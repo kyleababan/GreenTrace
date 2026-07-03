@@ -1,20 +1,104 @@
+
+import { useRouter } from "expo-router";
 import {
-  View,
-  Text,
-  StyleSheet,
   Image,
   ScrollView,
+  StyleSheet,
+  Text,
   TouchableOpacity,
+  View
 } from "react-native";
 import Navbar from "../components/navbar";
-import { useRouter } from "expo-router";
-import { useState } from "react";
+
+import { useEffect, useState } from "react";
+
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  orderBy,
+  query,
+  where,
+} from "firebase/firestore";
+
+import { auth, db } from "../firebaseConfig";
 
 export default function Notification() {
   const router = useRouter();
 
+
+      const currentUser = auth.currentUser;
+
+    const getActorText = (item) => {
+
+    const names = item.actorNames || [];
+
+    if (names.length === 0) return "Someone";
+
+    if (names.length === 1) return names[0];
+
+    if (names.length === 2)
+        return `${names[0]} & ${names[1]}`;
+
+    return `${names[0]}, ${names[1]} and ${names.length - 2} more`;
+
+};
+
   // This creates 5 placeholder notifications
-  const notifications = [1, 2, 3, ];
+ const [notifications, setNotifications] = useState([]);
+
+const loadNotifications = async () => {
+
+
+
+    if (!currentUser) return;
+
+    const q = query(
+        collection(db, "notifications"),
+        where("userId", "==", currentUser.uid),
+        orderBy("createdAt", "desc")
+    );
+
+    const snapshot = await getDocs(q);
+
+    const data = await Promise.all(
+
+        snapshot.docs.map(async notification => {
+
+            const item = {
+                id: notification.id,
+                ...notification.data(),
+            };
+
+            try {
+
+                const postSnap = await getDoc(
+                    doc(db, "posts", item.postId)
+                );
+
+                if (postSnap.exists()) {
+
+                    item.postImage =
+                        postSnap.data().imageUrl;
+
+                }
+
+            } catch (e) {}
+
+            return item;
+
+        })
+
+    );
+
+    setNotifications(data);
+
+};
+
+ useEffect(() => {
+    loadNotifications();
+}, []);
 
   return (
     <View style={styles.wrapper}>
@@ -31,7 +115,19 @@ export default function Notification() {
         {/* CONTENT */}
         <ScrollView style={styles.feed} showsVerticalScrollIndicator={false}>
           {notifications.map((item) => (
-            <View key={item} style={styles.notificationCard}>
+            <TouchableOpacity
+    key={item.id}
+    style={styles.notificationCard}
+    activeOpacity={0.8}
+    onPress={() =>
+        router.push({
+            pathname: "/post",
+            params: {
+                id: item.postId,
+            },
+        })
+    }
+>
               
               {/* LEFT: Avatar/Profile Icon */}
               <Image
@@ -41,19 +137,55 @@ export default function Notification() {
             
               {/* CENTER: Text Content */}
               <View style={styles.textContainer}>
-                <Text style={styles.userName}>SomeoneYouKnow</Text>
-                <Text style={styles.userAction} numberOfLines={1}>
-                  Something long sentence....
-                </Text>
+                <Text style={styles.userName}>
+    {getActorText(item)}
+</Text>
+
+<Text style={styles.userAction}>
+    {item.type === "comment"
+        ? "commented on your post."
+        : "increased your priority."}
+</Text>
               </View>
 
               {/* RIGHT: Small Thumbnail of the post */}
-              <View style={styles.postThumbnail}>
-                 {/* Replace with <Image source={...} /> later */}
-              </View>
+              {item.postImage ? (
 
-            </View>
+<Image
+    source={{ uri: item.postImage }}
+    style={styles.postThumbnail}
+/>
+
+) : (
+
+<View style={styles.postThumbnail} />
+
+)}
+
+            </TouchableOpacity>
           ))}
+
+          {notifications.length === 0 && (
+
+<View
+    style={{
+        marginTop: 60,
+        alignItems: "center",
+    }}
+>
+
+<Text
+    style={{
+        color: "#777",
+        fontSize: 16,
+    }}
+>
+    No notifications yet.
+</Text>
+
+</View>
+
+)}
         </ScrollView>
 
         {/* NAVBAR */}
@@ -66,6 +198,18 @@ export default function Notification() {
 }
 
 const styles = StyleSheet.create({
+  postThumbnail: {
+
+    width: 60,
+
+    height: 60,
+
+    borderRadius: 10,
+
+    backgroundColor: "#DDD",
+
+},
+
   wrapper: {
     flex: 1,
     alignItems: "center",

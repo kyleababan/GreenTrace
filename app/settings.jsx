@@ -1,18 +1,74 @@
-import React from "react";
-import { View, Text, StyleSheet, Image, TouchableOpacity, SafeAreaView } from "react-native";
 import { useRouter } from "expo-router";
+import { signOut } from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
+import { useEffect, useState } from "react";
+import { Image, Modal, SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import Navbar from "../components/navbar"; // Assuming your navbar is already styled
+import { auth, db } from "../firebaseConfig";
 
 export default function ProfileScreen() {
+
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+
   const router = useRouter();
 
-  // Placeholder data - replace with your actual state/props
-  const userData = {
-    name: "Lois Token",
-    points: 123,
-    phoneNumber: "09000001"
-  };
+  useEffect(() => {
+    loadUser();
+}, []);
 
+const loadUser = async () => {
+
+    const currentUser = auth.currentUser;
+
+    const logout = async () => {
+
+    try {
+
+        await signOut(auth);
+
+        router.replace("/signin");
+
+    } catch (error) {
+
+        console.log(error);
+
+    }
+
+};
+
+    if (!currentUser) return;
+
+    try {
+
+        const snapshot = await getDoc(
+            doc(db, "users", currentUser.uid)
+        );
+
+        if (snapshot.exists()) {
+
+            setUserData(snapshot.data());
+
+        }
+
+    } catch (error) {
+
+        console.log(error);
+
+    }
+
+};
+
+  // Placeholder data - replace with your actual state/props
+  const [userData, setUserData] = useState(null);
+
+
+ if (!userData) {
+    return (
+        <View style={{flex:1,justifyContent:"center",alignItems:"center"}}>
+            <Text>Loading...</Text>
+        </View>
+    );
+}
   return (
     <SafeAreaView style={styles.wrapper}>
       <View style={styles.container}>
@@ -26,11 +82,15 @@ export default function ProfileScreen() {
               style={styles.profileAvatar}
             />
             <View style={styles.userTextDetails}>
-              <Text style={styles.userName}>{userData.name}</Text>
+              <Text style={styles.userName}>
+    {userData.firstName} {userData.lastName}
+</Text>
               <View style={styles.pointsRow}>
                 <Image source={require("../assets/images/ecopts.png")} style={styles.ecoIcon} />
                 <Text style={styles.ecoPointsLabel}>Eco Points</Text>
-                <Text style={styles.pointsValue}> {userData.points} pts</Text>
+               <Text style={styles.pointsValue}>
+    {userData.points ?? 0} pts
+</Text>
               </View>
               <Text style={styles.phonePlaceholder}>#{userData.phoneNumber}</Text>
             </View>
@@ -75,16 +135,74 @@ export default function ProfileScreen() {
           </View>
 
           {/* LOGOUT BUTTON */}
-          <TouchableOpacity style={styles.logoutButton}
-          onPress={() => router.push("/signin")}
-          >
-            <Text style={styles.logoutText}>Log out</Text>
-          </TouchableOpacity>
+          <TouchableOpacity
+    style={styles.logoutButton}
+    onPress={() => setShowLogoutModal(true)}
+>
+    <Text style={styles.logoutText}>Log out</Text>
+</TouchableOpacity>
         </View>
 
         {/* BOTTOM NAVBAR */}
         <View style={styles.navbarContainer}>
           <Navbar />
+
+          <Modal
+    visible={showLogoutModal}
+    transparent
+    animationType="fade"
+>
+    <View style={styles.modalOverlay}>
+
+        <View style={styles.logoutModal}>
+
+            <Text style={styles.logoutTitle}>
+                Log Out
+            </Text>
+
+            <Text style={styles.logoutMessage}>
+                Are you sure you want to log out?
+            </Text>
+
+            <TouchableOpacity
+                style={styles.confirmLogoutButton}
+                onPress={async () => {
+
+                    try {
+
+                        await signOut(auth);
+
+                        setShowLogoutModal(false);
+
+                        router.replace("/signin");
+
+                    } catch (error) {
+
+                        console.log(error);
+
+                        setShowLogoutModal(false);
+
+                    }
+
+                }}
+            >
+                <Text style={styles.confirmLogoutText}>
+                    Log Out
+                </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+                onPress={() => setShowLogoutModal(false)}
+            >
+                <Text style={styles.cancelLogoutText}>
+                    Cancel
+                </Text>
+            </TouchableOpacity>
+
+        </View>
+
+    </View>
+</Modal>
         </View>
       </View>
     </SafeAreaView>
@@ -92,6 +210,54 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
+
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "center",
+    alignItems: "center",
+},
+
+logoutModal: {
+    width: 300,
+    backgroundColor: "#fff",
+    borderRadius: 18,
+    padding: 25,
+    alignItems: "center",
+},
+
+logoutTitle: {
+    fontSize: 22,
+    fontWeight: "bold",
+    marginBottom: 10,
+},
+
+logoutMessage: {
+    textAlign: "center",
+    color: "#666",
+    marginBottom: 25,
+},
+
+confirmLogoutButton: {
+    width: "100%",
+    backgroundColor: "#E74C3C",
+    paddingVertical: 13,
+    borderRadius: 10,
+    alignItems: "center",
+},
+
+confirmLogoutText: {
+    color: "#fff",
+    fontWeight: "bold",
+    fontSize: 17,
+},
+
+cancelLogoutText: {
+    marginTop: 18,
+    color: "#666",
+    fontSize: 16,
+},
+
   wrapper: {
     flex: 1,
     alignItems: "center",

@@ -1,10 +1,424 @@
-import { View, Text, TextInput, StyleSheet, Image, ScrollView, TouchableOpacity } from "react-native";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { useEffect, useState } from "react";
+
+import {
+    Alert,
+    Animated,
+    Image,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    useWindowDimensions,
+    View,
+} from "react-native";
+
+import {
+    addDoc,
+    arrayUnion,
+    collection,
+    deleteDoc,
+    doc,
+    getDoc,
+    getDocs,
+    increment,
+    orderBy,
+    query,
+    serverTimestamp,
+    updateDoc,
+    where
+} from "firebase/firestore";
 import Navbar from "../components/navbar";
-import { useRouter } from "expo-router";
+import { auth, db } from "../firebaseConfig";
 
 
 export default function Post() {
+
+  const { width, height } = useWindowDimensions();
+
+  const { id } = useLocalSearchParams();
+  console.log(id);
+console.log(typeof id);
+
+  const [showImage, setShowImage] = useState(false);
+
   const router = useRouter();
+
+  const [post, setPost] = useState(null);
+  
+  const [currentUserData, setCurrentUserData] = useState(null);
+
+  const loadCurrentUser = async () => {
+
+    const snapshot = await getDoc(
+        doc(db, "users", currentUser.uid)
+    );
+
+    if (snapshot.exists()) {
+        setCurrentUserData(snapshot.data());
+    }
+
+};
+
+const createOrUpdateNotification = async (type) => {
+
+    const q = query(
+        collection(db, "notifications"),
+        where("userId", "==", post.userId),
+        where("postId", "==", post.id),
+        where("type", "==", type)
+    );
+
+    const snapshot = await getDocs(q);
+
+    const actorName =
+        `${currentUserData.firstName} ${currentUserData.lastName}`;
+
+    if (!snapshot.empty) {
+
+        const notif = snapshot.docs[0];
+
+        await updateDoc(doc(db, "notifications", notif.id), {
+
+            actorNames: arrayUnion(actorName),
+
+            createdAt: serverTimestamp(),
+
+            read: false,
+
+        });
+
+    } else {
+
+        await addDoc(collection(db, "notifications"), {
+
+            userId: post.userId,
+
+            actorId: currentUser.uid,
+
+            actorNames: [actorName],
+
+            type,
+
+            postId: post.id,
+
+            createdAt: serverTimestamp(),
+
+            read: false,
+
+        });
+
+    }
+
+};
+
+  const [comments, setComments] = useState([]);
+
+const [comment, setComment] = useState("");
+
+const currentUser = auth.currentUser;
+
+const [userReaction, setUserReaction] = useState(null);
+
+const [reactionScale] = useState(new Animated.Value(1));
+
+const [showSettings, setShowSettings] = useState(false);
+
+const [sendingComment, setSendingComment] = useState(false);
+
+
+
+
+  useEffect(() => {
+    loadPost();
+    loadComments();
+    loadReaction();
+    loadCurrentUser();
+}, []);
+
+
+const deletePost = () => {
+
+  Alert.alert(
+    "Delete Post",
+    "Are you sure you want to delete this post?",
+    [
+      {
+        text: "Cancel",
+        style: "cancel",
+      },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+
+          try {
+
+            await deleteDoc(
+              doc(db, "posts", post.id)
+            );
+
+            Alert.alert(
+              "Deleted",
+              "Your post has been deleted."
+            );
+
+            router.replace("/home");
+
+          } catch (error) {
+
+            console.log(error);
+
+            Alert.alert(
+              "Error",
+              "Failed to delete the post."
+            );
+
+          }
+
+        },
+      },
+    ]
+  );
+
+};
+
+
+
+  const loadPost = async () => {
+
+    try {
+
+        const docRef = doc(db, "posts", id);
+
+        const snapshot = await getDoc(docRef);
+
+        if (snapshot.exists()) {
+
+            setPost({
+                id: snapshot.id,
+                ...snapshot.data(),
+            });
+
+        }
+
+    } catch(error){
+
+    console.log(error);
+
+    setSendingComment(false);
+
+}
+
+};
+
+const loadReaction = async () => {
+
+    const currentUser = auth.currentUser;
+
+    if (!currentUser) return;
+
+    const q = query(
+        collection(db, "post_reactions"),
+        where("postId", "==", id),
+        where("userId", "==", currentUser.uid)
+    );
+
+    const snapshot = await getDocs(q);
+
+    if (!snapshot.empty) {
+        setUserReaction(snapshot.docs[0].id);
+    }
+
+};
+
+const loadComments = async () => {
+
+    const q = query(
+        collection(db, "comments"),
+        where("postId", "==", id),
+        orderBy("createdAt", "asc")
+    );
+
+    const snapshot = await getDocs(q);
+
+    const data = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+    }));
+
+    setComments(data);
+
+};
+
+
+
+const submitComment = async () => {
+
+    console.log("submitComment called");
+console.log("currentUserData:", currentUserData);
+console.log("currentUser:", currentUser);
+console.log("post:", post);
+
+    if (!comment.trim()) return;
+
+     if (!currentUserData) {
+        console.log("User data not loaded yet.");
+        return;
+     }
+
+    setSendingComment(true);
+
+    
+    try {
+
+       await addDoc(collection(db, "comments"), {
+
+    postId: id,
+
+    userId: currentUser.uid,
+
+    firstName: currentUserData.firstName,
+
+    lastName: currentUserData.lastName,
+
+    points: currentUserData.points,
+
+    comment,
+
+    createdAt: serverTimestamp(),
+
+});
+
+        // Don't notify yourself
+        console.log("Reaction clicked");
+console.log("Current User:", currentUser.uid);
+console.log("Post Owner:", post.userId);
+        
+    if (currentUser.uid !== post.userId) {
+
+    await createOrUpdateNotification("comment");
+
+}
+
+        setComment("");
+
+        loadComments();
+
+    } catch (error) {
+
+        console.log(error);
+
+    } finally {
+
+        setSendingComment(false);
+
+    }
+
+};
+
+const playReactionAnimation = () => {
+
+    Animated.sequence([
+
+        Animated.timing(reactionScale,{
+            toValue:1.35,
+            duration:120,
+            useNativeDriver:true,
+        }),
+
+        Animated.timing(reactionScale,{
+            toValue:0.9,
+            duration:80,
+            useNativeDriver:true,
+        }),
+
+        Animated.spring(reactionScale,{
+            toValue:1,
+            friction:4,
+            useNativeDriver:true,
+        }),
+
+    ]).start();
+
+};
+
+const toggleReaction = async () => {
+
+    playReactionAnimation(post.id);
+
+    const currentUser = auth.currentUser;
+
+   
+    if (!currentUser) return;
+
+    const postRef = doc(db, "posts", post.id);
+
+    if (userReaction) {
+
+        await deleteDoc(
+            doc(db, "post_reactions", userReaction)
+        );
+
+        await updateDoc(postRef, {
+            reactionCount: increment(-1),
+        });
+
+        setPost(prev => ({
+            ...prev,
+            reactionCount: prev.reactionCount - 1,
+        }));
+
+        setUserReaction(null);
+
+    } else {
+
+        console.log("Creating reaction notification...");
+
+        const reaction = await addDoc(
+            
+            collection(db, "post_reactions"),
+            {
+                
+                postId: post.id,
+                userId: currentUser.uid,
+                createdAt: serverTimestamp(),
+            }
+        );
+        console.log("Reaction notification created.");
+
+         if (currentUser.uid !== post.userId) {
+
+    await createOrUpdateNotification("reaction");
+
+}
+
+
+        await updateDoc(postRef, {
+            reactionCount: increment(1),
+        });
+
+        setPost(prev => ({
+            ...prev,
+            reactionCount: prev.reactionCount + 1,
+        }));
+
+        setUserReaction(reaction.id);
+
+    }
+
+};
+
+if (!post) {
+    return (
+        <View style={styles.wrapper}>
+            <Text>Loading...</Text>
+        </View>
+    );
+}
+
   return (
     <View style={styles.wrapper}>
     <View style={styles.container}>
@@ -23,7 +437,7 @@ export default function Post() {
 
     {/* TITLE */}
     <Text style={styles.headerTitle}>
-      Peter Dawning’s Post
+      {post.firstName} {post.lastName}'s Post
     </Text>
 
   </View>
@@ -37,91 +451,186 @@ export default function Post() {
           
           {/* USER INFO */}
           <View style={styles.userRow}>
-            <Image
-  source={require("../assets/images/profile2.png")} // 👈 your image
-  style={styles.avatar}
-/>
+
+    <Image
+        source={require("../assets/images/profile2.png")}
+        style={styles.avatar}
+    />
+
+    <View style={{ flex: 1 }}>
+
+        {/* TOP ROW */}
+
+        <View style={styles.userTopRow}>
+
             <View>
-              <Text style={styles.username}>
-                Peter Dawning <Text style={styles.points}>123pts</Text>
-              </Text>
-                <View style={styles.locationRow}>
-                     <Image
-                     source={require("../assets/images/location.png")}
-                    style={styles.locationIcon}
-                    />
-            <Text style={styles.locationText}>
-            Pandacan, Pinamungajan
-            </Text>
-                </View>
+
+                <Text style={styles.username}>
+                    {post.firstName} {post.lastName}
+                    <Text style={styles.points}>
+                        {" "}
+                        {post.points}pts
+                    </Text>
+                </Text>
+
             </View>
-          </View>
+
+            {/* RIGHT SIDE */}
+
+            <View style={styles.rightButtons}>
+
+                <TouchableOpacity
+                    onPress={toggleReaction}
+                >
+
+                    <Animated.Image
+                        source={
+                            userReaction
+                                ? require("../assets/images/priorityreact.png")
+                                : require("../assets/images/priorityreact_gray.png")
+                        }
+                        style={[
+                            styles.reactIcon,
+                            {
+                                transform: [
+                                    {
+                                        scale: reactionScale,
+                                    },
+                                ],
+                            },
+                        ]}
+                    />
+
+                </TouchableOpacity>
+
+                <Text style={styles.reactCount}>
+                    {post.reactionCount}
+                </Text>
+
+                {currentUser?.uid === post.userId && (
+
+                    <TouchableOpacity
+                        onPress={() => setShowSettings(true)}
+                    >
+
+                        <Image
+                            source={require("../assets/images/setting.png")}
+                            style={styles.settingsIcon}
+                        />
+
+                    </TouchableOpacity>
+
+                )}
+
+            </View>
+
+        </View>
+
+        {/* LOCATION */}
+
+        <View style={styles.locationRow}>
+
+            <Image
+                source={require("../assets/images/location.png")}
+                style={styles.locationIcon}
+            />
+
+            <Text style={styles.locationText}>
+                {post.locationName}
+            </Text>
+
+        </View>
+
+    </View>
+
+</View>
 
           <Text style={styles.caption}>
-            Garbage piling up near the alley
+            {post.caption}
           </Text>
 
           {/* IMAGE */}
 
 <TouchableOpacity
-  style={styles.imageContainer}
-  onPress={() => router.push("/post")}
+    style={styles.imageContainer}
+    onPress={() => setShowImage(true)}
 >
   <Image
-    source={require("../assets/images/pic2.png")}
+    source={{ uri: post.imageUrl }}
     style={styles.postImage}
-  />
+/>
 
   {/* ✅ MOVE HERE */}
-  <View style={styles.statusDotRed} />
+  <View
+    style={
+        post.status === "critical"
+            ? styles.statusDotRed
+            : styles.statusDotYellow
+    }
+/>
 </TouchableOpacity>
     </View>
 
     {/* COMMENT INPUT */}
-<View style={styles.commentInputRow}>
-  <Text style={styles.commentLabel}>Comments</Text>
+    <Text style={styles.commentLabel}>
+Comments
+</Text>
+<View style={styles.commentRow}>
 
-  <TextInput
-    placeholder="Write a comment..."
-    style={styles.commentInput}
-  />
+    <TextInput
+        placeholder="Write a comment..."
+        style={styles.commentInput}
+        value={comment}
+        onChangeText={setComment}
+    />
+
+    <TouchableOpacity
+        style={styles.sendButton}
+         onPress={submitComment}
+    disabled={sendingComment}
+    >
+        <Text style={styles.sendText}>
+            {sendingComment ? "Sending..." : "Send"}
+        </Text>
+    </TouchableOpacity>
+
 </View>
 
 {/* COMMENTS LIST */}
 
-<View style={styles.commentCard}>
-  <View style={styles.commentUserRow}>
-    <Image
-  source={require("../assets/images/profile2.png")} // 👈 your image
-  style={styles.avatar}
+{comments.map(comment => (
+
+<View
+    key={comment.id}
+    style={styles.commentCard}
+>
+
+<Image
+    source={require("../assets/images/profile2.png")}
+    style={styles.avatar}
 />
-    <View>
-      <Text style={styles.username}>
-        SomeoneTheyKnow <Text style={styles.points}>20pts</Text>
-      </Text>
-      <Text style={styles.commentText}>
-        Something long sentence....
-      </Text>
-    </View>
-  </View>
+
+<View style={{ flex: 1 }}>
+
+<Text style={styles.username}>
+    {comment.firstName} {comment.lastName}
+    <Text style={styles.points}>
+        {" "}
+        {comment.points}pts
+    </Text>
+</Text>
+
+<Text style={styles.commentText}>
+    {comment.comment}
+</Text>
+
 </View>
 
-<View style={styles.commentCard}>
-  <View style={styles.commentUserRow}>
-    <Image
-  source={require("../assets/images/profile2.png")} // 👈 your image
-  style={styles.avatar}
-/>
-    <View>
-      <Text style={styles.username}>
-        SomeoneYouKnow <Text style={styles.points}>22pts</Text>
-      </Text>
-      <Text style={styles.commentText}>
-        Something long sentence....
-      </Text>
-    </View>
-  </View>
 </View>
+
+))}
+
+
 
 
       </ScrollView>
@@ -130,9 +639,155 @@ export default function Post() {
       <View style={styles.navbarContainer}>
         
        <Navbar />
-
       </View>
 
+<Modal
+    visible={showSettings}
+    transparent
+    animationType="fade"
+>
+
+<View style={styles.settingsOverlay}>
+
+<View style={styles.settingsBox}>
+
+<TouchableOpacity
+    style={styles.settingsButton}
+    onPress={() => {
+
+        setShowSettings(false);
+
+        router.push({
+            pathname: "/edit_post",
+            params: {
+                id: post.id,
+            },
+        });
+
+    }}
+>
+
+<Image
+    source={require("../assets/images/edit.png")}
+    style={styles.modalIcon}
+/>
+
+<Text style={styles.settingsText}>
+    Edit Post
+</Text>
+
+</TouchableOpacity>
+
+<TouchableOpacity
+    style={styles.settingsButton}
+    onPress={() => {
+
+        setShowSettings(false);
+
+        Alert.alert(
+            "Delete Post",
+            "Are you sure you want to delete this post?",
+            [
+                {
+    text: "Delete",
+    style: "destructive",
+    onPress: async () => {
+
+        try {
+
+            await deleteDoc(
+                doc(db, "posts", post.id)
+            );
+
+            Alert.alert(
+                "Deleted",
+                "Your post has been deleted."
+            );
+
+            router.replace("/home");
+
+        } catch (error) {
+
+            console.log(error);
+
+            Alert.alert(
+                "Error",
+                "Failed to delete post."
+            );
+
+        }
+
+    },
+},
+            ]
+        );
+
+    }}
+>
+
+{/* <Image
+    source={require("../assets/images/delete.png")}
+    style={styles.modalIcon}
+/> */}
+
+<Text
+    style={[
+        styles.settingsText,
+        { color: "red" },
+    ]}
+>
+    Delete Post
+</Text>
+
+</TouchableOpacity>
+
+<TouchableOpacity
+    onPress={() => setShowSettings(false)}
+>
+
+<Text
+    style={{
+        marginTop: 20,
+        color: "#666",
+    }}
+>
+    Cancel
+</Text>
+
+</TouchableOpacity>
+
+</View>
+
+</View>
+
+</Modal>
+
+<Modal
+    visible={showImage}
+    transparent={true}
+    animationType="fade"
+>
+
+<View style={styles.modalContainer}>
+
+<TouchableOpacity
+    style={styles.closeButton}
+    onPress={() => setShowImage(false)}
+>
+    <Text style={styles.closeText}>✕</Text>
+</TouchableOpacity>
+<Image
+    source={{ uri: post.imageUrl }}
+    style={{
+        width: width * 0.9,
+        height: height * 0.8,
+    }}
+    resizeMode="contain"
+/>
+
+</View>
+
+</Modal>
     </View>
 </View>
   );
@@ -217,13 +872,13 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
 
-  avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+avatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     marginRight: 10,
-    resizeMode: "cover",
-  },
+    alignSelf: "flex-start",
+},
 
   username: {
     fontWeight: "600",
@@ -255,12 +910,13 @@ locationText: {
   },
 
   imageContainer: {
-  width: "100%",
-  height: 160,
+
+   width: "100%",
+  height: 320,
   borderRadius: 10,
-  overflow: "hidden", // 👈 keeps image inside rounded corners
+  overflow: "hidden",
   backgroundColor: "#ddd",
-  position: "relative", // 👈 needed for status dot
+  position: "relative",
 },
 
 postImage: {
@@ -355,9 +1011,6 @@ headerTitle: {
   fontSize: 24,
   fontWeight: "600",
 },
-commentInputRow: {
-  marginTop: 10,
-},
 
 commentLabel: {
   fontWeight: "600",
@@ -365,17 +1018,19 @@ commentLabel: {
 },
 
 commentInput: {
-  backgroundColor: "#E5E5E5",
-  borderRadius: 20,
-  paddingHorizontal: 15,
-  height: 40,
+    flex: 1,
+    backgroundColor: "#E5E5E5",
+    borderRadius: 20,
+    height: 45,
+    paddingHorizontal: 16,
 },
 
 commentCard: {
-  backgroundColor: "#F2F2F2",
-  borderRadius: 10,
-  padding: 10,
-  marginTop: 10,
+    backgroundColor: "#F4F4F4",
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 10,
+    flexDirection: "row",
 },
 
 commentUserRow: {
@@ -384,9 +1039,115 @@ commentUserRow: {
 },
 
 commentText: {
-  fontSize: 12,
-  color: "#555",
+    marginTop: 2,
+    fontSize: 13,
+    color: "#666",
 },
 
+modalContainer: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.95)",
+    justifyContent: "center",
+    alignItems: "center",
+},
+
+fullImage: {
+    width: "100%",
+    height: "80%",
+},
+
+closeButton: {
+    position: "absolute",
+    top: 50,
+    right: 25,
+    zIndex: 1,
+},
+
+closeText: {
+    color: "#fff",
+    fontSize: 35,
+    fontWeight: "bold",
+},
+
+commentRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+},
+
+sendButton: {
+    marginLeft: 10,
+    backgroundColor: "#5F9C76",
+    borderRadius: 20,
+    height: 45,
+    width: 80,
+    justifyContent: "center",
+    alignItems: "center",
+},
+
+sendText: {
+    color: "#fff",
+    fontWeight: "bold",
+},
+
+userTopRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+},
+
+rightButtons: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+},
+
+reactIcon: {
+    width: 26,
+    height: 26,
+    resizeMode: "contain",
+},
+
+reactCount: {
+    fontWeight: "600",
+    color: "#666",
+},
+
+settingsIcon: {
+    width: 27,
+    height: 27,
+    resizeMode: "contain",
+},
+
+settingsOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "center",
+    alignItems: "center",
+},
+
+settingsBox: {
+    backgroundColor: "#fff",
+    width: 260,
+    borderRadius: 15,
+    padding: 20,
+},
+
+settingsButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginVertical: 10,
+},
+
+modalIcon: {
+    width: 24,
+    height: 24,
+    marginRight: 12,
+},
+
+settingsText: {
+    fontSize: 17,
+    fontWeight: "600",
+},
 
 });

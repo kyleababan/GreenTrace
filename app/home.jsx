@@ -1,28 +1,213 @@
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
-import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Animated, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, } from "react-native";
 import Navbar from "../components/navbar";
 
 import {
+  addDoc,
   collection,
+  deleteDoc,
+  doc,
+  getDoc,
   getDocs,
+  increment,
   orderBy,
-  query
+  query,
+  serverTimestamp,
+  updateDoc,
+  where,
 } from "firebase/firestore";
 
-import { db } from "../firebaseConfig";
+import { auth, db } from "../firebaseConfig";
 
 
 export default function Home() {
+
   const router = useRouter();
 
+  const [imageSizes, setImageSizes] = useState({});
   
-
   const [posts, setPosts] = useState([]);
+
+  const [search, setSearch] = useState("");
+
+  const [filteredPosts, setFilteredPosts] = useState([]);
+
+  const [userReactions, setUserReactions] = useState({});
+  const [animatingPost, setAnimatingPost] = useState(null);
+
+  const [animations, setAnimations] = useState({});
+
+
+
+
+
 
 useEffect(() => {
     loadPosts();
+    loadUserReactions();
+    
 }, []);
+
+const loadUserReactions = async () => {
+
+  const currentUser = auth.currentUser;
+
+  if (!currentUser) return;
+
+  const q = query(
+    collection(db, "post_reactions"),
+    where("userId", "==", currentUser.uid)
+  );
+
+  const snapshot = await getDocs(q);
+
+  const reacted = {};
+
+  snapshot.forEach(doc => {
+    reacted[doc.data().postId] = doc.id;
+  });
+
+  setUserReactions(reacted);
+
+};
+
+const playReactionAnimation = (postId) => {
+  const scale = animations[postId];
+
+  if (!scale) return;
+
+  Animated.sequence([
+    Animated.timing(scale, {
+      toValue: 1.35,
+      duration: 120,
+      useNativeDriver: true,
+    }),
+    Animated.timing(scale, {
+      toValue: 0.9,
+      duration: 80,
+      useNativeDriver: true,
+    }),
+    Animated.spring(scale, {
+      toValue: 1,
+      friction: 4,
+      useNativeDriver: true,
+    }),
+  ]).start();
+};
+
+const toggleReaction = async (postId) => {
+  
+  playReactionAnimation(postId);
+
+  const currentUser = auth.currentUser;
+
+  if (!currentUser) return;
+
+  const postRef = doc(db, "posts", postId);
+
+  if (userReactions[postId]) {
+
+    await deleteDoc(
+      doc(db, "post_reactions", userReactions[postId])
+    );
+
+    await updateDoc(postRef, {
+      reactionCount: increment(-1),
+    });
+
+    setPosts(prev =>
+      prev.map(post =>
+        post.id === postId
+          ? {
+              ...post,
+              reactionCount: post.reactionCount - 1,
+            }
+          : post
+      )
+    );
+
+    const updated = { ...userReactions };
+
+    delete updated[postId];
+
+    setUserReactions(updated);
+
+  } else {
+
+    const reaction = await addDoc(
+      collection(db, "post_reactions"),
+      {
+        postId,
+        userId: currentUser.uid,
+        createdAt: serverTimestamp(),
+      }
+    );
+
+    const postSnapshot = await getDoc(postRef);
+
+const postOwner = postSnapshot.data().userId;
+
+if (postOwner !== currentUser.uid) {
+
+    await addDoc(
+        collection(db, "notifications"),
+        {
+            receiverId: postOwner,
+            senderId: currentUser.uid,
+            postId,
+            type: "reaction",
+            isRead: false,
+            createdAt: serverTimestamp(),
+        }
+    );
+
+}
+
+    await updateDoc(postRef, {
+      reactionCount: increment(1),
+    });
+
+    setPosts(prev =>
+      prev.map(post =>
+        post.id === postId
+          ? {
+              ...post,
+              reactionCount: post.reactionCount + 1,
+            }
+          : post
+      )
+    );
+
+    setUserReactions(prev => ({
+      ...prev,
+      [postId]: reaction.id,
+    }));
+
+  }
+
+};
+
+useEffect(() => {
+
+  const keyword = search.toLowerCase().trim();
+
+  if (!keyword) {
+    setFilteredPosts(posts);
+    return;
+  }
+
+  const filtered = posts.filter(post =>
+    post.caption?.toLowerCase().includes(keyword) ||
+    post.locationName?.toLowerCase().includes(keyword) ||
+    post.firstName?.toLowerCase().includes(keyword) ||
+    post.lastName?.toLowerCase().includes(keyword)
+  );
+
+  setFilteredPosts(filtered);
+
+}, [search, posts]);
+
 
 const loadPosts = async () => {
     try {
@@ -40,11 +225,24 @@ const loadPosts = async () => {
         }));
 
         setPosts(data);
+        setFilteredPosts(data);
+
+        const anims = {};
+
+data.forEach(post => {
+  anims[post.id] = new Animated.Value(1);
+});
+
+setAnimations(anims);
 
     } catch (error) {
         console.log(error);
     }
 };
+
+
+
+
   return (
     <View style={styles.wrapper}>
     <View style={styles.container}>
@@ -52,11 +250,22 @@ const loadPosts = async () => {
       {/* TOP SECTION */}
       <View style={styles.topSection}>
                 <View style={styles.searchRow}>
-                  <Image
-                    source={require("../assets/images/minicon.png")}
-                    style={{ width: 50, height: 50, marginRight: 10 }}
-                  />
-                  <TextInput placeholder="Search" style={styles.searchInput} />
+                  
+    <Image
+        source={require("../assets/images/minicon.png")}
+        style={{
+            width: 50,
+            height: 50,
+            marginRight: 10,
+        }}
+    />
+
+                  <TextInput
+  placeholder="Search"
+  style={styles.searchInput}
+  value={search}
+  onChangeText={setSearch}
+/>
                   <TouchableOpacity style={styles.addButton} onPress={() => router.push("/create_post")}>
                     <Text style={styles.addText}>+</Text>
                   </TouchableOpacity>
@@ -66,7 +275,7 @@ const loadPosts = async () => {
       {/* POSTS */}
       <ScrollView style={styles.feed}>
         
-    {posts.map(post => (
+    {filteredPosts.map(post => (
 
 <View
 key={post.id}
@@ -76,7 +285,7 @@ style={styles.card}
 <View style={styles.userRow}>
 
 <Image
-source={require("../assets/images/profile.png")}
+source={require("../assets/images/ProfileIW.png")}
 style={styles.avatar}
 />
 
@@ -125,9 +334,24 @@ id: post.id,
   
 
 <Image
-source={{ uri: post.imageUrl }}
-style={styles.postImage}
- resizeMode="cover"
+  source={{ uri: post.imageUrl }}
+  style={[
+    styles.postImage,
+    imageSizes[post.id] && {
+      aspectRatio:
+        imageSizes[post.id].width /
+        imageSizes[post.id].height,
+    },
+  ]}
+  resizeMode="cover"
+  onLoad={() => {
+    Image.getSize(post.imageUrl, (width, height) => {
+      setImageSizes(prev => ({
+        ...prev,
+        [post.id]: { width, height },
+      }));
+    });
+  }}
 />
 
 </TouchableOpacity>
@@ -142,21 +366,47 @@ post.status === "critical"
 
 <View style={styles.actionsContainer}>
 
-<View style={styles.likeSection}>
 
-<Image
-source={require("../assets/images/priorityreact.png")}
-style={styles.actionIcon}
+<TouchableOpacity
+  style={styles.likeSection}
+  onPress={() => toggleReaction(post.id)}
+  
+>
+
+<Animated.Image
+  source={
+    userReactions[post.id]
+      ? require("../assets/images/priorityreact.png")
+      : require("../assets/images/priorityreact_gray.png")
+  }
+  style={[
+    styles.actionIcon,
+    {
+      transform: [
+        {
+          scale: animations[post.id] || 1,
+        },
+      ],
+    },
+  ]}
 />
 
 <Text style={styles.actionText}>
-{post.reactionCount}
+  {post.reactionCount}
 </Text>
 
-</View>
+</TouchableOpacity>
 
 <TouchableOpacity
 style={styles.commentBox}
+onPress={() =>
+router.push({
+pathname: "/post",
+params: {
+id: post.id,
+},
+})
+}
 >
 
 <View style={styles.commentContent}>
@@ -214,7 +464,7 @@ const styles = StyleSheet.create({
     width: "100%",
     maxWidth: 500, // 👈 THIS PREVENTS STRETCHING
     flex: 1,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "#f8f6f6",
   },
 
   topSection: {
@@ -319,15 +569,14 @@ locationText: {
 
   imageContainer: {
   width: "100%",
-  height: 200,
   borderRadius: 10,
   overflow: "hidden",
   backgroundColor: "#ddd",
+  maxHeight: 250,
 },
 
 postImage: {
   width: "100%",
-  height: "100%",
 },
 
   statusDotRed: {
