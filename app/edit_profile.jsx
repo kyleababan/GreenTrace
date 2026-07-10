@@ -1,82 +1,314 @@
-import React from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  Image,
-  TouchableOpacity,
-  TextInput,
-  SafeAreaView,
-} from "react-native";
 import { useRouter } from "expo-router";
+import {
+    doc,
+    getDoc,
+    updateDoc,
+} from "firebase/firestore";
+import { useEffect, useState } from "react";
+import {
+    Image,
+    SafeAreaView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+} from "react-native";
 import Navbar from "../components/navbar";
+
+import { auth, db } from "../firebaseConfig";
 
 export default function EditProfile() {
   const router = useRouter();
 
+  const currentUser = auth.currentUser;
+
+const [firstName, setFirstName] = useState("");
+const [lastName, setLastName] = useState("");
+const [email, setEmail] = useState("");
+const [cellNumber, setcellNumber] = useState("");
+
+const [editable, setEditable] = useState({
+    firstName: false,
+    lastName: false,
+    email: false,
+    cellNumber: false,
+});
+
+const loadCurrentUser = async () => {
+
+    if (!currentUser) return;
+
+    const snapshot = await getDoc(
+        doc(db, "users", currentUser.uid)
+    );
+
+    if (snapshot.exists()) {
+
+        const data = snapshot.data();
+
+        setFirstName(data.firstName || "");
+        setLastName(data.lastName || "");
+        setEmail(data.email || "");
+        setcellNumber(data.cellNumber || "");
+
+    }
+
+};
+
+const saveProfile = async () => {
+
+    if (!currentUser) return;
+
+    setSaving(true);
+
+    try {
+
+        await updateDoc(
+            doc(db, "users", currentUser.uid),
+            {
+                firstName,
+                lastName,
+                email,
+                cellNumber,
+            }
+        );
+
+        setEditable({
+            firstName: false,
+            lastName: false,
+            email: false,
+            cellNumber: false,
+        });
+
+    } catch (error) {
+
+        console.log(error);
+
+    } finally {
+
+        setSaving(false);
+
+    }
+
+};
+
+useEffect(() => {
+
+    loadCurrentUser();
+
+}, []);
+
+const [saving, setSaving] = useState(false);
   return (
     <SafeAreaView style={styles.wrapper}>
       <View style={styles.container}>
         
         {/* HEADER */}
         <View style={styles.header}>
-        
-        <TouchableOpacity onPress={() => router.back()}>
-         <Image
-         source={require("../assets/images/back.png")}
-         style={styles.backIcon}
-        />
-        </TouchableOpacity>
 
-          <View style={styles.userInfoContainer}>
-            
-            <View style={styles.avatarWrapper}>
-              <Image
+    <TouchableOpacity onPress={() => router.back()}>
+        <Image
+            source={require("../assets/images/back.png")}
+            style={styles.backIcon}
+        />
+    </TouchableOpacity>
+
+    <View style={styles.userInfoContainer}>
+
+        <View style={styles.avatarWrapper}>
+
+            <Image
                 source={require("../assets/images/profile.png")}
                 style={styles.profileAvatar}
-              />
+            />
 
-              {/* EDIT BADGE */}
-              <TouchableOpacity style={styles.editAvatarBadge}>
-                <Image
-                  source={require("../assets/images/edit.png")} // 👈 replace later
-                  style={styles.editIcon}
-                />
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.userName}>Lois Token</Text>
-          </View>
         </View>
+
+        <Text style={styles.userName}>
+            {firstName} {lastName}
+        </Text>
+
+    </View>
+
+</View>
 
         {/* FORM */}
         <View style={styles.formContainer}>
           <Text style={styles.title}>Edit Profile</Text>
 
-          {["Name", "Email", "Phone Number", "Address"].map((label) => (
-            <View key={label} style={styles.inputGroup}>
-              <Text style={styles.label}>{label}</Text>
+          <View style={styles.inputGroup}>
 
-              <View style={styles.inputWrapper}>
-                <TextInput
-                  style={styles.input}
-                  placeholder={`Enter ${label}`}
-                />
+    <Text style={styles.label}>
+        First Name
+    </Text>
 
-                {/* <Image
-                  source={require("../assets/images/edit.png")} // 👈 replace later
-                  style={styles.fieldEditIcon}
-                /> */}
-              </View>
-            </View>
-          ))}
+    <View style={styles.inputWrapper}>
+
+        <TextInput
+            style={[
+                styles.input,
+                editable.firstName && styles.inputEditing,
+            ]}
+            value={firstName}
+            onChangeText={setFirstName}
+            editable={editable.firstName}
+        />
+
+        <TouchableOpacity
+            onPress={() =>
+                setEditable(prev => ({
+                    ...prev,
+                    firstName: !prev.firstName,
+                }))
+            }
+        >
+
+            <Image
+                source={require("../assets/images/editlabel.png")}
+                style={styles.fieldEditIcon}
+            />
+
+        </TouchableOpacity>
+
+    </View>
+
+</View>
+
+{/* LAST NAME */}
+
+<View style={styles.inputGroup}>
+
+    <Text style={styles.label}>
+        Last Name
+    </Text>
+
+    <View style={styles.inputWrapper}>
+
+        <TextInput
+            style={[
+                styles.input,
+                editable.lastName && styles.inputEditing,
+            ]}
+            value={lastName}
+            onChangeText={setLastName}
+            editable={editable.lastName}
+        />
+
+        <TouchableOpacity
+            onPress={() =>
+                setEditable(prev => ({
+                    ...prev,
+                    lastName: !prev.lastName,
+                }))
+            }
+        >
+
+            <Image
+                source={require("../assets/images/editlabel.png")}
+                style={styles.fieldEditIcon}
+            />
+
+        </TouchableOpacity>
+
+    </View>
+
+</View>
+
+{/* EMAIL */}
+
+<View style={styles.inputGroup}>
+
+    <Text style={styles.label}>
+        Email
+    </Text>
+
+    <View style={styles.inputWrapper}>
+
+        <TextInput
+            style={[
+                styles.input,
+                editable.email && styles.inputEditing,
+            ]}
+            value={email}
+            onChangeText={setEmail}
+            editable={editable.email}
+        />
+
+        <TouchableOpacity
+            onPress={() =>
+                setEditable(prev => ({
+                    ...prev,
+                    email: !prev.email,
+                }))
+            }
+        >
+
+            <Image
+                source={require("../assets/images/editlabel.png")}
+                style={styles.fieldEditIcon}
+            />
+
+        </TouchableOpacity>
+
+    </View>
+
+</View>
+
+{/* PHONE */}
+
+<View style={styles.inputGroup}>
+
+    <Text style={styles.label}>
+        Phone Number
+    </Text>
+
+    <View style={styles.inputWrapper}>
+
+        <TextInput
+            style={[
+                styles.input,
+                editable.cellNumber && styles.inputEditing,
+            ]}
+            value={cellNumber}
+            onChangeText={setcellNumber}
+            editable={editable.cellNumber}
+        />
+
+        <TouchableOpacity
+            onPress={() =>
+                setEditable(prev => ({
+                    ...prev,
+                    cellNumber: !prev.cellNumber,
+                }))
+            }
+        >
+
+            <Image
+                source={require("../assets/images/editlabel.png")}
+                style={styles.fieldEditIcon}
+            />
+
+        </TouchableOpacity>
+
+    </View>
+
+</View>
 
           {/* BUTTON */}
-          <TouchableOpacity style={styles.confirmButton}>
-            <Text style={styles.confirmButtonText}>
-              Confirm Changes
-            </Text>
-          </TouchableOpacity>
+         <TouchableOpacity
+    style={styles.confirmButton}
+    onPress={saveProfile}
+    disabled={saving}
+>
+
+    <Text style={styles.confirmButtonText}>
+        {saving
+            ? "Saving..."
+            : "Confirm Changes"}
+    </Text>
+
+</TouchableOpacity>
         </View>
 
         {/* NAVBAR */}
@@ -104,9 +336,12 @@ const styles = StyleSheet.create({
 
   header: {
     backgroundColor: "#5F9C76",
+    flexDirection: "row",
+    alignItems: "center",
     paddingHorizontal: 20,
+    paddingTop: 55,
     paddingBottom: 25,
-  },
+},
 
   backButton: {
     backgroundColor: "#FFF",
@@ -122,15 +357,14 @@ const styles = StyleSheet.create({
     width: 45,
     height: 45,
     resizeMode: "contain",
-    top: 66,
-  },
+},
 
-  userInfoContainer: {
+ userInfoContainer: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 10,
-    right: -70,
-  },
+    marginLeft: 15,
+    flex: 1,
+},
 
   avatarWrapper: {
     position: "relative",
@@ -200,10 +434,12 @@ const styles = StyleSheet.create({
     height: 38,
   },
 
-  input: {
+ input: {
     flex: 1,
-    fontSize: 13,
-  },
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#111",
+},
 
   fieldEditIcon: {
     width: 14,
@@ -230,4 +466,14 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderColor: "#ddd",
   },
+  inputEditing: {
+    color: "#666",
+},
+fieldEditIcon: {
+    width: 22,
+    height: 22,
+    marginLeft: 10,
+    resizeMode: "contain",
+},
+
 });

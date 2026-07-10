@@ -38,14 +38,43 @@ export default function Home() {
 
   const [animations, setAnimations] = useState({});
 
+  const [currentUserData, setCurrentUserData] = useState(null);
+
+  const [reactionLoading, setReactionLoading] = useState(false);
 
 
 
+const loadCurrentUser = async () => {
+
+    const currentUser = auth.currentUser;
+
+    if (!currentUser) return;
+
+    try {
+
+        const snapshot = await getDoc(
+            doc(db, "users", currentUser.uid)
+        );
+
+        if (snapshot.exists()) {
+
+            setCurrentUserData(snapshot.data());
+
+        }
+
+    } catch (error) {
+
+        console.log(error);
+
+    }
+
+};
 
 
 useEffect(() => {
     loadPosts();
     loadUserReactions();
+    loadCurrentUser();
     
 }, []);
 
@@ -97,92 +126,167 @@ const playReactionAnimation = (postId) => {
 };
 
 const toggleReaction = async (postId) => {
-  
+
+  if (reactionLoading) return;
+
+  setReactionLoading(true);
+
   playReactionAnimation(postId);
 
-  const currentUser = auth.currentUser;
+  try {
 
-  if (!currentUser) return;
+    const currentUser = auth.currentUser;
 
-  const postRef = doc(db, "posts", postId);
+    if (!currentUser) return;
 
-  if (userReactions[postId]) {
+    const postRef = doc(db, "posts", postId);
 
-    await deleteDoc(
-      doc(db, "post_reactions", userReactions[postId])
-    );
+    if (userReactions[postId]) {
 
-    await updateDoc(postRef, {
-      reactionCount: increment(-1),
-    });
+      await deleteDoc(
+        doc(db, "post_reactions", userReactions[postId])
+      );
 
-    setPosts(prev =>
-      prev.map(post =>
-        post.id === postId
-          ? {
-              ...post,
-              reactionCount: post.reactionCount - 1,
-            }
-          : post
-      )
-    );
+      await updateDoc(postRef, {
+        reactionCount: increment(-1),
+      });
 
-    const updated = { ...userReactions };
+      setPosts(prev =>
+        prev.map(post =>
+          post.id === postId
+            ? {
+                ...post,
+                reactionCount: post.reactionCount - 1,
+              }
+            : post
+        )
+      );
 
-    delete updated[postId];
+      const updated = { ...userReactions };
 
-    setUserReactions(updated);
+      delete updated[postId];
 
-  } else {
+      setUserReactions(updated);
 
-    const reaction = await addDoc(
-      collection(db, "post_reactions"),
-      {
-        postId,
-        userId: currentUser.uid,
-        createdAt: serverTimestamp(),
-      }
-    );
+    } else {
 
-    const postSnapshot = await getDoc(postRef);
-
-const postOwner = postSnapshot.data().userId;
-
-if (postOwner !== currentUser.uid) {
-
-    await addDoc(
-        collection(db, "notifications"),
+      const reaction = await addDoc(
+        collection(db, "post_reactions"),
         {
-            receiverId: postOwner,
-            senderId: currentUser.uid,
-            postId,
-            type: "reaction",
-            isRead: false,
-            createdAt: serverTimestamp(),
+          postId,
+          userId: currentUser.uid,
+          createdAt: serverTimestamp(),
         }
-    );
+      );
 
-}
+      const postSnapshot = await getDoc(postRef);
 
-    await updateDoc(postRef, {
-      reactionCount: increment(1),
-    });
+      console.log("Post exists:", postSnapshot.exists());
+      console.log("Post data:", postSnapshot.data());
 
-    setPosts(prev =>
-      prev.map(post =>
-        post.id === postId
-          ? {
-              ...post,
-              reactionCount: post.reactionCount + 1,
-            }
-          : post
-      )
-    );
+      const postData = postSnapshot.data();
 
-    setUserReactions(prev => ({
-      ...prev,
-      [postId]: reaction.id,
-    }));
+      console.log("Current User:", currentUser.uid);
+      console.log("Post Owner:", postData.userId);
+      console.log("Current User Data:", currentUserData);
+
+      if (postData.userId !== currentUser.uid) {
+
+        console.log("Entered notification block");
+
+        const notificationQuery = query(
+          collection(db, "notifications"),
+          where("userId", "==", postData.userId),
+          where("postId", "==", postId),
+          where("type", "==", "reaction")
+        );
+
+        const notificationSnapshot = await getDocs(notificationQuery);
+
+        console.log("Creating NEW notification");
+
+        if (!currentUserData) return;
+
+        const actorName =
+          `${currentUserData.firstName} ${currentUserData.lastName}`;
+
+        if (notificationSnapshot.empty) {
+
+          await addDoc(collection(db, "notifications"), {
+
+            userId: postData.userId,
+
+            actorId: currentUser.uid,
+
+            actorNames: [actorName],
+
+            type: "reaction",
+
+            postId,
+
+            createdAt: serverTimestamp(),
+
+            read: false,
+
+          });
+
+        } else {
+
+          console.log("Updating EXISTING notification");
+
+          const notificationDoc = notificationSnapshot.docs[0];
+
+          const data = notificationDoc.data();
+
+          let actorNames = data.actorNames || [];
+
+          if (!actorNames.includes(actorName)) {
+
+            actorNames.push(actorName);
+
+          }
+
+          await updateDoc(notificationDoc.ref, {
+
+            actorNames,
+
+            createdAt: serverTimestamp(),
+
+          });
+
+        }
+
+      }
+
+      await updateDoc(postRef, {
+        reactionCount: increment(1),
+      });
+
+      setPosts(prev =>
+        prev.map(post =>
+          post.id === postId
+            ? {
+                ...post,
+                reactionCount: post.reactionCount + 1,
+              }
+            : post
+        )
+      );
+
+      setUserReactions(prev => ({
+        ...prev,
+        [postId]: reaction.id,
+      }));
+
+    }
+
+  } catch (error) {
+
+    console.log(error);
+
+  } finally {
+
+    setReactionLoading(false);
 
   }
 
@@ -285,7 +389,7 @@ style={styles.card}
 <View style={styles.userRow}>
 
 <Image
-source={require("../assets/images/ProfileIW.png")}
+source={require("../assets/images/profile2.png")}
 style={styles.avatar}
 />
 
@@ -368,9 +472,12 @@ post.status === "critical"
 
 
 <TouchableOpacity
-  style={styles.likeSection}
-  onPress={() => toggleReaction(post.id)}
-  
+    disabled={reactionLoading}
+    style={{ opacity: reactionLoading ? 0.5 : 1, flexDirection: "row",
+  alignItems: "center",
+  marginRight: 10,
+  gap: 6, }}
+    onPress={() => toggleReaction(post.id)}
 >
 
 <Animated.Image
@@ -417,7 +524,7 @@ style={styles.actionIcon}
 />
 
 <Text style={styles.actionText}>
-{post.commentCount}
+{post.commentCount ?? 0}
 </Text>
 
 </View>
@@ -530,10 +637,10 @@ const styles = StyleSheet.create({
   },
 
   avatar: {
-    width: 36,
-    height: 36,
+    width: 40 ,
+    height: 40,
     borderRadius: 18,
-    backgroundColor: "#000000",
+  
     marginRight: 10,
     resizeMode: "cover",
   },
@@ -606,10 +713,8 @@ postImage: {
 },
 
 likeSection: {
-  flexDirection: "row",
-  alignItems: "center",
-  marginRight: 10,
-  gap: 6,
+  
+ 
 },
 
 commentBox: {

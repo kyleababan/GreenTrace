@@ -1,20 +1,67 @@
+import { useRouter } from "expo-router";
 import {
-  View,
-  Text,
-  StyleSheet,
+  collection,
+  getDocs,
+  orderBy,
+  query,
+  where,
+} from "firebase/firestore";
+import { useEffect, useState } from "react";
+import {
   Image,
+  SafeAreaView,
   ScrollView,
+  StyleSheet,
+  Text,
   TouchableOpacity,
-  SafeAreaView
+  View
 } from "react-native";
 import Navbar from "../components/navbar";
-import { useRouter } from "expo-router";
+import { auth, db } from "../firebaseConfig";
 
 export default function ReportPosts() {
   const router = useRouter();
+const [reportPosts, setReportPosts] = useState([]);
+const loadReportPosts = async () => {
 
-  // Placeholder data for your history/recent posts
-  const reportPosts = [1, 2, 3];
+    try {
+
+        const currentUser = auth.currentUser;
+
+        if (!currentUser) return;
+
+        const q = query(
+
+            collection(db, "posts"),
+
+            where("userId", "==", currentUser.uid),
+
+            orderBy("createdAt", "desc")
+
+        );
+
+        const snapshot = await getDocs(q);
+
+        const posts = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+        }));
+
+        setReportPosts(posts);
+
+    } catch (error) {
+
+        console.log(error);
+
+    }
+
+};
+
+useEffect(() => {
+
+    loadReportPosts();
+
+}, []);
 
   return (
     <SafeAreaView style={styles.wrapper}>
@@ -35,38 +82,94 @@ export default function ReportPosts() {
 
         {/* FEED SECTION */}
         <ScrollView style={styles.feed} showsVerticalScrollIndicator={false}>
-          {reportPosts.map((item) => (
-            <View key={item} style={styles.reportCard}>
-              
-              {/* LEFT CONTENT */}
-              <View style={styles.cardLeft}>
-                <Text style={styles.userName}>Lois Token</Text>
-                <Text style={styles.reportDescription} numberOfLines={2}>
-                  Garbage piling up near the alley
-                </Text>
+          {reportPosts.length === 0 && (
 
-                <View style={styles.locationRow}>
-                  <Image 
-                    source={require("../assets/images/location.png")} 
-                    style={styles.locationIcon} 
-                  />
-                  <Text style={styles.locationText}>Address, Address</Text>
-                </View>
+<View
+    style={{
+        alignItems: "center",
+        marginTop: 50,
+    }}
+>
 
-                <TouchableOpacity style={styles.seePostButton}>
-                  <Text style={styles.seePostText}>See post?</Text>
-                </TouchableOpacity>
-              </View>
+<Text
+    style={{
+        color: "#777",
+        fontSize: 16,
+    }}
+>
+You haven't created any reports yet.
+</Text>
 
-              {/* RIGHT IMAGE */}
-              <View style={styles.cardRight}>
-                <Image
-                  source={require("../assets/images/pic1.png")}
-                  style={styles.postImage}
-                />
-              </View>
+</View>
 
-            </View>
+)}
+          {reportPosts.map((post) => (
+<View key={post.id} style={styles.reportCard}>
+
+    <View style={styles.cardLeft}>
+
+        <Text style={styles.userName}>
+            {post.firstName} {post.lastName}
+        </Text>
+
+        <Text
+            style={styles.reportDescription}
+            numberOfLines={2}
+        >
+            {post.caption}
+        </Text>
+
+        <View style={styles.locationRow}>
+
+            <Image
+                source={require("../assets/images/location.png")}
+                style={styles.locationIcon}
+            />
+
+            <Text style={styles.locationText}>
+                {post.locationName}
+            </Text>
+
+        </View>
+
+        <TouchableOpacity
+
+            style={styles.seePostButton}
+
+            onPress={() =>
+                router.push({
+                    pathname: "/post",
+                    params: {
+                        id: post.id,
+                    },
+                })
+            }
+
+        >
+
+            <Text style={styles.seePostText}>
+                See Post
+            </Text>
+
+        </TouchableOpacity>
+
+    </View>
+
+    <View style={styles.cardRight}>
+
+        <Image
+
+            source={{
+                uri: post.imageUrl,
+            }}
+
+            style={styles.postImage}
+
+        />
+
+    </View>
+
+</View>
           ))}
         </ScrollView>
 

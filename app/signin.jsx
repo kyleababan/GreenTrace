@@ -1,12 +1,13 @@
-import React, { useState } from "react";
+import { useState } from "react";
 
 import {
-  View,
+  Image,
+  SafeAreaView,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
-  SafeAreaView,
+  View
 } from "react-native";
 
 
@@ -129,7 +130,12 @@ const loginUser = async () => {
         <View style={styles.welcome}>
            {/* Logo + App Name (Row) */}
         <View style={styles.header}>
+          <Image
+                      source={require("../assets/images/minicon.png")}
+                      style={styles.logo}
+                  />
           <View style={styles.logo} />
+          
           <View style={styles.logoText}>
             <Text style={styles.appName}>GreenTrace</Text>
             <Text style={styles.tagline}>
@@ -203,13 +209,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 32,
   },
-  logo: {
-    width: 56,
-    height: 56,
-    backgroundColor: "#FFFFFF",
-    borderRadius: 8,
-    marginRight: 12,
+  logo:{
+    width: 60,
+    height: 60,
+    marginRight: 20,
   },
+
   logoText: {
     flexShrink: 1,
   },
@@ -277,6 +282,5 @@ const styles = StyleSheet.create({
   },
   signupLink: {
     fontWeight: "700",
-    textDecorationLine: "underline",
   },
 });

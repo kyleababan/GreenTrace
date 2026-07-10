@@ -92,7 +92,7 @@ const loadUser = async () => {
     {userData.points ?? 0} pts
 </Text>
               </View>
-              <Text style={styles.phonePlaceholder}>#{userData.phoneNumber}</Text>
+              <Text style={styles.phonePlaceholder}>#{userData.cellNumber}</Text>
             </View>
           </View>
         </View>

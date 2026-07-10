@@ -1,7 +1,86 @@
-import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-
+import { collection, getDocs } from "firebase/firestore";
+import { useEffect, useState } from "react";
+import { StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { db } from "../../firebaseConfig";
 export default function Dashboard() {
   const { width } = useWindowDimensions();
+
+  const [stats, setStats] = useState({
+
+    critical: 0,
+
+    moderate: 0,
+
+    cleaned: 0,
+
+    ongoing: 0,
+
+});
+
+const loadDashboard = async () => {
+
+    try {
+
+        const snapshot = await getDocs(
+            collection(db, "posts")
+        );
+
+        let critical = 0;
+        let moderate = 0;
+        let cleaned = 0;
+        let ongoing = 0;
+
+        snapshot.forEach((doc) => {
+
+            const post = doc.data();
+
+            switch (post.status) {
+
+                case "critical":
+                    critical++;
+                    break;
+
+                case "moderate":
+                    moderate++;
+                    break;
+
+                case "cleaned":
+                    cleaned++;
+                    break;
+
+                case "ongoing":
+                    ongoing++;
+                    break;
+
+            }
+
+        });
+
+        setStats({
+
+            critical,
+
+            moderate,
+
+            cleaned,
+
+            ongoing,
+
+        });
+
+    } catch (error) {
+
+        console.log(error);
+
+    }
+
+};
+
+useEffect(() => {
+
+    loadDashboard();
+
+}, []);
 
   const isDesktop = width >= 1024;
 
@@ -32,7 +111,7 @@ export default function Dashboard() {
           ]}
         >
           <View style={[styles.card, styles.card1]}>
-            <Text style={cardTextStyle(isDesktop)}>44</Text>
+            <Text style={cardTextStyle(isDesktop)}>{stats.critical}</Text>
           </View>
 
           <Text style={styles.cardLabel}>Critical Situation</Text>
@@ -49,7 +128,7 @@ export default function Dashboard() {
           ]}
         >
           <View style={[styles.card, styles.card2]}>
-            <Text style={cardTextStyle(isDesktop)}>44</Text>
+            <Text style={cardTextStyle(isDesktop)}>{stats.moderate}</Text>
           </View>
 
           <Text style={styles.cardLabel}>Moderate Situation</Text>
@@ -66,7 +145,7 @@ export default function Dashboard() {
           ]}
         >
           <View style={[styles.card, styles.card3]}>
-            <Text style={cardTextStyle(isDesktop)}>44</Text>
+            <Text style={cardTextStyle(isDesktop)}>{stats.cleaned}</Text>
           </View>
 
           <Text style={styles.cardLabel}>Cleaned</Text>
@@ -83,7 +162,7 @@ export default function Dashboard() {
           ]}
         >
           <View style={[styles.card, styles.card4]}>
-            <Text style={cardTextStyle(isDesktop)}>44</Text>
+            <Text style={cardTextStyle(isDesktop)}>{stats.ongoing}</Text>
           </View>
 
           <Text style={styles.cardLabel}>On-going</Text>

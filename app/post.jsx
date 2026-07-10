@@ -128,7 +128,9 @@ const [showSettings, setShowSettings] = useState(false);
 
 const [sendingComment, setSendingComment] = useState(false);
 
+const [showDeleteModal, setShowDeleteModal] = useState(false);
 
+const [reactionLoading, setReactionLoading] = useState(false);
 
 
   useEffect(() => {
@@ -290,6 +292,10 @@ console.log("post:", post);
 
     createdAt: serverTimestamp(),
 
+});
+
+await updateDoc(doc(db, "posts", id), {
+    commentCount: increment(1),
 });
 
         // Don't notify yourself
@@ -682,45 +688,8 @@ Comments
     style={styles.settingsButton}
     onPress={() => {
 
-        setShowSettings(false);
-
-        Alert.alert(
-            "Delete Post",
-            "Are you sure you want to delete this post?",
-            [
-                {
-    text: "Delete",
-    style: "destructive",
-    onPress: async () => {
-
-        try {
-
-            await deleteDoc(
-                doc(db, "posts", post.id)
-            );
-
-            Alert.alert(
-                "Deleted",
-                "Your post has been deleted."
-            );
-
-            router.replace("/home");
-
-        } catch (error) {
-
-            console.log(error);
-
-            Alert.alert(
-                "Error",
-                "Failed to delete post."
-            );
-
-        }
-
-    },
-},
-            ]
-        );
+    setShowSettings(false);
+    setShowDeleteModal(true);
 
     }}
 >
@@ -763,27 +732,93 @@ Comments
 </Modal>
 
 <Modal
-    visible={showImage}
-    transparent={true}
+    visible={showDeleteModal}
+    transparent
     animationType="fade"
 >
 
-<View style={styles.modalContainer}>
+<View style={styles.settingsOverlay}>
+
+<View style={styles.settingsBox}>
+
+<Text
+    style={{
+        fontSize: 22,
+        fontWeight: "bold",
+        marginBottom: 10,
+        textAlign: "center",
+    }}
+>
+    Delete Post
+</Text>
+
+<Text
+    style={{
+        color: "#666",
+        textAlign: "center",
+        marginBottom: 25,
+    }}
+>
+    Are you sure you want to delete this post?
+</Text>
 
 <TouchableOpacity
-    style={styles.closeButton}
-    onPress={() => setShowImage(false)}
->
-    <Text style={styles.closeText}>✕</Text>
-</TouchableOpacity>
-<Image
-    source={{ uri: post.imageUrl }}
     style={{
-        width: width * 0.9,
-        height: height * 0.8,
+        backgroundColor: "#E74C3C",
+        borderRadius: 10,
+        paddingVertical: 12,
+        alignItems: "center",
     }}
-    resizeMode="contain"
-/>
+    onPress={async () => {
+
+        try {
+
+            await deleteDoc(
+                doc(db, "posts", post.id)
+            );
+
+            setShowDeleteModal(false);
+
+            router.replace("/home");
+
+        } catch (error) {
+
+            console.log(error);
+
+        }
+
+    }}
+>
+
+<Text
+    style={{
+        color: "#fff",
+        fontWeight: "bold",
+        fontSize: 17,
+    }}
+>
+    Delete
+</Text>
+
+</TouchableOpacity>
+
+<TouchableOpacity
+    onPress={() => setShowDeleteModal(false)}
+>
+
+<Text
+    style={{
+        marginTop: 18,
+        color: "#666",
+        textAlign: "center",
+    }}
+>
+    Cancel
+</Text>
+
+</TouchableOpacity>
+
+</View>
 
 </View>
 
@@ -941,8 +976,8 @@ postImage: {
     backgroundColor: "yellow",
     borderRadius: 30,
     position: "absolute",
-    right: 20,
-    top: 90,
+    right: 10,
+    top: 10,
   },
 
  actionsContainer: {

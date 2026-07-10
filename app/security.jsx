@@ -1,67 +1,267 @@
-import React, { useState } from "react";
+import { useEffect, useState } from "react";
+
 import {
-  View,
-  Text,
-  StyleSheet,
+  Alert,
   Image,
-  TouchableOpacity,
-  TextInput,
   SafeAreaView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
+
 import { useRouter } from "expo-router";
+
 import Navbar from "../components/navbar";
+
+import { auth, db } from "../firebaseConfig";
+
+import {
+  EmailAuthProvider,
+  reauthenticateWithCredential,
+  updatePassword
+} from "firebase/auth";
+
+import { doc, getDoc } from "firebase/firestore";
 
 export default function Security() {
   const router = useRouter();
 
-  // Labels for the password fields
-  const fields = ["Current Password", "New Password", "Repeat Password"];
+  const currentUser = auth.currentUser;
 
+const [currentPassword, setCurrentPassword] = useState("");
+const [newPassword, setNewPassword] = useState("");
+const [repeatPassword, setRepeatPassword] = useState("");
+const [editCurrent, setEditCurrent] = useState(false);
+const [editNew, setEditNew] = useState(false);
+const [editRepeat, setEditRepeat] = useState(false);
+const [showCurrent, setShowCurrent] = useState(false);
+const [showNew, setShowNew] = useState(false);
+const [showRepeat, setShowRepeat] = useState(false);
+const [firstName, setFirstName] = useState("");
+const [lastName, setLastName] = useState("");
+
+useEffect(() => {
+  loadCurrentUser();
+}, []);
+
+  // Labels for the password fields
+ 
+const loadCurrentUser = async () => {
+
+    if (!currentUser) return;
+
+    try {
+
+        const snapshot = await getDoc(
+            doc(db, "users", currentUser.uid)
+        );
+
+        if (snapshot.exists()) {
+
+            const data = snapshot.data();
+
+            setFirstName(data.firstName || "");
+            setLastName(data.lastName || "");
+
+        }
+
+    } catch (error) {
+
+        console.log(error);
+
+    }
+
+};
+
+  const changePassword = async () => {
+
+    if (!currentPassword || !newPassword || !repeatPassword) {
+        Alert.alert("Error", "Please fill in all fields.");
+        return;
+    }
+
+    if (newPassword !== repeatPassword) {
+        Alert.alert("Error", "Passwords do not match.");
+        return;
+    }
+
+    try {
+
+        const credential = EmailAuthProvider.credential(
+            currentUser.email,
+            currentPassword
+        );
+
+        await reauthenticateWithCredential(
+            currentUser,
+            credential
+        );
+
+        await updatePassword(
+            currentUser,
+            newPassword
+        );
+
+        Alert.alert(
+            "Success",
+            "Password updated successfully."
+        );
+
+        setCurrentPassword("");
+        setNewPassword("");
+        setRepeatPassword("");
+
+    } catch (error) {
+
+        Alert.alert(
+            "Error",
+            error.message
+        );
+
+    }
+
+};
   return (
     <SafeAreaView style={styles.wrapper}>
       <View style={styles.container}>
         
         {/* HEADER SECTION */}
         <View style={styles.header}>
-          
 
-          {/* CENTERED USER INFO */}
-          <View style={styles.userInfoContainer}>
-            <TouchableOpacity onPress={() => router.back()}>
+    <TouchableOpacity onPress={() => router.back()}>
+        <Image
+            source={require("../assets/images/back.png")}
+            style={styles.backIcon}
+        />
+    </TouchableOpacity>
+
+    <View style={styles.userInfoContainer}>
+
+        <View style={styles.avatarWrapper}>
+
             <Image
-              source={require("../assets/images/back.png")}
-              style={styles.backIcon}
-            />
-          </TouchableOpacity>
-            <View style={styles.avatarWrapper}>
-              <Image
                 source={require("../assets/images/profile.png")}
                 style={styles.profileAvatar}
-              />
-            </View>
-            <Text style={styles.userName}>Lois Token</Text>
-          </View>
+            />
         </View>
 
-        {/* FORM SECTION */}
-        <View style={styles.formContainer}>
-          <Text style={styles.title}>Change Password</Text>
+        <Text style={styles.userName}>
+            {firstName} {lastName}
+        </Text>
 
-          {fields.map((label) => (
-            <View key={label} style={styles.inputGroup}>
-              <Text style={styles.label}>{label}</Text>
-              <View style={styles.inputWrapper}>
-                <TextInput
-                  style={styles.input}
-                  secureTextEntry={true} // Hides the password
-                  placeholder=""
-                />
-              </View>
-            </View>
-          ))}
+    </View>
+
+</View>
+        {/* FORM SECTION */}
+
+
+        <View style={styles.formContainer}>
+
+          
+        <Text style={styles.label}>
+Current Password
+</Text>
+
+<View style={styles.inputWrapper}>
+<TextInput
+style={styles.input}
+        secureTextEntry
+        value={currentPassword}
+        onChangeText={setCurrentPassword}
+        secureTextEntry={!showCurrent}
+/>
+
+ <TouchableOpacity
+    onPress={() => setShowCurrent(!showCurrent)}
+>
+
+<Image
+    source={
+        showCurrent
+            ? require("../assets/images/show.png")
+            : require("../assets/images/hide.png")
+    }
+    style={[
+        styles.eyeIcon,
+        showCurrent && { opacity: 0.4 }
+    ]}
+/>
+
+</TouchableOpacity>
+</View>
+          <Text style={styles.label}>
+New Password
+</Text>
+
+<View style={styles.inputWrapper}>
+ <TextInput
+        style={styles.input}
+        secureTextEntry
+  
+        value={newPassword}
+        onChangeText={setNewPassword}
+        secureTextEntry={!showNew}
+    />
+
+    <TouchableOpacity
+        onPress={() => setShowNew(!showNew)}
+    >
+
+        <Image
+    source={
+        showNew
+            ? require("../assets/images/show.png")
+            : require("../assets/images/hide.png")
+    }
+    style={[
+        styles.eyeIcon,
+        showNew && { opacity: 0.4 }
+    ]}
+/>
+
+</TouchableOpacity>
+</View>
+
+<Text style={styles.label}>
+Repeat Password
+</Text>
+
+<View style={styles.inputWrapper}>
+<TextInput
+        style={styles.input}
+        secureTextEntry
+
+        value={repeatPassword}
+        onChangeText={setRepeatPassword}
+        secureTextEntry={!showRepeat}
+    />
+
+    <TouchableOpacity
+        onPress={() => setShowRepeat(!showRepeat)}
+    >
+
+        <Image
+    source={
+        showRepeat
+            ? require("../assets/images/show.png")
+            : require("../assets/images/hide.png")
+    }
+    style={[
+        styles.eyeIcon,
+        showRepeat && { opacity: 0.4 }
+    ]}
+/>
+
+</TouchableOpacity>
+</View>
 
           {/* CONFIRM BUTTON */}
-          <TouchableOpacity style={styles.confirmButton}>
+          <TouchableOpacity
+style={styles.confirmButton}
+onPress={changePassword}
+>
             <Text style={styles.confirmButtonText}>Confirm Changes?</Text>
           </TouchableOpacity>
         </View>
@@ -87,31 +287,43 @@ const styles = StyleSheet.create({
     maxWidth: 500,
     backgroundColor: "#F2F2F2", // Light grey background
   },
-  header: {
+ header: {
     backgroundColor: "#5F9C76",
+    flexDirection: "row",
+    alignItems: "center",
     paddingHorizontal: 20,
-    paddingBottom: 50,
-    alignItems: "center", // Centers items in the header
+    paddingTop: 55,
+    paddingBottom: 25,
+},
+
+  backButton: {
+    backgroundColor: "#FFF",
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 10,
   },
- backIcon: {
+
+  backIcon: {
     width: 45,
     height: 45,
     resizeMode: "contain",
-    top: 3,
-    right: 35,
-    
-  },
-  
-  userInfoContainer: {
+},
+
+ userInfoContainer: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    top: 35,
-    right: 30,
-  },
+    marginLeft: 15,
+    flex: 1,
+},
+
   avatarWrapper: {
     position: "relative",
+
   },
+  
   profileAvatar: {
     width: 80,
     height: 80,
@@ -175,7 +387,9 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
   },
-  eyeIcon: {
+  
+
+   eyeIcon: {
     width: 20,
     height: 20,
     opacity: 0.7,
