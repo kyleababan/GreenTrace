@@ -137,14 +137,25 @@ const loadNotifications = async () => {
             
               {/* CENTER: Text Content */}
               <View style={styles.textContainer}>
-                <Text style={styles.userName}>
-    {getActorText(item)}
+<Text style={styles.userName}>
+
+{item.type === "deleted_post"
+    ? "GreenTrace LGU"
+    : getActorText(item)}
+
 </Text>
 
 <Text style={styles.userAction}>
-    {item.type === "comment"
-        ? "commented on your post."
-        : "increased your priority."}
+
+{item.type === "comment"
+    ? "commented on your post."
+
+    : item.type === "priority"
+
+    ? "increased your priority."
+
+    : item.message}
+
 </Text>
               </View>
 

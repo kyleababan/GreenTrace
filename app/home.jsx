@@ -11,6 +11,7 @@ import {
   getDoc,
   getDocs,
   increment,
+  onSnapshot,
   orderBy,
   query,
   serverTimestamp,
@@ -72,10 +73,14 @@ const loadCurrentUser = async () => {
 
 
 useEffect(() => {
-    loadPosts();
+
+    const unsubscribe = loadPosts();
+
     loadUserReactions();
     loadCurrentUser();
-    
+
+    return unsubscribe;
+
 }, []);
 
 const loadUserReactions = async () => {
@@ -313,15 +318,14 @@ useEffect(() => {
 }, [search, posts]);
 
 
-const loadPosts = async () => {
-    try {
+const loadPosts = () => {
 
-        const q = query(
-            collection(db, "posts"),
-            orderBy("createdAt", "desc")
-        );
+    const q = query(
+        collection(db, "posts"),
+        orderBy("createdAt", "desc")
+    );
 
-        const snapshot = await getDocs(q);
+    return onSnapshot(q, (snapshot) => {
 
         const data = snapshot.docs.map(doc => ({
             id: doc.id,
@@ -333,15 +337,18 @@ const loadPosts = async () => {
 
         const anims = {};
 
-data.forEach(post => {
-  anims[post.id] = new Animated.Value(1);
-});
+        data.forEach(post => {
 
-setAnimations(anims);
+            anims[post.id] =
+                animations[post.id] ||
+                new Animated.Value(1);
 
-    } catch (error) {
-        console.log(error);
-    }
+        });
+
+        setAnimations(anims);
+
+    });
+
 };
 
 
@@ -461,11 +468,19 @@ id: post.id,
 </TouchableOpacity>
 
 <View
-style={
-post.status === "critical"
-? styles.statusDotRed
-: styles.statusDotYellow
-}
+    style={[
+        styles.statusDot,
+        {
+            backgroundColor:
+                post.status === "critical"
+                    ? "#FF5B5B"
+                    : post.status === "moderate"
+                    ? "#FFC940"
+                    : post.status === "cleaned"
+                    ? "#34C759"
+                    : "#A5A5A5",
+        },
+    ]}
 />
 
 <View style={styles.actionsContainer}>
@@ -686,25 +701,16 @@ postImage: {
   width: "100%",
 },
 
-  statusDotRed: {
-    width: 25,
-    height: 25,
-    backgroundColor: "red",
-    borderRadius: 30,
-    position: "absolute",
-    right: 20,
-    top: 90,
-  },
+statusDot:{
+    width:25,
+    height:25,
+    borderRadius:30,
+    position:"absolute",
+    right:20,
+    top:90,
+},
 
-  statusDotYellow: {
-    width: 25,
-    height: 25,
-    backgroundColor: "yellow",
-    borderRadius: 30,
-    position: "absolute",
-    right: 20,
-    top: 90,
-  },
+
 
  actionsContainer: {
   flexDirection: "row",

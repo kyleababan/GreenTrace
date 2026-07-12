@@ -27,7 +27,7 @@ export default function Sidebar() {
       {/* LOGO */}
 
       {/* <Image
-        source={require("../assets/minicon.png")}
+        source={require("../assets/images/minicon.png")}
         style={styles.logo}
       /> */}
 
@@ -38,10 +38,10 @@ export default function Sidebar() {
         onPress={() => router.push("/admin/profile")}
       >
 
-        {/* <Image
-          source={require("../assets/profile.png")}
+        <Image
+          source={require("../assets/images/profile.png")}
           style={styles.Aprofile}
-        /> */}
+        />
 
         <View>
           <Text style={styles.adminName}>
@@ -66,10 +66,10 @@ export default function Sidebar() {
           }
         >
 
-          {/* <Image
-            source={require("../assets/Dashboard Logo.png")}
+          <Image
+            source={require("../assets/images/Dashboard Logo.png")}
             style={styles.icon}
-          /> */}
+          />
 
           <Text style={styles.itemText}>
             Dashboard
@@ -84,10 +84,10 @@ export default function Sidebar() {
           }
         >
 
-          {/* <Image
-            source={require("../assets/Situation Assessment Logo.png")}
+          <Image
+            source={require("../assets/images/Situation Assessment Logo.png")}
             style={styles.icon}
-          /> */}
+          />
 
           <Text style={styles.itemText}>
             Situation Assessment
@@ -102,10 +102,10 @@ export default function Sidebar() {
           }
         >
 
-          {/* <Image
-            source={require("../assets/vlist.png")}
+          <Image
+            source={require("../assets/images/vlist.png")}
             style={styles.icon}
-          /> */}
+          />
 
           <Text style={styles.itemText}>
             Volunteer List
@@ -120,10 +120,10 @@ export default function Sidebar() {
           }
         >
 
-          {/* <Image
-            source={require("../assets/acc.png")}
+          <Image
+            source={require("../assets/images/acc.png")}
             style={styles.icon}
-          /> */}
+          />
 
           <Text style={styles.itemText}>
             Users
@@ -143,10 +143,10 @@ export default function Sidebar() {
           }
         >
 
-          {/* <Image
-            source={require("../assets/Settings BTN.png")}
+          <Image
+            source={require("../assets/images/settings.png")}
             style={styles.settings}
-          /> */}
+          />
 
         </TouchableOpacity>
 
