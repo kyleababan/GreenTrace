@@ -2,7 +2,6 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 
 import {
-    Alert,
     Animated,
     Image,
     Modal,
@@ -11,7 +10,6 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
-    useWindowDimensions,
     View,
 } from "react-native";
 
@@ -32,11 +30,10 @@ import {
 } from "firebase/firestore";
 import Navbar from "../components/navbar";
 import { auth, db } from "../firebaseConfig";
+import { deleteRelatedDocuments } from "./guards/deletePostHelper";
 
 
 export default function Post() {
-
-  const { width, height } = useWindowDimensions();
 
   const { id } = useLocalSearchParams();
   console.log(id);
@@ -138,55 +135,9 @@ const [reactionLoading, setReactionLoading] = useState(false);
     loadComments();
     loadReaction();
     loadCurrentUser();
-}, []);
-
-
-const deletePost = () => {
-
-  Alert.alert(
-    "Delete Post",
-    "Are you sure you want to delete this post?",
-    [
-      {
-        text: "Cancel",
-        style: "cancel",
-      },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: async () => {
-
-          try {
-
-            await deleteDoc(
-              doc(db, "posts", post.id)
-            );
-
-            Alert.alert(
-              "Deleted",
-              "Your post has been deleted."
-            );
-
-            router.replace("/home");
-
-          } catch (error) {
-
-            console.log(error);
-
-            Alert.alert(
-              "Error",
-              "Failed to delete the post."
-            );
-
-          }
-
-        },
-      },
-    ]
-  );
-
-};
-
+// The screen only reloads these records when its route post ID changes.
+// eslint-disable-next-line react-hooks/exhaustive-deps
+}, [id]);
 
 
   const loadPost = async () => {
@@ -353,14 +304,23 @@ const playReactionAnimation = () => {
 
 const toggleReaction = async () => {
 
+    if (reactionLoading || !post) return;
+
+    setReactionLoading(true);
+
     playReactionAnimation(post.id);
 
     const currentUser = auth.currentUser;
 
    
-    if (!currentUser) return;
+    if (!currentUser) {
+        setReactionLoading(false);
+        return;
+    }
 
     const postRef = doc(db, "posts", post.id);
+
+    try {
 
     if (userReaction) {
 
@@ -415,6 +375,16 @@ const toggleReaction = async () => {
 
     }
 
+    } catch (error) {
+
+        console.error("Unable to update reaction:", error);
+
+    } finally {
+
+        setReactionLoading(false);
+
+    }
+
 };
 
 if (!post) {
@@ -443,7 +413,7 @@ if (!post) {
 
     {/* TITLE */}
     <Text style={styles.headerTitle}>
-      {post.firstName} {post.lastName}'s Post
+      {post.firstName} {post.lastName}{"'s Post"}
     </Text>
 
   </View>
@@ -486,6 +456,8 @@ if (!post) {
             <View style={styles.rightButtons}>
 
                 <TouchableOpacity
+                    disabled={reactionLoading}
+                    style={{ opacity: reactionLoading ? 0.5 : 1 }}
                     onPress={toggleReaction}
                 >
 
@@ -568,11 +540,19 @@ if (!post) {
 
   {/* ✅ MOVE HERE */}
   <View
-    style={
-        post.status === "critical"
-            ? styles.statusDotRed
-            : styles.statusDotYellow
-    }
+    style={[
+        styles.statusDot,
+        {
+            backgroundColor:
+                post.status === "critical"
+                    ? "#FF5B5B"
+                    : post.status === "moderate"
+                    ? "#FFC940"
+                    : post.status === "cleaned"
+                    ? "#34C759"
+                    : "#A5A5A5",
+        },
+    ]}
 />
 </TouchableOpacity>
     </View>
@@ -646,6 +626,33 @@ Comments
         
        <Navbar />
       </View>
+
+<Modal
+    visible={showImage}
+    transparent
+    animationType="fade"
+    onRequestClose={() => setShowImage(false)}
+>
+
+<View style={styles.modalContainer}>
+
+<TouchableOpacity
+    style={styles.closeButton}
+    onPress={() => setShowImage(false)}
+    accessibilityLabel="Close full image"
+>
+    <Text style={styles.closeText}>×</Text>
+</TouchableOpacity>
+
+<Image
+    source={{ uri: post.imageUrl }}
+    style={styles.fullImage}
+    resizeMode="contain"
+/>
+
+</View>
+
+</Modal>
 
 <Modal
     visible={showSettings}
@@ -773,9 +780,7 @@ Comments
 
         try {
 
-            await deleteDoc(
-                doc(db, "posts", post.id)
-            );
+            await deleteRelatedDocuments(post.id);
 
             setShowDeleteModal(false);
 
@@ -841,8 +846,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     width: "100%",
     maxWidth: 500, // 👈 THIS PREVENTS STRETCHING
-    flex: 1,
-    backgroundColor: "#FFFFFF",
   },
 
   topSection: {
@@ -960,20 +963,9 @@ postImage: {
   resizeMode: "cover", // 👈 fills the container nicely
 },
 
-  statusDotRed: {
+  statusDot: {
     width: 25,
     height: 25,
-    backgroundColor: "red",
-    borderRadius: 30,
-    position: "absolute",
-    right: 10,
-    top: 10,
-  },
-
-  statusDotYellow: {
-    width: 25,
-    height: 25,
-    backgroundColor: "yellow",
     borderRadius: 30,
     position: "absolute",
     right: 10,

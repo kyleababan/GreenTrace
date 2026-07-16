@@ -1,7 +1,6 @@
 import { useState } from "react";
 
 import {
-  Image,
   SafeAreaView,
   StyleSheet,
   Text,
@@ -130,10 +129,10 @@ const loginUser = async () => {
         <View style={styles.welcome}>
            {/* Logo + App Name (Row) */}
         <View style={styles.header}>
-          <Image
+          {/* <Image
                       source={require("../assets/images/minicon.png")}
                       style={styles.logo}
-                  />
+                  /> */}
           <View style={styles.logo} />
           
           <View style={styles.logoText}>

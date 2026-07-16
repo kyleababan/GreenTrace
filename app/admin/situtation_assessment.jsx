@@ -29,12 +29,12 @@ const renderContent = () => {
     if (selectedPost) {
 
         return (
-            <PostDetail
-                post={selectedPost}
-                setSelectedPost={setSelectedPost}
-                setSelectedVolunteerPost={setSelectedVolunteerPost}
-
-            />
+<PostDetail
+    post={selectedPost}
+    currentTab={activeTab}
+    setSelectedPost={setSelectedPost}
+    setSelectedVolunteerPost={setSelectedVolunteerPost}
+/>
         );
 
     }

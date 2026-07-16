@@ -35,7 +35,6 @@ export default function Home() {
   const [filteredPosts, setFilteredPosts] = useState([]);
 
   const [userReactions, setUserReactions] = useState({});
-  const [animatingPost, setAnimatingPost] = useState(null);
 
   const [animations, setAnimations] = useState({});
 
@@ -81,6 +80,8 @@ useEffect(() => {
 
     return unsubscribe;
 
+// The post subscription is initialized once when the Home screen mounts.
+// eslint-disable-next-line react-hooks/exhaustive-deps
 }, []);
 
 const loadUserReactions = async () => {
@@ -155,17 +156,6 @@ const toggleReaction = async (postId) => {
       await updateDoc(postRef, {
         reactionCount: increment(-1),
       });
-
-      setPosts(prev =>
-        prev.map(post =>
-          post.id === postId
-            ? {
-                ...post,
-                reactionCount: post.reactionCount - 1,
-              }
-            : post
-        )
-      );
 
       const updated = { ...userReactions };
 
@@ -266,17 +256,6 @@ const toggleReaction = async (postId) => {
       await updateDoc(postRef, {
         reactionCount: increment(1),
       });
-
-      setPosts(prev =>
-        prev.map(post =>
-          post.id === postId
-            ? {
-                ...post,
-                reactionCount: post.reactionCount + 1,
-              }
-            : post
-        )
-      );
 
       setUserReactions(prev => ({
         ...prev,
@@ -585,8 +564,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     width: "100%",
     maxWidth: 500, // 👈 THIS PREVENTS STRETCHING
-    flex: 1,
-    backgroundColor: "#f8f6f6",
   },
 
   topSection: {
@@ -689,12 +666,11 @@ locationText: {
     marginBottom: 8,
   },
 
-  imageContainer: {
+imageContainer: {
   width: "100%",
   borderRadius: 10,
   overflow: "hidden",
   backgroundColor: "#ddd",
-  maxHeight: 250,
 },
 
 postImage: {

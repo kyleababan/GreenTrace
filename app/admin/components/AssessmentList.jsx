@@ -37,7 +37,7 @@ export default function AssessmentList({
     loadPosts();
   }, []);
 
-  const loadPosts = async () => {
+  const loadPosts = async () => { 
 
     try {
 

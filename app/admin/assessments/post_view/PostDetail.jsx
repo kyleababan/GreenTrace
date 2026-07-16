@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useRouter } from "expo-router";
 import {
   Image,
   Modal,
@@ -24,7 +25,9 @@ import {
 import { db } from "../../../../firebaseConfig";
 import { deleteRelatedDocuments } from "../../../guards/deletePostHelper";
 
-export default function PostDetail({ post, setSelectedPost, setSelectedVolunteerPost, }) {
+export default function PostDetail({ post,currentTab, setSelectedPost, setSelectedVolunteerPost, }) {
+
+  const router = useRouter();
 
   const [comments, setComments] = useState([]);
   const [updating, setUpdating] = useState(false);
@@ -39,6 +42,7 @@ const [selectedReason, setSelectedReason] = useState("");
 const [customReason, setCustomReason] = useState("");
 
 const [deleting, setDeleting] = useState(false);
+const [openingVolunteerActivity, setOpeningVolunteerActivity] = useState(false);
 
 const deleteReasons = [
 
@@ -54,8 +58,100 @@ const deleteReasons = [
 
 
 useEffect(() => {
+    const loadComments = async () => {
+
+        const q = query(
+            collection(db, "comments"),
+            where("postId", "==", post.id)
+        );
+
+        const snapshot = await getDocs(q);
+
+        setComments(snapshot.docs.map(comment => ({
+            id: comment.id,
+            ...comment.data(),
+        })));
+
+    };
+
     loadComments();
-}, []);
+}, [post.id]);
+
+const markAsClean = async () => {
+
+    if (updating) return;
+
+    setUpdating(true);
+
+    try {
+
+        await updateDoc(
+            doc(db, "posts", post.id),
+            {
+                status: "cleaned",
+            }
+        );
+
+        const volunteerSnapshot = await getDocs(
+            query(collection(db, "volunteer_posts"), where("postId", "==", post.id))
+        );
+
+        await Promise.all(
+            volunteerSnapshot.docs.map((volunteerPost) =>
+                updateDoc(volunteerPost.ref, { status: "cleaned" })
+            )
+        );
+
+        alert("Post marked as cleaned.");
+
+        setSelectedPost(null);
+
+    } catch (error) {
+
+        console.log(error);
+
+        alert("Failed to update.");
+
+        setUpdating(false);
+
+    }
+
+};
+
+const openVolunteerActivity = async () => {
+
+    if (openingVolunteerActivity) return;
+
+    setOpeningVolunteerActivity(true);
+
+    try {
+
+        const volunteerSnapshot = await getDocs(
+            query(collection(db, "volunteer_posts"), where("postId", "==", post.id))
+        );
+
+        if (!volunteerSnapshot.empty) {
+            router.push({
+                pathname: "/admin/assessments/post_view/VolunteerPostDetail",
+                params: { volunteerId: volunteerSnapshot.docs[0].id },
+            });
+            return;
+        }
+
+        setSelectedVolunteerPost(post);
+
+    } catch (error) {
+
+        console.error("Unable to open volunteer activity:", error);
+        alert("Unable to check volunteer activities. Please try again.");
+
+    } finally {
+
+        setOpeningVolunteerActivity(false);
+
+    }
+
+};
 
 const chooseReason = (reason)=>{
 
@@ -150,24 +246,6 @@ const deletePost = async () => {
         setDeleting(false);
 
     }
-
-};
-
-const loadComments = async () => {
-
-    const q = query(
-        collection(db, "comments"),
-        where("postId", "==", post.id)
-    );
-
-    const snapshot = await getDocs(q);
-
-    const data = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-    }));
-
-    setComments(data);
 
 };
 
@@ -355,26 +433,41 @@ const setToOngoing = async () => {
 
       {/* BUTTON */}
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', padding: 20, gap: 5, }}>
-        <TouchableOpacity style={[styles.helpBTN, { width: '100%', flex: 1 }]} onPress={() => {setSelectedVolunteerPost(post)}}>
-          <Text style={styles.helpText}>Help</Text>
-        </TouchableOpacity>
 <TouchableOpacity
-    disabled={updating}
-    style={[
-        styles.helpBTN,
-        {
-            backgroundColor: "rgb(161, 158, 158)",
-            width: "100%",
-            flex: 1,
-            opacity: updating ? 0.6 : 1,
-        },
-    ]}
-    onPress={setToOngoing}
+    disabled={openingVolunteerActivity}
+    style={[styles.helpBTN, { flex: 1 }]}
+    onPress={openVolunteerActivity}
 >
     <Text style={styles.helpText}>
-        {updating ? "Updating..." : "Set to On-Going"}
+        {openingVolunteerActivity ? "Loading..." : "Help"}
     </Text>
 </TouchableOpacity>
+
+{currentTab !== "cleaned" && (
+    <TouchableOpacity
+        style={[
+            styles.helpBTN,
+            {
+                backgroundColor:
+                    currentTab === "ongoing"
+                        ? "#2DCC6F"
+                        : "#A5A5A5",
+                flex: 1,
+            },
+        ]}
+        onPress={
+            currentTab === "ongoing"
+                ? markAsClean
+                : setToOngoing
+        }
+    >
+        <Text style={styles.helpText}>
+            {currentTab === "ongoing"
+                ? "Mark as Clean"
+                : "Set to On-Going"}
+        </Text>
+    </TouchableOpacity>
+)}
       </View>
 
       <Modal

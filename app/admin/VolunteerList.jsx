@@ -1,5 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
-import React from "react";
+import { router } from "expo-router";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  orderBy,
+  query,
+} from "firebase/firestore";
+import { useEffect, useMemo, useState } from "react";
 import {
   Image,
   ScrollView,
@@ -10,9 +19,82 @@ import {
   View,
 } from "react-native";
 
+import { db } from "../../firebaseConfig";
+
 
 export default function VolunteerList({ setActivePage }) {
-  const posts = Array(6).fill(null);
+  const [posts, setPosts] = useState([]);
+const [search, setSearch] = useState("");
+
+useEffect(() => {
+    loadVolunteerPosts();
+}, []);
+
+const loadVolunteerPosts = async () => {
+
+    try {
+
+        const q = query(
+            collection(db, "volunteer_posts"),
+            orderBy("createdAt", "desc")
+        );
+
+        const snapshot = await getDocs(q);
+
+        const data = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+        }));
+
+        const activePosts = await Promise.all(
+            data.map(async (volunteerPost) => {
+                if (volunteerPost.status === "cleaned") return null;
+                if (!volunteerPost.postId) return volunteerPost;
+
+                try {
+                    const sourcePost = await getDoc(doc(db, "posts", volunteerPost.postId));
+
+                    return sourcePost.exists() && sourcePost.data().status === "cleaned"
+                        ? null
+                        : volunteerPost;
+                } catch (error) {
+                    console.error("Unable to check volunteer post status:", error);
+                    return volunteerPost;
+                }
+            })
+        );
+
+        setPosts(activePosts.filter(Boolean));
+
+    } catch (error) {
+
+        console.log(error);
+
+    }
+
+};
+
+const filteredPosts = useMemo(() => {
+
+    const keyword = search.toLowerCase();
+
+    return posts.filter(post =>
+
+        post.status !== "cleaned" && (
+
+            !keyword ||
+
+            post.title?.toLowerCase().includes(keyword) ||
+
+            post.description?.toLowerCase().includes(keyword) ||
+
+            post.locationName?.toLowerCase().includes(keyword)
+
+        )
+
+    );
+
+}, [posts, search]);
 
   return (
     <View style={styles.page}>
@@ -21,11 +103,13 @@ export default function VolunteerList({ setActivePage }) {
         {/* TOP BAR */}
         <View style={styles.searchContainer}>
         <Ionicons name="search" size={20} color="#888" style={styles.searchIcon} />
-        <TextInput 
-          placeholder="Search" 
-          style={styles.searchInput}
-          placeholderTextColor="#888"
-        />
+<TextInput
+    placeholder="Search"
+    style={styles.searchInput}
+    placeholderTextColor="#888"
+    value={search}
+    onChangeText={setSearch}
+/>
       </View>
 
         {/* GRID */}
@@ -34,15 +118,15 @@ export default function VolunteerList({ setActivePage }) {
           contentContainerStyle={styles.grid}
           showsVerticalScrollIndicator={true}
         >
-          {posts.map((_, index) => (
-            <View key={index} style={styles.card}>
+          {filteredPosts.map(post => (
+            <View key={post.id} style={styles.card}>
 
               {/* LEFT */}
               <View style={styles.cardLeft}>
-                <Text style={styles.title}>Need Volunteers</Text>
+                <Text style={styles.title}>{post.title}</Text>
 
                 <Text style={styles.desc} numberOfLines={3}>
-                  Responsible for sorting and organizing garbage to ensure proper transfer to a nearby landfill.
+                 {post.description}
                 </Text>
 
                 <View style={styles.locationRow}>
@@ -50,13 +134,21 @@ export default function VolunteerList({ setActivePage }) {
                     source={require("../../assets/images/location.png")}
                     style={styles.locationIcon}
                   />
-                  <Text style={styles.location}>Address, Address</Text>
+                  <Text style={styles.location}>{post.locationName}</Text>
                 </View>
 
                 {/* ✅ NAVIGATION FIX */}
                 <TouchableOpacity
                   style={styles.button}
-                  onPress={() => setActivePage('volunteerdetails')}
+                  onPress={() =>
+    router.push({
+        pathname: "/admin/assessments/post_view/VolunteerPostDetail",
+        params: {
+            volunteerId: post.id,
+        },
+    })
+}
+
                 >
                   <Text style={styles.buttonText}>Check</Text>
                 </TouchableOpacity>
@@ -64,10 +156,10 @@ export default function VolunteerList({ setActivePage }) {
 
               {/* RIGHT IMAGE */}
               <View style={styles.imageWrapper}>
-                <Image
-                  source={require("../../assets/images/Post1.png")}
-                  style={styles.image}
-                />
+         <Image
+    source={{ uri: post.imageUrl }}
+    style={styles.image}
+/>
               </View>
 
             </View>

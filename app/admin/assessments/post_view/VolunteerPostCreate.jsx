@@ -1,336 +1,240 @@
+import { Ionicons } from "@expo/vector-icons";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import {
   addDoc,
   collection,
   doc,
+  getDoc,
   getDocs,
   query,
   serverTimestamp,
   updateDoc,
   where,
 } from "firebase/firestore";
-import { useState } from "react";
-import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from "react-native";
+import { useEffect, useState } from "react";
+import {
+  ActivityIndicator,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+  useWindowDimensions,
+} from "react-native";
 
-import { db, } from "../../../../firebaseConfig";
+import { db } from "../../../../firebaseConfig";
 
-export default function VolunteerPostCreate({ setSelectedVolunteerPost, post, setSelectedPost}) {
-  const [title, setTitle] = useState("Need Volunteers");
-  const [desc, setDesc] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [requirements, setRequirements] = useState([
-    ""
-]);
-  const [location, setLocation] = useState(post.locationName || "");
-  const [maxVolunteers, setMaxVolunteers] = useState("");
-
+export default function VolunteerPostCreate({
+  setSelectedVolunteerPost,
+  post: suppliedPost,
+  setSelectedPost,
+}) {
+  const { volunteerId } = useLocalSearchParams();
+  const router = useRouter();
+  const isEditing = Boolean(volunteerId);
   const { width } = useWindowDimensions();
   const isMobile = width < 600;
 
+  const [volunteerPost, setVolunteerPost] = useState(isEditing ? null : suppliedPost || null);
+  const [title, setTitle] = useState(suppliedPost?.title || "Need Volunteers");
+  const [desc, setDesc] = useState(suppliedPost?.description || "");
+  const [requirements, setRequirements] = useState(suppliedPost?.requirements?.length ? suppliedPost.requirements : [""]);
+  const [location, setLocation] = useState(suppliedPost?.locationName || "");
+  const [maxVolunteers, setMaxVolunteers] = useState(
+    suppliedPost?.maxVolunteers ? String(suppliedPost.maxVolunteers) : ""
+  );
+  const [loading, setLoading] = useState(isEditing);
+  const [saving, setSaving] = useState(false);
 
-const saveVolunteerPost = async () => {
+  useEffect(() => {
+    if (!isEditing) return;
 
+    const loadVolunteerPost = async () => {
+      try {
+        const snapshot = await getDoc(doc(db, "volunteer_posts", volunteerId));
+
+        if (!snapshot.exists()) {
+          alert("This volunteer activity is no longer available.");
+          router.back();
+          return;
+        }
+
+        const data = { id: snapshot.id, ...snapshot.data() };
+        setVolunteerPost(data);
+        setTitle(data.title || "Need Volunteers");
+        setDesc(data.description || "");
+        setRequirements(data.requirements?.length ? data.requirements : [""]);
+        setLocation(data.locationName || "");
+        setMaxVolunteers(data.maxVolunteers ? String(data.maxVolunteers) : "");
+      } catch (error) {
+        console.error("Unable to load volunteer activity:", error);
+        alert("Unable to load this volunteer activity.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadVolunteerPost();
+  }, [isEditing, router, volunteerId]);
+
+  const goBack = () => {
+    if (isEditing) {
+      router.back();
+      return;
+    }
+
+    setSelectedVolunteerPost?.(null);
+    setSelectedPost?.(suppliedPost);
+  };
+
+  const saveVolunteerPost = async () => {
     if (saving) return;
+
+    const cleanedRequirements = requirements.map((item) => item.trim()).filter(Boolean);
+
+    if (!title.trim()) return alert("Please enter a title.");
+    if (!desc.trim()) return alert("Please enter a description.");
+    if (!cleanedRequirements.length) return alert("Please add at least one requirement.");
+    if (!location.trim()) return alert("Please enter a location.");
+    if (!maxVolunteers || Number(maxVolunteers) < 1) return alert("Please enter the maximum volunteers.");
 
     setSaving(true);
 
-    if (!desc.trim()) {
-        alert("Please enter a description.");
-        setSaving(false);
-        return;
-    }
-
-    if (requirements.filter(r => r.trim() !== "").length === 0) {
-        alert("Please add at least one requirement.");
-        setSaving(false);
-        return;
-    }
-
-    if (!location.trim()) {
-        alert("Please enter a location.");
-        setSaving(false);
-        return;
-    }
-
-    if (!maxVolunteers) {
-        alert("Please enter the maximum volunteers.");
-        setSaving(false);
-        return;
-    }
-
-    
-    const existingQuery = query(
-    collection(db, "volunteer_posts"),
-    where("postId", "==", post.id),
-    where("status", "==", "open")
-);
-
-const existingSnapshot = await getDocs(existingQuery);
-
-if (!existingSnapshot.empty) {
-
-    alert("This report already has an active volunteer activity.");
-    setSaving(false);
-
-    return;
-
-}
-
     try {
+      if (isEditing) {
+        await updateDoc(doc(db, "volunteer_posts", volunteerPost.id), {
+          title: title.trim(),
+          description: desc.trim(),
+          requirements: cleanedRequirements,
+          locationName: location.trim(),
+          maxVolunteers: Number(maxVolunteers),
+        });
 
-        await addDoc(
-            collection(db, "volunteer_posts"),
-            {
+        alert("Volunteer activity updated!");
+        router.replace("/admin/VolunteerList");
+        return;
+      }
 
-                postId: post.id,
+      const existingSnapshot = await getDocs(
+        query(
+          collection(db, "volunteer_posts"),
+          where("postId", "==", suppliedPost.id),
+          where("status", "==", "open")
+        )
+      );
 
-                title,
+      if (!existingSnapshot.empty) {
+        alert("This report already has an active volunteer activity.");
+        return;
+      }
 
-                description: desc,
+      await addDoc(collection(db, "volunteer_posts"), {
+        postId: suppliedPost.id,
+        title: title.trim(),
+        description: desc.trim(),
+        requirements: cleanedRequirements,
+        imageUrl: suppliedPost.imageUrl || "",
+        firstName: suppliedPost.firstName || "",
+        lastName: suppliedPost.lastName || "",
+        locationName: location.trim(),
+        maxVolunteers: Number(maxVolunteers),
+        joinedCount: 0,
+        volunteers: [],
+        status: "open",
+        createdAt: serverTimestamp(),
+      });
 
-                requirements: requirements.filter(r => r.trim() !== ""),
+      await updateDoc(doc(db, "posts", suppliedPost.id), { status: "ongoing" });
 
-                imageUrl: post.imageUrl,
-
-                firstName: post.firstName,
-
-                lastName: post.lastName,
-
-                locationName: location,
-
-                maxVolunteers: Number(maxVolunteers),
-
-                joinedCount: 0,
-
-                volunteers: [],
-
-                status: "open",
-
-                createdAt: serverTimestamp(),
-
-            }
-        );
-
-        await updateDoc(
-
-    doc(db,"posts",post.id),
-
-    {
-        status:"ongoing",
+      alert("Volunteer activity created!");
+      router.replace("/admin/VolunteerList");
+    } catch (error) {
+      console.error("Unable to save volunteer activity:", error);
+      alert("Something went wrong. Please try again.");
+    } finally {
+      setSaving(false);
     }
+  };
 
-);
+  const addRequirement = () => setRequirements((current) => [...current, ""]);
 
-        alert("Volunteer activity created!");
+  const removeRequirement = (index) => {
+    setRequirements((current) => current.filter((_, requirementIndex) => requirementIndex !== index));
+  };
 
-        setSelectedVolunteerPost(null);
+  const updateRequirement = (text, index) => {
+    setRequirements((current) => current.map((item, itemIndex) => (itemIndex === index ? text : item)));
+  };
 
-   } catch (error) {
+  if (loading) {
+    return <View style={styles.loading}><ActivityIndicator size="large" color="#5F9C76" /></View>;
+  }
 
-    console.log(error);
-
-    alert("Something went wrong.");
-
-    setSaving(false);
-
-}
-
-};
-
-const addRequirement = () => {
-
-    setRequirements([
-        ...requirements,
-        "",
-    ]);
-
-};
-
-const removeRequirement = (index) => {
-
-    const updated = [...requirements];
-
-    updated.splice(index, 1);
-
-    setRequirements(updated);
-
-};
-
-const updateRequirement = (text, index) => {
-
-    const updated = [...requirements];
-
-    updated[index] = text;
-
-    setRequirements(updated);
-
-};
+  const imageUrl = volunteerPost?.imageUrl || suppliedPost?.imageUrl;
 
   return (
     <View style={styles.page}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {/* BACK BUTTON */}
-       <TouchableOpacity
-    style={styles.backBtn}
-    onPress={() => {
-        setSelectedVolunteerPost(null);
-        setSelectedPost(post);
-    }}
->
+        <TouchableOpacity style={styles.backBtn} onPress={goBack} accessibilityLabel="Go back">
           <Image source={require("../../../../assets/images/backG.png")} style={styles.backIcon} />
         </TouchableOpacity>
 
-        {/* MAIN ROW */}
         <View style={[styles.row, { flexDirection: isMobile ? "column" : "row" }]}>
-          {/* LEFT CARD */}
           <View style={[styles.card, { flex: isMobile ? 0 : 1 }]}>
-            <Image
-    source={{ uri: post.imageUrl }}
-    style={[styles.cardImage, { height: isMobile ? 200 : 300 }]}
-    resizeMode="cover"
-/>
+            {imageUrl ? (
+              <Image source={{ uri: imageUrl }} style={[styles.cardImage, { height: isMobile ? 200 : 300 }]} resizeMode="cover" />
+            ) : (
+              <View style={[styles.imagePlaceholder, { height: isMobile ? 200 : 300 }]}>
+                <Ionicons name="image-outline" size={42} color="#71907d" />
+                <Text style={styles.placeholderText}>No image available</Text>
+              </View>
+            )}
           </View>
 
-          {/* RIGHT EDIT FIELDS */}
           <View style={[styles.editSection, { flex: isMobile ? 0 : 1 }]}>
+            <Text style={styles.heading}>{isEditing ? "Edit volunteer activity" : "Create volunteer activity"}</Text>
             <View style={styles.inputBox}>
-              <TextInput placeholder="Title..." value={title} onChangeText={setTitle} style={styles.input} />
-              <Image source={require("../../../../assets/images/edit.png")} style={styles.smallEdit} />
+              <TextInput placeholder="Title" value={title} onChangeText={setTitle} style={styles.input} />
             </View>
             <View style={[styles.inputBox, { minHeight: 100 }]}>
-              <TextInput placeholder="Write something" value={desc} onChangeText={setDesc} multiline style={[styles.input, { minHeight: 100 }]} />
-              <Image source={require("../../../../assets/images/edit.png")} style={styles.smallEdit} />
+              <TextInput placeholder="Write something" value={desc} onChangeText={setDesc} multiline style={[styles.input, { minHeight: 100 }]} textAlignVertical="top" />
             </View>
-<View style={styles.requirementBox}>
 
-    <ScrollView
-        style={{ maxHeight: 130 }}
-        showsVerticalScrollIndicator={false}
-    >
-
-        {requirements.map((item, index) => (
-
-            <View
-                key={index}
-                style={styles.requirementRow}
-            >
-
-                <TextInput
-                    placeholder="Requirement..."
-                    value={item}
-                    onChangeText={(text)=>
-                        updateRequirement(text,index)
-                    }
-                    style={styles.requirementInput}
-                />
-
-                {requirements.length > 1 && (
-
-                    <TouchableOpacity
-                        onPress={() =>
-                            removeRequirement(index)
-                        }
-                    >
-
-                        <Image
-                            source={require("../../../../assets/images/close.png")}
-                            style={styles.requirementIcon}
-                        />
-
+            <View style={styles.requirementBox}>
+              <Text style={styles.fieldLabel}>Requirements</Text>
+              {requirements.map((item, index) => (
+                <View key={`requirement-${index}`} style={styles.requirementRow}>
+                  <TextInput placeholder="Requirement" value={item} onChangeText={(text) => updateRequirement(text, index)} style={styles.requirementInput} />
+                  {requirements.length > 1 && (
+                    <TouchableOpacity onPress={() => removeRequirement(index)} accessibilityLabel="Remove requirement">
+                      <Ionicons name="close-circle" size={22} color="#b94b4b" />
                     </TouchableOpacity>
-
-                )}
-
+                  )}
+                </View>
+              ))}
+              <TouchableOpacity style={styles.addButton} onPress={addRequirement}>
+                <Ionicons name="add-circle-outline" size={22} color="#276344" />
+                <Text style={styles.addButtonText}>Add requirement</Text>
+              </TouchableOpacity>
             </View>
 
-        ))}
-
-    </ScrollView>
-
-    <TouchableOpacity
-        style={styles.addButton}
-        onPress={addRequirement}
-    >
-
-        <Image
-            source={require("../../../../assets/images/plus.png")}
-            style={styles.requirementIcon}
-        />
-
-    </TouchableOpacity>
-
-</View>
-<View style={styles.bottomRow}>
-
-  {/* LOCATION */}
-
-  <View style={[styles.inputBox, { flex: 2 }]}>
-    <Image
-      source={require("../../../../assets/images/location.png")}
-      style={styles.locationIcon}
-    />
-
-    <TextInput
-      placeholder="Location"
-      value={location}
-      onChangeText={setLocation}
-      style={[styles.input, { marginLeft: 8 }]}
-    />
-
-    <Image
-      source={require("../../../../assets/images/edit.png")}
-      style={styles.smallEdit}
-    />
-  </View>
-
-  {/* MAX VOLUNTEERS */}
-
-  <View style={[styles.inputBox, { flex: 1 }]}>
-
-    <Text
-      style={styles.peopleIcon}
-    >
-      <Image
-      source={require("../../../../assets/images/acc.png")}
-      style={styles.smallEdit}
-    />
-    </Text>
-
-<TextInput
-    placeholder="Max Participants"
-    keyboardType="numeric"
-    value={maxVolunteers}
-    onChangeText={(text) => {
-
-        const numbersOnly = text.replace(/[^0-9]/g, "");
-
-        setMaxVolunteers(numbersOnly);
-
-    }}
-    maxLength={2}
-    style={styles.maxVolunteerInput}
-/>
-
-
-  </View>
-
-</View>
+            <View style={styles.bottomRow}>
+              <View style={[styles.inputBox, { flex: 2 }]}>
+                <Ionicons name="location-outline" size={20} color="#276344" />
+                <TextInput placeholder="Location" value={location} onChangeText={setLocation} style={[styles.input, { marginLeft: 8 }]} />
+              </View>
+              <View style={[styles.inputBox, { flex: 1 }]}>
+                <Ionicons name="people-outline" size={20} color="#276344" />
+                <TextInput placeholder="Max" keyboardType="numeric" value={maxVolunteers} onChangeText={(text) => setMaxVolunteers(text.replace(/[^0-9]/g, ""))} maxLength={3} style={styles.maxVolunteerInput} />
+              </View>
+            </View>
           </View>
         </View>
 
-        {/* SAVE BUTTON */}
-        <TouchableOpacity
-    disabled={saving}
-    style={[
-        styles.saveBtn,
-        saving && {
-            opacity:0.6,
-        }
-    ]}
-    onPress={saveVolunteerPost}
->
-          <Text style={styles.saveText}>
-    {saving ? "Saving..." : "Save Changes"}
-</Text>
+        <TouchableOpacity disabled={saving} style={[styles.saveBtn, saving && styles.disabledButton]} onPress={saveVolunteerPost}>
+          <Text style={styles.saveText}>{saving ? "Saving..." : isEditing ? "Save changes" : "Create activity"}</Text>
         </TouchableOpacity>
       </ScrollView>
     </View>
@@ -338,73 +242,29 @@ const updateRequirement = (text, index) => {
 }
 
 const styles = StyleSheet.create({
-
-  requirementBox:{
-    backgroundColor:"#D9D9D9",
-    borderRadius:6,
-    padding:10,
-    minHeight:100,
-},
-
-requirementRow:{
-    flexDirection:"row",
-    alignItems:"center",
-    marginBottom:8,
-},
-
-requirementInput:{
-    flex:1,
-    backgroundColor:"#bdb9b9b7",
-    borderRadius:5, 
-    paddingHorizontal:10,
-    height:40,
-},
-
-requirementIcon:{
-    width:20,
-    height:20,
-    marginLeft:10,
-},
-
-addButton:{
-    alignItems:"flex-end",
-    marginTop:5,
-},
-
-  maxVolunteerInput:{
-    width:125,
-    textAlign:"center",
-    fontWeight:"bold",
-},
-
-  page: { flex: 1 },
+  page: { flex: 1, backgroundColor: "#f5f6f5" },
+  loading: { flex: 1, alignItems: "center", justifyContent: "center" },
   content: { padding: 20, gap: 20 },
-
-  backBtn: { marginBottom: 10 },
+  backBtn: { alignSelf: "flex-start" },
   backIcon: { width: 45, height: 45 },
-
   row: { gap: 20 },
-
-  card: { backgroundColor: "#fff", borderRadius: 10, overflow: 'hidden' },
-  cardImage: { width: "100%", borderRadius: 10 },
-
+  card: { borderRadius: 10, overflow: "hidden" },
+  cardImage: { width: "100%", borderRadius: 10, backgroundColor: "#dfe8e2" },
+  imagePlaceholder: { width: "100%", borderRadius: 10, backgroundColor: "#dfe8e2", alignItems: "center", justifyContent: "center", gap: 8 },
+  placeholderText: { color: "#577061" },
   editSection: { gap: 12 },
-
-  inputBox: { flexDirection: "row", alignItems: "center", backgroundColor: "#D9D9D9", borderRadius: 6, paddingHorizontal: 10, minHeight: 45 },
-  input: { flex: 1, fontSize: 14 },
-
-  smallEdit: { width: 18, height: 18 },
-  locationIcon: { width: 18, height: 18 },
-
-  saveBtn: { marginTop: 20, backgroundColor: "#5F9C76", padding: 15, borderRadius: 8, alignItems: "center" },
-  saveText: { color: "#fff", fontWeight: "bold", fontSize: 16 },
-
-  bottomRow: {
-    flexDirection: "row",
-    gap: 12,
-},
-
-peopleIcon: {
-    fontSize: 18,
-},
+  heading: { fontSize: 20, fontWeight: "700", color: "#1d2b21" },
+  inputBox: { flexDirection: "row", alignItems: "center", backgroundColor: "#fff", borderRadius: 8, paddingHorizontal: 12, minHeight: 48 },
+  input: { flex: 1, fontSize: 15, paddingVertical: 10 },
+  requirementBox: { backgroundColor: "#fff", borderRadius: 8, padding: 12, gap: 8 },
+  fieldLabel: { fontWeight: "700", color: "#1d2b21" },
+  requirementRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  requirementInput: { flex: 1, backgroundColor: "#f1f4f2", borderRadius: 6, paddingHorizontal: 10, height: 42 },
+  addButton: { flexDirection: "row", alignSelf: "flex-start", alignItems: "center", gap: 5, paddingTop: 2 },
+  addButtonText: { color: "#276344", fontWeight: "600" },
+  bottomRow: { flexDirection: "row", gap: 12 },
+  maxVolunteerInput: { flex: 1, textAlign: "center", fontWeight: "700", paddingVertical: 10 },
+  saveBtn: { backgroundColor: "#5F9C76", padding: 15, borderRadius: 8, alignItems: "center" },
+  disabledButton: { opacity: 0.6 },
+  saveText: { color: "#fff", fontWeight: "700", fontSize: 16 },
 });
