@@ -425,26 +425,9 @@ id: post.id,
 
 <Image
   source={{ uri: post.imageUrl }}
-  style={[
-    styles.postImage,
-    imageSizes[post.id] && {
-      aspectRatio:
-        imageSizes[post.id].width /
-        imageSizes[post.id].height,
-    },
-  ]}
+  style={styles.postImage}
   resizeMode="cover"
-  onLoad={() => {
-    Image.getSize(post.imageUrl, (width, height) => {
-      setImageSizes(prev => ({
-        ...prev,
-        [post.id]: { width, height },
-      }));
-    });
-  }}
 />
-
-</TouchableOpacity>
 
 <View
     style={[
@@ -461,6 +444,9 @@ id: post.id,
         },
     ]}
 />
+</TouchableOpacity>
+
+
 
 <View style={styles.actionsContainer}>
 
@@ -668,6 +654,7 @@ locationText: {
 
 imageContainer: {
   width: "100%",
+  height: 250,          // fixed card height
   borderRadius: 10,
   overflow: "hidden",
   backgroundColor: "#ddd",
@@ -675,15 +662,16 @@ imageContainer: {
 
 postImage: {
   width: "100%",
+  height: "100%",
 },
 
-statusDot:{
-    width:25,
-    height:25,
-    borderRadius:30,
-    position:"absolute",
-    right:20,
-    top:90,
+statusDot: {
+  position: "absolute",
+  top: 10,
+  right: 10,
+  width: 24,
+  height: 24,
+  borderRadius: 12,
 },
 
 

@@ -1,19 +1,19 @@
 import {
-  View,
+  SafeAreaView,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
-  SafeAreaView,
+  View,
 } from "react-native";
 
-import React, { useState } from "react";
+import { useState } from "react";
 
 import { Link, useRouter } from "expo-router";
 
 import { createUserWithEmailAndPassword } from "firebase/auth";
 
-import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 
 import { auth, db } from "../firebaseConfig";
 
@@ -24,7 +24,6 @@ const router = useRouter();
 
 const [firstName, setFirstName] = useState("");
 
-const [middleName, setMiddleName] = useState("");
 
 const [lastName, setLastName] = useState("");
 
@@ -137,7 +136,6 @@ const registerUser = async () => {
 
     !firstName.trim() ||
 
-    !middleName.trim() ||
 
     !lastName.trim() ||
 
@@ -283,9 +281,6 @@ const registerUser = async () => {
 
           firstName.trim(),
 
-        middleName:
-
-          middleName.trim(),
 
         lastName:
 
@@ -377,7 +372,6 @@ const registerUser = async () => {
         <View style={styles.formWrapper}>
           <View style={styles.form}>
             <TextInput style={styles.input} value={firstName} onChangeText={setFirstName} placeholder="First Name" />
-            <TextInput style={styles.input} value={middleName} onChangeText={setMiddleName} placeholder="Middle Name" />
             <TextInput style={styles.input} value={lastName} onChangeText={setLastName} placeholder="Last Name" />
             <TextInput style={styles.input} value={email} onChangeText={setEmail} placeholder="Email" />
             <TextInput

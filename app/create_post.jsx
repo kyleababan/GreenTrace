@@ -382,7 +382,7 @@ const createPost = async () => {
         style={styles.imageIcon}
       />
       <Text style={styles.imageText}>
-        Choose Image or Video
+        Choose Image 
       </Text>
     </View>
 
