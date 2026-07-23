@@ -150,9 +150,9 @@ const loadNotifications = async () => {
 {item.type === "comment"
     ? "commented on your post."
 
-    : item.type === "priority"
+    : item.type === "reaction" || item.type === "priority"
 
-    ? "increased your priority."
+    ? "Increased your priority."
 
     : item.message}
 

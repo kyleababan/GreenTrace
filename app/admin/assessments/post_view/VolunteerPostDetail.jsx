@@ -3,7 +3,6 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Image,
   Modal,
   ScrollView,
@@ -13,7 +12,7 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
-import { doc, getDoc, runTransaction } from "firebase/firestore";
+import { doc, getDoc, runTransaction, updateDoc } from "firebase/firestore";
 
 import { db } from "../../../../firebaseConfig";
 
@@ -56,9 +55,11 @@ export default function VolunteerPostDetail({
   const [loadError, setLoadError] = useState("");
   const [showMembers, setShowMembers] = useState(false);
   const [selectedMember, setSelectedMember] = useState(null);
-  const [profileMember, setProfileMember] = useState(null);
   const [removingMemberId, setRemovingMemberId] = useState("");
   const [memberProfiles, setMemberProfiles] = useState({});
+  const [kickDialog, setKickDialog] = useState(null);
+  const [updatingLock, setUpdatingLock] = useState(false);
+  const [startingCleanup, setStartingCleanup] = useState(false);
 
   useEffect(() => {
     if (suppliedPost || !volunteerId) return;
@@ -141,23 +142,96 @@ export default function VolunteerPostDetail({
     });
   };
 
+  const toggleActivityLock = async () => {
+    if (!post?.id || updatingLock) return;
+
+    const nextLocked = !post.isLocked;
+    setUpdatingLock(true);
+    try {
+      await updateDoc(doc(db, "volunteer_posts", post.id), {
+        isLocked: nextLocked,
+      });
+      setPost((currentPost) => ({ ...currentPost, isLocked: nextLocked }));
+    } catch (error) {
+      console.error("Unable to update activity lock:", error);
+      setKickDialog({
+        title: "Unable to update activity",
+        message: "Please try again.",
+      });
+    } finally {
+      setUpdatingLock(false);
+    }
+  };
+
+  const startCleanupOperation = async () => {
+    if (!post?.postId || startingCleanup) {
+      if (!post?.postId) {
+        setKickDialog({
+          title: "Unable to start cleanup",
+          message: "This activity is not linked to a report.",
+        });
+      }
+      return;
+    }
+
+    setStartingCleanup(true);
+    try {
+      await updateDoc(doc(db, "posts", post.postId), { status: "ongoing" });
+      router.replace({
+        pathname: "/admin/assessments/post_view/PostDetail",
+        params: { postId: post.postId },
+      });
+    } catch (error) {
+      console.error("Unable to start cleanup operation:", error);
+      setKickDialog({
+        title: "Unable to start cleanup",
+        message: "Please try again.",
+      });
+      setStartingCleanup(false);
+    }
+  };
+
+  const viewMemberProfile = (member) => {
+    const memberId = getMemberId(member);
+
+    if (!memberId) {
+      setKickDialog({
+        title: "Unable to view profile",
+        message: "This volunteer does not have a user ID.",
+      });
+      return;
+    }
+
+    setShowMembers(false);
+    router.push({
+      pathname: "/admin/assessments/post_view/UserPostDetail",
+      params: { userId: memberId },
+    });
+  };
+
   const confirmKick = (member) => {
     const memberId = getMemberId(member);
     const memberName = getMemberName(member);
 
     if (!memberId) {
-      Alert.alert("Unable to remove", "This volunteer does not have a user ID.");
+      setKickDialog({
+        title: "Unable to remove",
+        message: "This volunteer does not have a user ID.",
+      });
       return;
     }
 
-    Alert.alert("Kick volunteer?", `Remove ${memberName} from this activity?`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Kick",
-        style: "destructive",
-        onPress: () => kickMember(memberId),
-      },
-    ]);
+    setKickDialog({
+      title: "Kick volunteer?",
+      message: `Remove ${memberName} from this activity?`,
+      memberId,
+    });
+  };
+
+  const confirmKickMember = () => {
+    const memberId = kickDialog?.memberId;
+    setKickDialog(null);
+    if (memberId) kickMember(memberId);
   };
 
   const kickMember = async (memberId) => {
@@ -199,7 +273,10 @@ export default function VolunteerPostDetail({
       setSelectedMember(null);
     } catch (error) {
       console.error("Unable to kick volunteer:", error);
-      Alert.alert("Unable to remove", "Please try again.");
+      setKickDialog({
+        title: "Unable to remove",
+        message: "Please try again.",
+      });
     } finally {
       setRemovingMemberId("");
     }
@@ -231,10 +308,21 @@ export default function VolunteerPostDetail({
           <TouchableOpacity style={styles.backBtn} onPress={goBack} accessibilityLabel="Go back">
             <Image source={require("../../../../assets/images/backG.png")} style={styles.backIcon} />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.editButton} onPress={editVolunteerActivity}>
-            <Ionicons name="create-outline" size={19} color="#fff" />
-            <Text style={styles.editButtonText}>Edit</Text>
-          </TouchableOpacity>
+          <View style={styles.adminActions}>
+            <TouchableOpacity
+              style={[styles.lockButton, post.isLocked && styles.lockedButton, updatingLock && styles.disabledAction]}
+              onPress={toggleActivityLock}
+              disabled={updatingLock}
+              accessibilityRole="button"
+              accessibilityLabel={post.isLocked ? "Unlock volunteer activity" : "Lock volunteer activity"}
+            >
+              <Ionicons name={post.isLocked ? "lock-closed" : "lock-open-outline"} size={20} color={post.isLocked ? "#fff" : "#276344"} />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.editButton} onPress={editVolunteerActivity}>
+              <Ionicons name="create-outline" size={19} color="#fff" />
+              <Text style={styles.editButtonText}>Edit</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         <View style={[styles.row, { flexDirection: isMobile ? "column" : "row" }]}>
@@ -288,6 +376,16 @@ export default function VolunteerPostDetail({
               <Ionicons name="location" size={20} color="#276344" />
               <Text style={styles.locationText}>{post.locationName || "Location not specified"}</Text>
             </View>
+
+            <TouchableOpacity
+              style={[styles.startCleanupButton, startingCleanup && styles.disabledAction]}
+              onPress={startCleanupOperation}
+              disabled={startingCleanup}
+              accessibilityRole="button"
+            >
+              <Ionicons name="play-circle-outline" size={21} color="#fff" />
+              <Text style={styles.startCleanupText}>{startingCleanup ? "Starting..." : "Start Clean-up Operation"}</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </ScrollView>
@@ -337,7 +435,7 @@ export default function VolunteerPostDetail({
 
                     {isSelected && (
                       <View style={styles.memberActions}>
-                        <TouchableOpacity style={styles.viewProfileButton} onPress={() => setProfileMember(displayMember)}>
+                        <TouchableOpacity style={styles.viewProfileButton} onPress={() => viewMemberProfile(displayMember)}>
                           <Ionicons name="person-outline" size={18} color="#276344" />
                           <Text style={styles.viewProfileText}>View profile</Text>
                         </TouchableOpacity>
@@ -361,17 +459,39 @@ export default function VolunteerPostDetail({
         </View>
       </Modal>
 
-      <Modal visible={Boolean(profileMember)} transparent animationType="fade" onRequestClose={() => setProfileMember(null)}>
+      <Modal
+        visible={Boolean(kickDialog)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setKickDialog(null)}
+      >
         <View style={styles.modalOverlay}>
-          <View style={styles.profileModal}>
-            <TouchableOpacity style={styles.closeProfile} onPress={() => setProfileMember(null)} accessibilityLabel="Close profile">
-              <Ionicons name="close" size={24} color="#222" />
-            </TouchableOpacity>
-            <View style={styles.profileAvatar}>
-              <Text style={styles.profileInitials}>{initialsFor(getMemberName(profileMember))}</Text>
+          <View style={styles.confirmModal} accessibilityRole="alert">
+            <View style={styles.confirmIcon}>
+              <Ionicons
+                name={kickDialog?.memberId ? "person-remove-outline" : "alert-circle-outline"}
+                size={28}
+                color="#bf3030"
+              />
             </View>
-            <Text style={styles.profileName}>{getMemberName(profileMember)}</Text>
-            <Text style={styles.profileDetail}>{profileMember?.email || "Volunteer"}</Text>
+            <Text style={styles.confirmTitle}>{kickDialog?.title}</Text>
+            <Text style={styles.confirmMessage}>{kickDialog?.message}</Text>
+            <View style={styles.confirmActions}>
+              {kickDialog?.memberId ? (
+                <>
+                  <TouchableOpacity style={styles.cancelButton} onPress={() => setKickDialog(null)}>
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.confirmKickButton} onPress={confirmKickMember}>
+                    <Text style={styles.confirmKickText}>Kick</Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <TouchableOpacity style={styles.okButton} onPress={() => setKickDialog(null)}>
+                  <Text style={styles.okButtonText}>OK</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
         </View>
       </Modal>
@@ -389,6 +509,10 @@ const styles = StyleSheet.create({
   topBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   backBtn: { alignSelf: "flex-start" },
   backIcon: { width: 45, height: 45 },
+  adminActions: { flexDirection: "row", alignItems: "center", gap: 10 },
+  lockButton: { width: 42, height: 42, borderRadius: 8, borderWidth: 1, borderColor: "#5F9C76", backgroundColor: "#e6f0e9", alignItems: "center", justifyContent: "center" },
+  lockedButton: { backgroundColor: "#bf3030", borderColor: "#bf3030" },
+  disabledAction: { opacity: 0.6 },
   editButton: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#5F9C76", paddingHorizontal: 18, paddingVertical: 11, borderRadius: 8 },
   editButtonText: { color: "#fff", fontWeight: "700" },
   row: { gap: 24 },
@@ -409,6 +533,8 @@ const styles = StyleSheet.create({
   mutedText: { color: "#728078" },
   locationBox: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#e0e3e1", padding: 13, borderRadius: 8 },
   locationText: { color: "#243129", flex: 1 },
+  startCleanupButton: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "#276344", padding: 14, borderRadius: 8 },
+  startCleanupText: { color: "#fff", fontWeight: "700", fontSize: 15 },
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center", padding: 20 },
   membersModal: { width: "100%", maxWidth: 520, maxHeight: "80%", backgroundColor: "#fff", borderRadius: 14, padding: 20 },
   modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 },
@@ -427,10 +553,15 @@ const styles = StyleSheet.create({
   kickButton: { flex: 1, flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 5, padding: 10, borderRadius: 7, backgroundColor: "#fff0f0" },
   kickText: { color: "#bf3030", fontWeight: "600" },
   emptyText: { color: "#728078", textAlign: "center", paddingVertical: 24 },
-  profileModal: { width: "100%", maxWidth: 330, backgroundColor: "#fff", borderRadius: 14, padding: 24, alignItems: "center" },
-  closeProfile: { alignSelf: "flex-end" },
-  profileAvatar: { width: 76, height: 76, borderRadius: 38, backgroundColor: "#5F9C76", alignItems: "center", justifyContent: "center", marginTop: -10 },
-  profileInitials: { color: "#fff", fontSize: 24, fontWeight: "700" },
-  profileName: { marginTop: 12, fontSize: 20, fontWeight: "700", color: "#172119" },
-  profileDetail: { marginTop: 4, color: "#63756a" },
+  confirmModal: { width: "100%", maxWidth: 360, backgroundColor: "#fff", borderRadius: 14, padding: 24, alignItems: "center" },
+  confirmIcon: { width: 52, height: 52, borderRadius: 26, backgroundColor: "#fff0f0", alignItems: "center", justifyContent: "center" },
+  confirmTitle: { marginTop: 14, fontSize: 20, fontWeight: "700", color: "#172119", textAlign: "center" },
+  confirmMessage: { marginTop: 8, color: "#63756a", lineHeight: 20, textAlign: "center" },
+  confirmActions: { width: "100%", flexDirection: "row", gap: 10, marginTop: 22 },
+  cancelButton: { flex: 1, alignItems: "center", padding: 12, borderRadius: 8, backgroundColor: "#edf1ee" },
+  cancelButtonText: { color: "#304036", fontWeight: "700" },
+  confirmKickButton: { flex: 1, alignItems: "center", padding: 12, borderRadius: 8, backgroundColor: "#bf3030" },
+  confirmKickText: { color: "#fff", fontWeight: "700" },
+  okButton: { flex: 1, alignItems: "center", padding: 12, borderRadius: 8, backgroundColor: "#5F9C76" },
+  okButtonText: { color: "#fff", fontWeight: "700" },
 });

@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import {
   collection,
   doc,
@@ -8,7 +8,7 @@ import {
   orderBy,
   query,
 } from "firebase/firestore";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   Image,
   ScrollView,
@@ -26,11 +26,7 @@ export default function VolunteerList({ setActivePage }) {
   const [posts, setPosts] = useState([]);
 const [search, setSearch] = useState("");
 
-useEffect(() => {
-    loadVolunteerPosts();
-}, []);
-
-const loadVolunteerPosts = async () => {
+const loadVolunteerPosts = useCallback(async () => {
 
     try {
 
@@ -72,7 +68,13 @@ const loadVolunteerPosts = async () => {
 
     }
 
-};
+}, []);
+
+useFocusEffect(
+    useCallback(() => {
+        loadVolunteerPosts();
+    }, [loadVolunteerPosts])
+);
 
 const filteredPosts = useMemo(() => {
 

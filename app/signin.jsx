@@ -1,147 +1,145 @@
 import { useState } from "react";
+import { Ionicons } from "@expo/vector-icons";
 
 import {
+  Image,
+  Modal,
   SafeAreaView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  View
+  View,
 } from "react-native";
-
 
 import { Link, useRouter } from "expo-router";
 
-import { signInWithEmailAndPassword } from "firebase/auth";
+import { sendPasswordResetEmail, signInWithEmailAndPassword, signOut } from "firebase/auth";
 
 import { doc, getDoc } from "firebase/firestore";
 
 import { auth, db } from "../firebaseConfig";
 
-
 export default function Login() {
-  const router = useRouter(); 
-  const [email,setEmail] = useState("");
+  const router = useRouter();
+  const [email, setEmail] = useState("");
 
-const [password,setPassword] = useState("");
+  const [password, setPassword] = useState("");
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [showResetSentModal, setShowResetSentModal] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
+  const [sendingResetEmail, setSendingResetEmail] = useState(false);
+  const [loggingIn, setLoggingIn] = useState(false);
+  const [banReason, setBanReason] = useState("");
+  const [showBannedModal, setShowBannedModal] = useState(false);
 
-const loginUser = async () => {
+  const openResetModal = () => {
+    setResetEmail(email.trim());
+    setShowResetModal(true);
+  };
 
-  if (!email.trim()) {
+  const sendResetEmail = async () => {
+    const normalizedEmail = resetEmail.trim();
 
-    alert("Please enter your email");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      alert("Enter a valid email address.");
+      return;
+    }
 
-    return;
+    setSendingResetEmail(true);
 
-  }
+    try {
+      await sendPasswordResetEmail(auth, normalizedEmail);
+      setResetEmail(normalizedEmail);
+      setShowResetModal(false);
+      setShowResetSentModal(true);
+    } catch (error) {
+      console.log("Unable to send password reset email:", error);
+      alert("We couldn't send a reset email. Please check the address and try again.");
+    } finally {
+      setSendingResetEmail(false);
+    }
+  };
 
-  if (!password.trim()) {
+  const loginUser = async () => {
+    if (loggingIn) return;
 
-    alert("Please enter your password");
+    if (!email.trim()) {
+      alert("Please enter your email");
 
-    return;
+      return;
+    }
+    //sd
+    if (!password.trim()) {
+      alert("Please enter your password");
 
-  }
+      return;
+    }
 
-  try {
+    setLoggingIn(true);
 
-    const userCredential =
-
-      await signInWithEmailAndPassword(
-
+    try {
+      const userCredential = await signInWithEmailAndPassword(
         auth,
 
         email,
 
-        password
-
+        password,
       );
 
-    const uid =
+      const uid = userCredential.user.uid;
 
-      userCredential.user.uid;
+      const userRef = doc(db, "users", uid);
 
-    const userRef =
+      const userSnap = await getDoc(userRef);
 
-      doc(db, "users", uid);
+      if (!userSnap.exists()) {
+        await signOut(auth);
+        alert("User data not found");
 
-    const userSnap =
+        return;
+      }
 
-      await getDoc(userRef);
+      const userData = userSnap.data();
 
-    if (!userSnap.exists()) {
+      if (userData.isBanned) {
+        await signOut(auth);
+        setBanReason(userData.banReason || "No reason was provided.");
+        setShowBannedModal(true);
+        return;
+      }
 
-      alert("User data not found");
-
-      return;
-
+      if (userData.role === "admin") {
+        router.replace("/admin/dashboard");
+      } else {
+        router.replace("/home");
+      }
+    } catch (_error) {
+      alert("Invalid email or password");
+    } finally {
+      setLoggingIn(false);
     }
-
-    const userData =
-
-      userSnap.data();
-
-    if (
-
-      userData.role === "admin"
-
-    ) {
-
-      router.replace(
-
-        "/admin/dashboard"
-
-      );
-
-    }
-
-    else {
-
-      router.replace(
-
-        "/home"
-
-      );
-
-    }
-
-  }
-
-  catch (error) {
-
-    alert(
-
-      "Invalid email or password"
-
-    );
-
-  }
-
-};
+  };
   return (
-    
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
-
-       
-
         {/* Welcome Text */}
         <View style={styles.welcome}>
-           {/* Logo + App Name (Row) */}
-        <View style={styles.header}>
-          {/* <Image
+          {/* Logo + App Name (Row) */}
+          <View style={styles.header}>
+            {/* <Image
                       source={require("../assets/images/minicon.png")}
                       style={styles.logo}
                   /> */}
-          <View style={styles.logo} />
-          
-          <View style={styles.logoText}>
-            <Text style={styles.appName}>GreenTrace</Text>
-            <Text style={styles.tagline}>
-              What we do today shapes tomorrow’s green.
-            </Text>
+            <View style={styles.logo} />
+
+            <View style={styles.logoText}>
+              <Text style={styles.appName}>GreenTrace</Text>
+              <Text style={styles.tagline}>
+                What we do today shapes tomorrow’s green.
+              </Text>
+            </View>
           </View>
-        </View>
           <Text style={styles.welcomeTitle}>Welcome to GreenTrace</Text>
           <Text style={styles.welcomeSubtitle}>
             Act Now for a Greener Tomorrow
@@ -168,25 +166,122 @@ const loginUser = async () => {
               style={styles.input}
             />
 
-            
-
-<TouchableOpacity
-  style={styles.button}
-  onPress={loginUser}
->
-  <Text style={styles.buttonText}>LOG IN</Text>
-</TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.button, loggingIn && styles.disabledButton]}
+              onPress={loginUser}
+              disabled={loggingIn}
+            >
+              <Text style={styles.buttonText}>
+                {loggingIn ? "Logging in..." : "LOG IN"}
+              </Text>
+            </TouchableOpacity>
 
             <Text style={styles.signupText}>
-  Don’t have an account?{" "}
-  <Link href="/signup" asChild>
-    <Text style={styles.signupLink}>Sign Up</Text>
-  </Link>
-</Text>
+              Don’t have an account?{" "}
+              <Link href="/signup" asChild>
+                <Text style={styles.signupLink}>Sign Up</Text>
+              </Link>
+            </Text>
+
+            <TouchableOpacity onPress={openResetModal}>
+              <Text style={styles.forgotPasswordLink}>Forgot password?</Text>
+            </TouchableOpacity>
           </View>
         </View>
-
       </View>
+
+      <Modal
+        visible={showResetModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowResetModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <TouchableOpacity
+              style={styles.modalBackButton}
+              onPress={() => setShowResetModal(false)}
+              accessibilityLabel="Close password reset"
+            >
+              <Image
+                source={require("../assets/images/backG.png")}
+                style={styles.modalBackIcon}
+              />
+            </TouchableOpacity>
+
+            <Text style={styles.modalTitle}>Reset password</Text>
+            <Text style={styles.modalDescription}>
+              Confirm the email address registered to your GreenTrace account.
+            </Text>
+
+            <TextInput
+              placeholder="Email address"
+              placeholderTextColor="#888"
+              style={styles.modalInput}
+              value={resetEmail}
+              onChangeText={setResetEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+
+            <TouchableOpacity
+              style={[styles.modalPrimaryButton, sendingResetEmail && styles.disabledButton]}
+              onPress={sendResetEmail}
+              disabled={sendingResetEmail}
+            >
+              <Text style={styles.modalPrimaryButtonText}>
+                {sendingResetEmail ? "SENDING..." : "SEND RESET EMAIL"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showResetSentModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowResetSentModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Image
+              source={require("../assets/images/backG.png")}
+              style={styles.modalSuccessIcon}
+            />
+            <Text style={styles.modalTitle}>Check your inbox</Text>
+            <Text style={styles.modalDescription}>
+              A password reset email has been sent to {resetEmail}. Check your spam folder too.
+            </Text>
+
+            <TouchableOpacity
+              style={styles.modalPrimaryButton}
+              onPress={() => setShowResetSentModal(false)}
+            >
+              <Text style={styles.modalPrimaryButtonText}>CLOSE</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showBannedModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowBannedModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard} accessibilityRole="alert">
+            <Ionicons name="ban-outline" size={52} color="#bf3030" style={styles.bannedIcon} />
+            <Text style={styles.bannedTitle}>Your account is banned</Text>
+            <Text style={styles.modalDescription}>Reason: {banReason}</Text>
+            <TouchableOpacity style={styles.modalPrimaryButton} onPress={() => setShowBannedModal(false)}>
+              <Text style={styles.modalPrimaryButtonText}>CLOSE</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -208,7 +303,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 32,
   },
-  logo:{
+  logo: {
     width: 60,
     height: 60,
     marginRight: 20,
@@ -282,4 +377,78 @@ const styles = StyleSheet.create({
   signupLink: {
     fontWeight: "700",
   },
+  forgotPasswordLink: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 12,
+    textAlign: "center",
+  },
+  modalOverlay: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.45)",
+    padding: 24,
+  },
+  modalCard: {
+    width: "100%",
+    maxWidth: 360,
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
+    padding: 24,
+  },
+  modalBackButton: {
+    alignSelf: "flex-start",
+    marginBottom: 12,
+  },
+  modalBackIcon: {
+    width: 42,
+    height: 42,
+  },
+  modalSuccessIcon: {
+    width: 52,
+    height: 52,
+    alignSelf: "center",
+    marginBottom: 14,
+  },
+  modalTitle: {
+    color: "#276749",
+    fontSize: 22,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  modalDescription: {
+    color: "#555",
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 10,
+    textAlign: "center",
+  },
+  modalInput: {
+    borderColor: "#D4DDD7",
+    borderRadius: 8,
+    borderWidth: 1,
+    fontSize: 14,
+    marginTop: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  modalPrimaryButton: {
+    alignItems: "center",
+    backgroundColor: "#5F9C76",
+    borderRadius: 8,
+    marginTop: 18,
+    paddingVertical: 13,
+  },
+  modalPrimaryButtonText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  disabledButton: {
+    opacity: 0.6,
+  },
+  bannedIcon: { alignSelf: "center", marginBottom: 12 },
+  bannedTitle: { color: "#bf3030", fontSize: 22, fontWeight: "700", textAlign: "center" },
 });

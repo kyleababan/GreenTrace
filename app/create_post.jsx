@@ -1,6 +1,6 @@
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import { useEffect, useState } from 'react';
+import { useEffect, useState } from "react";
 import {
   Image,
   Modal,
@@ -8,7 +8,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View
+  View,
 } from "react-native";
 import Navbar from "../components/navbar";
 
@@ -27,46 +27,27 @@ import {
 } from "firebase/firestore";
 
 export default function CreateReport() {
-
-  
-
   useEffect(() => {
+    const loadUser = async () => {
+      try {
+        const currentUser = auth.currentUser;
 
-  const loadUser = async () => {
+        if (!currentUser) return;
 
-    try {
+        const userSnap = await getDoc(doc(db, "users", currentUser.uid));
 
-      const currentUser = auth.currentUser;
+        if (userSnap.exists()) {
+          const data = userSnap.data();
 
-      if (!currentUser) return;
-
-      const userSnap = await getDoc(
-        doc(db, "users", currentUser.uid)
-      );
-
-      if (userSnap.exists()) {
-
-        const data = userSnap.data();
-
-        setUserName(
-          `${data.firstName} ${data.lastName}`
-        );
-
+          setUserName(`${data.firstName} ${data.lastName}`);
+        }
+      } catch (error) {
+        console.log(error);
       }
+    };
 
-    }
-
-    catch (error) {
-
-      console.log(error);
-
-    }
-
-  };
-
-  loadUser();
-
-}, []);
+    loadUser();
+  }, []);
 
   const [uploading, setUploading] = useState(false);
 
@@ -75,211 +56,160 @@ export default function CreateReport() {
   const [status, setStatus] = useState("red");
   const [caption, setCaption] = useState("");
 
-const [image, setImage] = useState(null);
+  const [image, setImage] = useState(null);
 
+  const [locationModalVisible, setLocationModalVisible] = useState(false);
+  const [manualLocation, setManualLocation] = useState("");
+  const [manualLocationModal, setManualLocationModal] = useState(false);
+  const [locationName, setLocationName] = useState("");
 
-const [locationModalVisible, setLocationModalVisible] = useState(false);
-const [manualLocation, setManualLocation] = useState("");
-const [manualLocationModal, setManualLocationModal] = useState(false);
-const [locationName, setLocationName] =
-  useState("Set Location...");
+  const pickImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      quality: 0.8,
+      allowsEditing: true,
+    });
 
-const pickImage = async () => {
-  const result = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: ["images"],
-    quality: 0.8,
-    allowsEditing: true,
-  });
+    if (result.canceled) return;
 
-  if (result.canceled) return;
+    const asset = result.assets[0];
 
-  const asset = result.assets[0];
-
-  // Reject videos
-  if (asset.type === "video") {
-    alert("Videos are not supported.");
-    return;
-  }
-
-  // 2.5 MB limit
-  if (asset.fileSize && asset.fileSize > 2.5 * 1024 * 1024) {
-    alert("Image must be smaller than 2.5 MB.");
-    return;
-  }
-
-  setImage(asset);
-};
-
-const getCurrentLocation = async () => {
-
-  try {
-
-    const { status } =
-      await Location.requestForegroundPermissionsAsync();
-
-    if (status !== "granted") {
-
-      alert("Location permission denied");
-
+    // Reject videos
+    if (asset.type === "video") {
+      alert("Videos are not supported.");
       return;
-
     }
 
-    const location =
-      await Location.getCurrentPositionAsync({});
+    // 2.5 MB limit
+    if (asset.fileSize && asset.fileSize > 2.5 * 1024 * 1024) {
+      alert("Image must be smaller than 2.5 MB.");
+      return;
+    }
 
-    const address =
-      await Location.reverseGeocodeAsync({
+    setImage(asset);
+  };
 
-        latitude:
-          location.coords.latitude,
+  const getCurrentLocation = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
 
-        longitude:
-          location.coords.longitude,
+      if (status !== "granted") {
+        alert("Location permission denied");
 
+        return;
+      }
+
+      const location = await Location.getCurrentPositionAsync({});
+
+      const address = await Location.reverseGeocodeAsync({
+        latitude: location.coords.latitude,
+
+        longitude: location.coords.longitude,
       });
 
-    if (address.length > 0) {
-
+      if (address.length > 0) {
         const place = [
-  address[0].name,
-  address[0].street,
-  address[0].district,
-  address[0].subregion,
-  address[0].city,
-]
-.filter(Boolean)
-.join(", ");
+          address[0].name,
+          address[0].street,
+          address[0].district,
+          address[0].subregion,
+          address[0].city,
+        ]
+          .filter(Boolean)
+          .join(", ");
 
-      setLocationName(place);
-
+        setLocationName(place);
+      }
+    } catch (error) {
+      console.log(error);
     }
+  };
 
-  }
-
-  catch (error) {
-
-    console.log(error);
-
-  }
-
-};
-
-const createPost = async () => {
-  if (uploading) return;
-  try {
-    setUploading(true);
+  const createPost = async () => {
+    if (uploading) return;
     if (!caption.trim()) {
-
       alert("Caption is required");
 
       return;
-
     }
 
     if (!image) {
-
       alert("Please select an image");
 
       return;
-
     }
 
-    const currentUser = auth.currentUser;
-
-    if (!currentUser) {
-
-      alert("User not logged in");
+    if (!locationName.trim()) {
+      alert("Please set a location before posting.");
 
       return;
-
     }
 
-    const userSnap =
-      await getDoc(
-        doc(
-          db,
-          "users",
-          currentUser.uid
-        )
+    try {
+      setUploading(true);
+
+      const currentUser = auth.currentUser;
+
+      if (!currentUser) {
+        alert("User not logged in");
+
+        return;
+      }
+
+      const userSnap = await getDoc(doc(db, "users", currentUser.uid));
+
+      const userData = userSnap.data();
+
+      const imageUrl = await uploadToCloudinary(image);
+
+      await addDoc(
+        collection(db, "posts"),
+
+        {
+          userId: currentUser.uid,
+
+          firstName: userData.firstName,
+
+          lastName: userData.lastName,
+
+          points: userData.points || 0,
+
+          caption,
+
+          imageUrl,
+
+          locationName,
+
+          status: status === "red" ? "critical" : "moderate",
+
+          reactionCount: 0,
+
+          commentCount: 0,
+
+          createdAt: serverTimestamp(),
+        },
       );
 
-    const userData =
-      userSnap.data();
+      alert("Post created");
 
-    const imageUrl = await uploadToCloudinary(image);
+      router.replace("/home");
+    } catch (error) {
+      console.log(error);
 
-
-
-    await addDoc(
-      collection(db, "posts"),
-
-      {
-
-        userId:
-          currentUser.uid,
-
-        firstName:
-          userData.firstName,
-
-        lastName:
-          userData.lastName,
-
-        points:
-          userData.points || 0,
-
-        caption,
-
-        imageUrl,
-
-        locationName,
-
-        status:
-          status === "red"
-            ? "critical"
-            : "moderate",
-
-        reactionCount: 0,
-
-        commentCount: 0,
-
-        createdAt:
-          serverTimestamp(),
-
-      }
-    );
-
-    alert("Post created");
-
-    router.replace("/home");
-
-  }
-
-  catch (error) {
-
-    console.log(error);
-
-    alert(error.message);
-
-  }
-
-  finally {
-  setUploading(false);
-}
-
-};
+      alert(error.message);
+    } finally {
+      setUploading(false);
+    }
+  };
 
   return (
     <View style={styles.wrapper}>
       <View style={styles.container}>
-
         {/* CONTENT WRAPPER */}
         <View style={styles.contentWrapper}>
-
           {/* HEADER */}
           <View style={styles.topSection}>
             <View style={styles.headerRow}>
-              
               <TouchableOpacity onPress={() => router.back()}>
                 <Image
                   source={require("../assets/images/close.png")}
@@ -293,7 +223,6 @@ const createPost = async () => {
 
           {/* MAIN CONTENT */}
           <View style={styles.content}>
-
             {/* USER + POST BUTTON */}
             <View style={styles.userRow}>
               <View style={styles.userInfo}>
@@ -301,208 +230,179 @@ const createPost = async () => {
                   source={require("../assets/images/profile2.png")}
                   style={styles.avatar}
                 />
-                <Text style={styles.username}>
-  {userName}
-</Text>
+                <Text style={styles.username}>{userName}</Text>
               </View>
 
               <TouchableOpacity
-  style={[
-    styles.postButton,
-    uploading && { opacity: 0.6 },
-  ]}
-  onPress={createPost}
-  disabled={uploading}
->
+                style={[styles.postButton, uploading && { opacity: 0.6 }]}
+                onPress={createPost}
+                disabled={uploading}
+              >
                 <Text style={styles.postText}>
-  {uploading ? "POSTING..." : "POST"}
-</Text>
+                  {uploading ? "POSTING..." : "POST"}
+                </Text>
               </TouchableOpacity>
             </View>
 
             {/* LOCATION */}
             <TouchableOpacity
-  style={styles.locationRow}
-  onPress={() => setLocationModalVisible(true)}
->
+              style={styles.locationRow}
+              onPress={() => setLocationModalVisible(true)}
+            >
               <Image
                 source={require("../assets/images/location.png")}
                 style={styles.locationIcon}
               />
               <Text style={styles.locationText}>
-  {locationName}
-</Text>
+                {locationName || "Set Location..."}
+              </Text>
             </TouchableOpacity>
 
             {/* CAPTION */}
             <TextInput
-  placeholder="Write Something..."
-  multiline
-  style={styles.captionInput}
-  value={caption}
-  onChangeText={setCaption}
-/>
+              placeholder="Write Something..."
+              multiline
+              style={styles.captionInput}
+              value={caption}
+              onChangeText={setCaption}
+            />
 
             {/* IMAGE PICKER */}
-            <TouchableOpacity
-  style={styles.imageBox}
-  onPress={pickImage}
->
-              
+            <TouchableOpacity style={styles.imageBox} onPress={pickImage}>
               {/* STATUS DOT */}
               <TouchableOpacity
-  onPress={() =>
-    setStatus(status === "red" ? "yellow" : "red")
-  }
-  style={[
-    styles.statusDot,
-    status === "red"
-      ? styles.statusRed
-      : styles.statusYellow,
-  ]}
-/>
+                onPress={() => setStatus(status === "red" ? "yellow" : "red")}
+                style={[
+                  styles.statusDot,
+                  status === "red" ? styles.statusRed : styles.statusYellow,
+                ]}
+              />
 
-  {image ? (
-
-    <Image
-  source={{ uri: image.uri }}
-  style={{
-    width: "100%",
-    height: "100%",
-    borderRadius: 10,
-  }}
-  resizeMode="cover"
-/>
-
-  ) : (
-
-    <View style={styles.imagePlaceholderContent}>
-      <Image
-        source={require("../assets/images/image.png")}
-        style={styles.imageIcon}
-      />
-      <Text style={styles.imageText}>
-        Choose Image 
-      </Text>
-    </View>
-
-  )}
-
-</TouchableOpacity>
-
+              {image ? (
+                <Image
+                  source={{ uri: image.uri }}
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    borderRadius: 10,
+                  }}
+                  resizeMode="cover"
+                />
+              ) : (
+                <View style={styles.imagePlaceholderContent}>
+                  <Image
+                    source={require("../assets/images/image.png")}
+                    style={styles.imageIcon}
+                  />
+                  <Text style={styles.imageText}>Choose Image</Text>
+                </View>
+              )}
+            </TouchableOpacity>
           </View>
         </View>
 
         {/* NAVBAR (ALWAYS AT BOTTOM) */}
-        <Modal
-  visible={locationModalVisible}
-  transparent
-  animationType="fade"
->
-  <View style={styles.modalBackground}>
-    <View style={styles.modalBox}>
+        <Modal visible={locationModalVisible} transparent animationType="fade">
+          <View style={styles.modalBackground}>
+            <View style={styles.modalBox}>
+              <Text style={styles.modalTitle}>Choose Location</Text>
 
-      <Text style={styles.modalTitle}>
-        Choose Location
-      </Text>
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={() => {
+                  setLocationModalVisible(false);
+                  getCurrentLocation();
+                }}
+              >
+                <View style={styles.modalButtonContent}>
+                  <Image
+                    source={require("../assets/images/location.png")}
+                    style={styles.locationIcon}
+                  />
+                  <Text>Use Current GPS</Text>
+                </View>
+              </TouchableOpacity>
 
-      <TouchableOpacity
-        style={styles.modalButton}
-        onPress={() => {
-          setLocationModalVisible(false);
-          getCurrentLocation();
-        }}
-      >
-        <Text>📍 Use Current GPS</Text>
-      </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={() => {
+                  setLocationModalVisible(false);
+                  setManualLocationModal(true);
+                }}
+              >
+                <View style={styles.modalButtonContent}>
+                  <Image
+                    source={require("../assets/images/editlabel.png")}
+                    style={styles.editIcon}
+                  />
+                  <Text>Type Manually</Text>
+                </View>
+              </TouchableOpacity>
 
-      <TouchableOpacity
-        style={styles.modalButton}
-        onPress={() => {
-          setLocationModalVisible(false);
-          setManualLocationModal(true);
-        }}
-      >
-        <Text>✏ Type Manually</Text>
-      </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalCancel}
+                onPress={() => setLocationModalVisible(false)}
+              >
+                <Text>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
 
-      <TouchableOpacity
-        style={styles.modalCancel}
-        onPress={() => setLocationModalVisible(false)}
-      >
-        <Text>Cancel</Text>
-      </TouchableOpacity>
+        <Modal visible={manualLocationModal} transparent animationType="fade">
+          <View style={styles.modalBackground}>
+            <View style={styles.modalBox}>
+              <Text style={styles.modalTitle}>Enter Location</Text>
 
-    </View>
-  </View>
-</Modal>
+              <TextInput
+                placeholder="Example: Poblacion, Pinamungajan"
+                value={manualLocation}
+                onChangeText={setManualLocation}
+                style={styles.manualInput}
+              />
 
-<Modal
-  visible={manualLocationModal}
-  transparent
-  animationType="fade"
->
-  <View style={styles.modalBackground}>
-    <View style={styles.modalBox}>
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={() => {
+                  if (manualLocation.trim()) {
+                    setLocationName(manualLocation);
+                  }
 
-      <Text style={styles.modalTitle}>
-        Enter Location
-      </Text>
+                  setManualLocation("");
+                  setManualLocationModal(false);
+                }}
+              >
+                <Text>Save</Text>
+              </TouchableOpacity>
 
-      <TextInput
-        placeholder="Example: Poblacion, Pinamungajan"
-        value={manualLocation}
-        onChangeText={setManualLocation}
-        style={styles.manualInput}
-      />
-
-      <TouchableOpacity
-        style={styles.modalButton}
-        onPress={() => {
-
-          if (manualLocation.trim()) {
-            setLocationName(manualLocation);
-          }
-
-          setManualLocation("");
-          setManualLocationModal(false);
-
-        }}
-      >
-        <Text>Save</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        style={styles.modalCancel}
-        onPress={() => setManualLocationModal(false)}
-      >
-        <Text>Cancel</Text>
-      </TouchableOpacity>
-
-    </View>
-  </View>
-</Modal>
+              <TouchableOpacity
+                style={styles.modalCancel}
+                onPress={() => setManualLocationModal(false)}
+              >
+                <Text>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
         <View style={styles.navbarContainer}>
           <Navbar />
         </View>
-
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-
   contentWrapper: {
-  flex: 1, // 👈 THIS PUSHES NAVBAR DOWN
-},
+    flex: 1, // 👈 THIS PUSHES NAVBAR DOWN
+  },
 
-navbarContainer: {
-  borderTopWidth: 1,
-  borderColor: "#ddd",
-  backgroundColor: "#fff",
-},
-    
+  navbarContainer: {
+    borderTopWidth: 1,
+    borderColor: "#ddd",
+    backgroundColor: "#fff",
+  },
+
   wrapper: {
     flex: 1,
     alignItems: "center",
@@ -590,6 +490,11 @@ navbarContainer: {
     height: 16,
     marginRight: 5,
   },
+  editIcon: {
+    width: 18,
+    height: 18,
+    marginRight: 5,
+  },
 
   locationText: {
     color: "#555",
@@ -630,64 +535,70 @@ navbarContainer: {
   },
 
   statusDot: {
-  width: 30,
-  height: 30,
-  borderRadius: 20,
-  position: "absolute",
-  top: 10,
-  right: 10,
+    width: 30,
+    height: 30,
+    borderRadius: 20,
+    position: "absolute",
+    top: 10,
+    right: 10,
 
-  zIndex: 999,
-  elevation: 999,
-},
-    
-statusRed: {
-  backgroundColor: "red",
-},
+    zIndex: 999,
+    elevation: 999,
+  },
 
-statusYellow: {
-  backgroundColor: "yellow",
-},
+  statusRed: {
+    backgroundColor: "red",
+  },
 
-modalBackground: {
-  flex: 1,
-  justifyContent: "center",
-  alignItems: "center",
-  backgroundColor: "rgba(0,0,0,0.4)",
-},
+  statusYellow: {
+    backgroundColor: "yellow",
+  },
 
-modalBox: {
-  width: "85%",
-  backgroundColor: "#fff",
-  borderRadius: 10,
-  padding: 20,
-},
+  modalBackground: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.4)",
+  },
 
-modalTitle: {
-  fontSize: 18,
-  fontWeight: "bold",
-  marginBottom: 15,
-},
+  modalBox: {
+    width: "80%",
+    maxWidth: 760,
+    backgroundColor: "#fff",
+    borderRadius: 10,
+    padding: 20,
+  },
 
-modalButton: {
-  backgroundColor: "#5F9C76",
-  padding: 12,
-  borderRadius: 8,
-  marginTop: 10,
-  alignItems: "center",
-},
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    marginBottom: 15,
+  },
 
-modalCancel: {
-  padding: 12,
-  alignItems: "center",
-  marginTop: 10,
-},
+  modalButton: {
+    backgroundColor: "#5F9C76",
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 10,
+    alignItems: "center",
+  },
 
-manualInput: {
-  borderWidth: 1,
-  borderColor: "#ccc",
-  borderRadius: 8,
-  padding: 10,
-},
+  modalButtonContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+  },
 
+  modalCancel: {
+    padding: 12,
+    alignItems: "center",
+    marginTop: 10,
+  },
+
+  manualInput: {
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderRadius: 8,
+    padding: 10,
+  },
 });

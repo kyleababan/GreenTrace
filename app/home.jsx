@@ -1,6 +1,15 @@
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
-import { Animated, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, } from "react-native";
+import {
+  Animated,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import Navbar from "../components/navbar";
 
 import {
@@ -21,13 +30,40 @@ import {
 
 import { auth, db } from "../firebaseConfig";
 
+const formatRelativeTime = (timestamp, now) => {
+  if (!timestamp) return "Just now";
+
+  const date =
+    typeof timestamp.toDate === "function"
+      ? timestamp.toDate()
+      : new Date(timestamp);
+
+  if (Number.isNaN(date.getTime())) return "Just now";
+
+  const seconds = Math.max(0, Math.floor((now - date.getTime()) / 1000));
+
+  let relativeTime;
+
+  if (seconds < 60) relativeTime = `${seconds}s`;
+  else if (seconds < 60 * 60) relativeTime = `${Math.floor(seconds / 60)}m`;
+  else if (seconds < 24 * 60 * 60)
+    relativeTime = `${Math.floor(seconds / (60 * 60))}h`;
+  else relativeTime = `${Math.floor(seconds / (24 * 60 * 60))}d`;
+
+  const dateLabel = date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+
+  return `${dateLabel} • ${relativeTime}`;
+};
 
 export default function Home() {
-
   const router = useRouter();
 
   const [imageSizes, setImageSizes] = useState({});
-  
+
   const [posts, setPosts] = useState([]);
 
   const [search, setSearch] = useState("");
@@ -40,510 +76,446 @@ export default function Home() {
 
   const [currentUserData, setCurrentUserData] = useState(null);
 
-  const [reactionLoading, setReactionLoading] = useState(false);
+  // Points belong to the user record. Posts only contain the value that existed
+  // when they were created, so keep a live lookup for the feed.
+  const [authorPoints, setAuthorPoints] = useState({});
 
+  const [reactionLoadingByPost, setReactionLoadingByPost] = useState({});
 
+  const [now, setNow] = useState(() => Date.now());
 
-const loadCurrentUser = async () => {
-
+  const loadCurrentUser = async () => {
     const currentUser = auth.currentUser;
 
     if (!currentUser) return;
 
     try {
+      const snapshot = await getDoc(doc(db, "users", currentUser.uid));
 
-        const snapshot = await getDoc(
-            doc(db, "users", currentUser.uid)
-        );
-
-        if (snapshot.exists()) {
-
-            setCurrentUserData(snapshot.data());
-
-        }
-
+      if (snapshot.exists()) {
+        setCurrentUserData(snapshot.data());
+      }
     } catch (error) {
-
-        console.log(error);
-
+      console.log(error);
     }
+  };
 
-};
-
-
-useEffect(() => {
-
+  useEffect(() => {
     const unsubscribe = loadPosts();
+    const unsubscribeUsers = onSnapshot(collection(db, "users"), (snapshot) => {
+      const pointsByUserId = {};
+
+      snapshot.forEach((userDocument) => {
+        pointsByUserId[userDocument.id] = userDocument.data().points ?? 0;
+      });
+
+      setAuthorPoints(pointsByUserId);
+    });
 
     loadUserReactions();
     loadCurrentUser();
 
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+      unsubscribeUsers();
+    };
 
-// The post subscription is initialized once when the Home screen mounts.
-// eslint-disable-next-line react-hooks/exhaustive-deps
-}, []);
+    // The post subscription is initialized once when the Home screen mounts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-const loadUserReactions = async () => {
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30 * 1000);
 
-  const currentUser = auth.currentUser;
+    return () => clearInterval(timer);
+  }, []);
 
-  if (!currentUser) return;
-
-  const q = query(
-    collection(db, "post_reactions"),
-    where("userId", "==", currentUser.uid)
-  );
-
-  const snapshot = await getDocs(q);
-
-  const reacted = {};
-
-  snapshot.forEach(doc => {
-    reacted[doc.data().postId] = doc.id;
-  });
-
-  setUserReactions(reacted);
-
-};
-
-const playReactionAnimation = (postId) => {
-  const scale = animations[postId];
-
-  if (!scale) return;
-
-  Animated.sequence([
-    Animated.timing(scale, {
-      toValue: 1.35,
-      duration: 120,
-      useNativeDriver: true,
-    }),
-    Animated.timing(scale, {
-      toValue: 0.9,
-      duration: 80,
-      useNativeDriver: true,
-    }),
-    Animated.spring(scale, {
-      toValue: 1,
-      friction: 4,
-      useNativeDriver: true,
-    }),
-  ]).start();
-};
-
-const toggleReaction = async (postId) => {
-
-  if (reactionLoading) return;
-
-  setReactionLoading(true);
-
-  playReactionAnimation(postId);
-
-  try {
-
+  const loadUserReactions = async () => {
     const currentUser = auth.currentUser;
 
     if (!currentUser) return;
 
-    const postRef = doc(db, "posts", postId);
+    const q = query(
+      collection(db, "post_reactions"),
+      where("userId", "==", currentUser.uid),
+    );
 
-    if (userReactions[postId]) {
+    const snapshot = await getDocs(q);
 
-      await deleteDoc(
-        doc(db, "post_reactions", userReactions[postId])
-      );
+    const reacted = {};
 
-      await updateDoc(postRef, {
-        reactionCount: increment(-1),
-      });
+    snapshot.forEach((doc) => {
+      reacted[doc.data().postId] = doc.id;
+    });
 
-      const updated = { ...userReactions };
+    setUserReactions(reacted);
+  };
 
-      delete updated[postId];
+  const playReactionAnimation = (postId) => {
+    const scale = animations[postId];
 
-      setUserReactions(updated);
+    if (!scale) return;
 
-    } else {
+    Animated.sequence([
+      Animated.timing(scale, {
+        toValue: 1.35,
+        duration: 120,
+        useNativeDriver: true,
+      }),
+      Animated.timing(scale, {
+        toValue: 0.9,
+        duration: 80,
+        useNativeDriver: true,
+      }),
+      Animated.spring(scale, {
+        toValue: 1,
+        friction: 4,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
 
-      const reaction = await addDoc(
-        collection(db, "post_reactions"),
-        {
+  const toggleReaction = async (postId) => {
+    if (reactionLoadingByPost[postId]) return;
+
+    setReactionLoadingByPost((current) => ({ ...current, [postId]: true }));
+
+    playReactionAnimation(postId);
+
+    try {
+      const currentUser = auth.currentUser;
+
+      if (!currentUser) return;
+
+      const postRef = doc(db, "posts", postId);
+
+      if (userReactions[postId]) {
+        await deleteDoc(doc(db, "post_reactions", userReactions[postId]));
+
+        await updateDoc(postRef, {
+          reactionCount: increment(-1),
+        });
+
+        const updated = { ...userReactions };
+
+        delete updated[postId];
+
+        setUserReactions(updated);
+      } else {
+        const reaction = await addDoc(collection(db, "post_reactions"), {
           postId,
           userId: currentUser.uid,
           createdAt: serverTimestamp(),
-        }
-      );
-
-      const postSnapshot = await getDoc(postRef);
-
-      console.log("Post exists:", postSnapshot.exists());
-      console.log("Post data:", postSnapshot.data());
-
-      const postData = postSnapshot.data();
-
-      console.log("Current User:", currentUser.uid);
-      console.log("Post Owner:", postData.userId);
-      console.log("Current User Data:", currentUserData);
-
-      if (postData.userId !== currentUser.uid) {
-
-        console.log("Entered notification block");
-
-        const notificationQuery = query(
-          collection(db, "notifications"),
-          where("userId", "==", postData.userId),
-          where("postId", "==", postId),
-          where("type", "==", "reaction")
-        );
-
-        const notificationSnapshot = await getDocs(notificationQuery);
-
-        console.log("Creating NEW notification");
-
-        if (!currentUserData) return;
-
-        const actorName =
-          `${currentUserData.firstName} ${currentUserData.lastName}`;
-
-        if (notificationSnapshot.empty) {
-
-          await addDoc(collection(db, "notifications"), {
-
-            userId: postData.userId,
-
-            actorId: currentUser.uid,
-
-            actorNames: [actorName],
-
-            type: "reaction",
-
-            postId,
-
-            createdAt: serverTimestamp(),
-
-            read: false,
-
-          });
-
-        } else {
-
-          console.log("Updating EXISTING notification");
-
-          const notificationDoc = notificationSnapshot.docs[0];
-
-          const data = notificationDoc.data();
-
-          let actorNames = data.actorNames || [];
-
-          if (!actorNames.includes(actorName)) {
-
-            actorNames.push(actorName);
-
-          }
-
-          await updateDoc(notificationDoc.ref, {
-
-            actorNames,
-
-            createdAt: serverTimestamp(),
-
-          });
-
-        }
-
-      }
-
-      await updateDoc(postRef, {
-        reactionCount: increment(1),
-      });
-
-      setUserReactions(prev => ({
-        ...prev,
-        [postId]: reaction.id,
-      }));
-
-    }
-
-  } catch (error) {
-
-    console.log(error);
-
-  } finally {
-
-    setReactionLoading(false);
-
-  }
-
-};
-
-useEffect(() => {
-
-  const keyword = search.toLowerCase().trim();
-
-  if (!keyword) {
-    setFilteredPosts(posts);
-    return;
-  }
-
-  const filtered = posts.filter(post =>
-    post.caption?.toLowerCase().includes(keyword) ||
-    post.locationName?.toLowerCase().includes(keyword) ||
-    post.firstName?.toLowerCase().includes(keyword) ||
-    post.lastName?.toLowerCase().includes(keyword)
-  );
-
-  setFilteredPosts(filtered);
-
-}, [search, posts]);
-
-
-const loadPosts = () => {
-
-    const q = query(
-        collection(db, "posts"),
-        orderBy("createdAt", "desc")
-    );
-
-    return onSnapshot(q, (snapshot) => {
-
-        const data = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data(),
-        }));
-
-        setPosts(data);
-        setFilteredPosts(data);
-
-        const anims = {};
-
-        data.forEach(post => {
-
-            anims[post.id] =
-                animations[post.id] ||
-                new Animated.Value(1);
-
         });
 
-        setAnimations(anims);
+        const postSnapshot = await getDoc(postRef);
 
+        console.log("Post exists:", postSnapshot.exists());
+        console.log("Post data:", postSnapshot.data());
+
+        const postData = postSnapshot.data();
+
+        console.log("Current User:", currentUser.uid);
+        console.log("Post Owner:", postData.userId);
+        console.log("Current User Data:", currentUserData);
+
+        if (postData.userId !== currentUser.uid) {
+          console.log("Entered notification block");
+
+          const notificationQuery = query(
+            collection(db, "notifications"),
+            where("userId", "==", postData.userId),
+            where("postId", "==", postId),
+            where("type", "==", "reaction"),
+          );
+
+          const notificationSnapshot = await getDocs(notificationQuery);
+
+          console.log("Creating NEW notification");
+
+          if (!currentUserData) return;
+
+          const actorName = `${currentUserData.firstName} ${currentUserData.lastName}`;
+
+          if (notificationSnapshot.empty) {
+            await addDoc(collection(db, "notifications"), {
+              userId: postData.userId,
+
+              actorId: currentUser.uid,
+
+              actorNames: [actorName],
+
+              type: "reaction",
+
+              postId,
+
+              createdAt: serverTimestamp(),
+
+              read: false,
+            });
+          } else {
+            console.log("Updating EXISTING notification");
+
+            const notificationDoc = notificationSnapshot.docs[0];
+
+            const data = notificationDoc.data();
+
+            let actorNames = data.actorNames || [];
+
+            if (!actorNames.includes(actorName)) {
+              actorNames.push(actorName);
+            }
+
+            await updateDoc(notificationDoc.ref, {
+              actorNames,
+
+              createdAt: serverTimestamp(),
+            });
+          }
+        }
+
+        await updateDoc(postRef, {
+          reactionCount: increment(1),
+        });
+
+        setUserReactions((prev) => ({
+          ...prev,
+          [postId]: reaction.id,
+        }));
+      }
+    } catch (error) {
+      console.log(error);
+    } finally {
+      setReactionLoadingByPost((current) => ({ ...current, [postId]: false }));
+    }
+  };
+
+  useEffect(() => {
+    const keyword = search.toLowerCase().trim();
+
+    if (!keyword) {
+      setFilteredPosts(posts);
+      return;
+    }
+
+    const filtered = posts.filter(
+      (post) =>
+        post.caption?.toLowerCase().includes(keyword) ||
+        post.locationName?.toLowerCase().includes(keyword) ||
+        post.firstName?.toLowerCase().includes(keyword) ||
+        post.lastName?.toLowerCase().includes(keyword),
+    );
+
+    setFilteredPosts(filtered);
+  }, [search, posts]);
+
+  const loadPosts = () => {
+    const q = query(collection(db, "posts"), orderBy("createdAt", "desc"));
+
+    return onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+
+      setPosts(data);
+      setFilteredPosts(data);
+
+      const anims = {};
+
+      data.forEach((post) => {
+        anims[post.id] = animations[post.id] || new Animated.Value(1);
+      });
+
+      setAnimations(anims);
     });
-
-};
-
-
-
+  };
 
   return (
     <View style={styles.wrapper}>
-    <View style={styles.container}>
-      
-      {/* TOP SECTION */}
-      <View style={styles.topSection}>
-                <View style={styles.searchRow}>
-                  
-    <Image
-        source={require("../assets/images/minicon.png")}
-        style={{
-            width: 50,
-            height: 50,
-            marginRight: 10,
-        }}
-    />
+      <View style={styles.container}>
+        {/* TOP SECTION */}
+        <View style={styles.topSection}>
+          <View style={styles.searchRow}>
+            <Image
+              source={require("../assets/images/minicon.png")}
+              style={{
+                width: 50,
+                height: 50,
+                marginRight: 10,
+              }}
+            />
 
-                  <TextInput
-  placeholder="Search"
-  style={styles.searchInput}
-  value={search}
-  onChangeText={setSearch}
-/>
-                  <TouchableOpacity style={styles.addButton} onPress={() => router.push("/create_post")}>
-                    <Text style={styles.addText}>+</Text>
-                  </TouchableOpacity>
+            <TextInput
+              placeholder="Search"
+              style={styles.searchInput}
+              value={search}
+              onChangeText={setSearch}
+            />
+            <TouchableOpacity
+              style={styles.addButton}
+              onPress={() => router.push("/create_post")}
+            >
+              <Image
+                source={require("../assets/images/plus.png")}
+                style={styles.addText}
+              />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* POSTS */}
+        <ScrollView style={styles.feed} showsVerticalScrollIndicator={false}>
+          {filteredPosts.map((post) => (
+            <View key={post.id} style={styles.card}>
+              <View style={styles.userRow}>
+                <Image
+                  source={require("../assets/images/profile2.png")}
+                  style={styles.avatar}
+                />
+
+                <View style={styles.userDetails}>
+                  <View style={styles.userHeader}>
+                    <Text style={styles.username}>
+                      {post.firstName} {post.lastName}
+                      <Text style={styles.points}>
+                        {" "}
+                        {authorPoints[post.userId] ?? post.points ?? 0} pts
+                      </Text>
+                    </Text>
+
+                    <Text style={styles.relativeTime}>
+                      {formatRelativeTime(post.createdAt, now)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.locationRow}>
+                    <Image
+                      source={require("../assets/images/location.png")}
+                      style={styles.locationIcon}
+                    />
+
+                    <Text style={styles.locationText}>{post.locationName}</Text>
+                  </View>
                 </View>
               </View>
 
-      {/* POSTS */}
-      <ScrollView style={styles.feed}>
-        
-    {filteredPosts.map(post => (
+              <Text style={styles.caption}>{post.caption}</Text>
 
-<View
-key={post.id}
-style={styles.card}
->
+              <TouchableOpacity
+                style={styles.imageContainer}
+                onPress={() =>
+                  router.push({
+                    pathname: "/post",
+                    params: {
+                      id: post.id,
+                    },
+                  })
+                }
+              >
+                <Image
+                  source={{ uri: post.imageUrl }}
+                  style={styles.postImage}
+                  resizeMode="cover"
+                />
 
-<View style={styles.userRow}>
+                <View
+                  style={[
+                    styles.statusDot,
+                    {
+                      backgroundColor:
+                        post.status === "critical"
+                          ? "#FF5B5B"
+                          : post.status === "moderate"
+                            ? "#FFC940"
+                            : post.status === "cleaned"
+                              ? "#34C759"
+                              : "#A5A5A5",
+                    },
+                  ]}
+                />
+              </TouchableOpacity>
 
-<Image
-source={require("../assets/images/profile2.png")}
-style={styles.avatar}
-/>
+              <View style={styles.actionsContainer}>
+                <TouchableOpacity
+                  disabled={reactionLoadingByPost[post.id]}
+                  style={{
+                    opacity: reactionLoadingByPost[post.id] ? 0.5 : 1,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    marginRight: 10,
+                    gap: 6,
+                  }}
+                  onPress={() => toggleReaction(post.id)}
+                >
+                  <Animated.Image
+                    source={
+                      userReactions[post.id]
+                        ? require("../assets/images/priorityreact.png")
+                        : require("../assets/images/priorityreact_gray.png")
+                    }
+                    style={[
+                      styles.actionIcon,
+                      {
+                        transform: [
+                          {
+                            scale: animations[post.id] || 1,
+                          },
+                        ],
+                      },
+                    ]}
+                  />
 
-<View>
+                  <Text style={styles.actionText}>{post.reactionCount}</Text>
+                </TouchableOpacity>
 
-<Text style={styles.username}>
-{post.firstName} {post.lastName}
-<Text style={styles.points}>
-{" "}
-{post.points}pts
-</Text>
-</Text>
+                <TouchableOpacity
+                  style={styles.commentBox}
+                  onPress={() =>
+                    router.push({
+                      pathname: "/post",
+                      params: {
+                        id: post.id,
+                      },
+                    })
+                  }
+                >
+                  <View style={styles.commentContent}>
+                    <Image
+                      source={require("../assets/images/comment.png")}
+                      style={styles.actionIcon}
+                    />
 
-<View style={styles.locationRow}>
-<Image
-source={require("../assets/images/location.png")}
-style={styles.locationIcon}
-/>
-
-<Text style={styles.locationText}>
-{post.locationName}
-</Text>
-
-</View>
-
-</View>
-
-</View>
-
-<Text style={styles.caption}>
-{post.caption}
-</Text>
-
-<TouchableOpacity
-style={styles.imageContainer}
-onPress={() =>
-router.push({
-pathname: "/post",
-params: {
-id: post.id,
-},
-})
-}
->
-
-  
-
-<Image
-  source={{ uri: post.imageUrl }}
-  style={styles.postImage}
-  resizeMode="cover"
-/>
-
-<View
-    style={[
-        styles.statusDot,
-        {
-            backgroundColor:
-                post.status === "critical"
-                    ? "#FF5B5B"
-                    : post.status === "moderate"
-                    ? "#FFC940"
-                    : post.status === "cleaned"
-                    ? "#34C759"
-                    : "#A5A5A5",
-        },
-    ]}
-/>
-</TouchableOpacity>
-
-
-
-<View style={styles.actionsContainer}>
-
-
-<TouchableOpacity
-    disabled={reactionLoading}
-    style={{ opacity: reactionLoading ? 0.5 : 1, flexDirection: "row",
-  alignItems: "center",
-  marginRight: 10,
-  gap: 6, }}
-    onPress={() => toggleReaction(post.id)}
->
-
-<Animated.Image
-  source={
-    userReactions[post.id]
-      ? require("../assets/images/priorityreact.png")
-      : require("../assets/images/priorityreact_gray.png")
-  }
-  style={[
-    styles.actionIcon,
-    {
-      transform: [
-        {
-          scale: animations[post.id] || 1,
-        },
-      ],
-    },
-  ]}
-/>
-
-<Text style={styles.actionText}>
-  {post.reactionCount}
-</Text>
-
-</TouchableOpacity>
-
-<TouchableOpacity
-style={styles.commentBox}
-onPress={() =>
-router.push({
-pathname: "/post",
-params: {
-id: post.id,
-},
-})
-}
->
-
-<View style={styles.commentContent}>
-
-<Image
-source={require("../assets/images/comment.png")}
-style={styles.actionIcon}
-/>
-
-<Text style={styles.actionText}>
-{post.commentCount ?? 0}
-</Text>
-
-</View>
-
-</TouchableOpacity>
-
-</View>
-
-</View>
-
-))}
-
-
-
-
-      </ScrollView>
-
-      {/* BOTTOM NAVBAR */}
-      <View style={styles.navbarContainer}>
-                <Navbar />
+                    <Text style={styles.actionText}>
+                      {post.commentCount ?? 0}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
               </View>
+            </View>
+          ))}
+        </ScrollView>
 
+        {/* BOTTOM NAVBAR */}
+        <View style={styles.navbarContainer}>
+          <Navbar />
+        </View>
+      </View>
     </View>
-</View>
   );
 }
 
 const styles = StyleSheet.create({
-
   navbarContainer: {
-  borderTopWidth: 1,
-  borderColor: "#ddd",
-  backgroundColor: "#fff",
-},
-    wrapper: {
-        flex: 1,
-        // backgroundColor: "#FFFFFF",
-        alignItems: "center",
-    },
+    borderTopWidth: 1,
+    borderColor: "#ddd",
+    backgroundColor: "#fff",
+  },
+  wrapper: {
+    flex: 1,
+    // backgroundColor: "#FFFFFF",
+    alignItems: "center",
+  },
 
   container: {
     flex: 1,
@@ -555,7 +527,6 @@ const styles = StyleSheet.create({
   topSection: {
     padding: 25,
     backgroundColor: "#5F9C76",
-    
   },
 
   searchRow: {
@@ -572,7 +543,7 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
 
-   searchInput: {
+  searchInput: {
     flex: 1,
     backgroundColor: "#fff",
     borderRadius: 20,
@@ -582,9 +553,8 @@ const styles = StyleSheet.create({
 
   addButton: {
     marginLeft: 10,
-    backgroundColor: "#fff",
     width: 40,
-    height: 40,
+    height: 30,
     borderRadius: 20,
     justifyContent: "center",
     alignItems: "center",
@@ -594,6 +564,8 @@ const styles = StyleSheet.create({
   addText: {
     fontSize: 20,
     fontWeight: "bold",
+    width: 50,
+    height: 50,
   },
 
   feed: {
@@ -615,10 +587,10 @@ const styles = StyleSheet.create({
   },
 
   avatar: {
-    width: 40 ,
+    width: 40,
     height: 40,
     borderRadius: 18,
-  
+
     marginRight: 10,
     resizeMode: "cover",
   },
@@ -627,82 +599,93 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
 
+  userDetails: {
+    flex: 1,
+  },
+
+  userHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+  },
+
   points: {
     color: "blue",
   },
 
   locationRow: {
-  flexDirection: "row",
-  alignItems: "center",
-},
+    flexDirection: "row",
+    alignItems: "center",
+  },
 
-locationIcon: {
-  width: 14,
-  height: 14,
-  marginRight: 4,
-  resizeMode: "contain",
-},
+  locationIcon: {
+    width: 14,
+    height: 14,
+    marginRight: 4,
+    resizeMode: "contain",
+  },
 
-locationText: {
-  fontSize: 12,
-  color: "gray",
-},
+  locationText: {
+    fontSize: 12,
+    color: "gray",
+  },
+
+  relativeTime: {
+    marginLeft: 12,
+    fontSize: 11,
+    color: "#7A7A7A",
+  },
 
   caption: {
     marginBottom: 8,
   },
 
-imageContainer: {
-  width: "100%",
-  height: 250,          // fixed card height
-  borderRadius: 10,
-  overflow: "hidden",
-  backgroundColor: "#ddd",
-},
+  imageContainer: {
+    width: "100%",
+    height: 250, // fixed card height
+    borderRadius: 10,
+    overflow: "hidden",
+    backgroundColor: "#ddd",
+  },
 
-postImage: {
-  width: "100%",
-  height: "100%",
-},
+  postImage: {
+    width: "100%",
+    height: "100%",
+  },
 
-statusDot: {
-  position: "absolute",
-  top: 10,
-  right: 10,
-  width: 24,
-  height: 24,
-  borderRadius: 12,
-},
+  statusDot: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+  },
 
+  actionsContainer: {
+    flexDirection: "row",
+    marginTop: 10,
+    alignItems: "center",
+  },
 
+  likeSection: {},
 
- actionsContainer: {
-  flexDirection: "row",
-  marginTop: 10,
-  alignItems: "center",
-},
+  commentBox: {
+    flex: 1,
+    backgroundColor: "#E5E5E5",
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 30,
+    flexDirection: "row",
+    justifyContent: "center",
+  },
 
-likeSection: {
-  
- 
-},
-
-commentBox: {
-  flex: 1,
-  backgroundColor: "#E5E5E5",
-  borderRadius: 8,
-  paddingVertical: 6,
-  paddingHorizontal: 30,
-  flexDirection: "row",
-  justifyContent: "center",
-},
-
-commentContent: {
-  flexDirection: "row",
-  alignItems: "center",
-  justifyContent: "center", // 👈 THIS FIXES YOUR ISSUE
-  gap: 6,
-},
+  commentContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center", // 👈 THIS FIXES YOUR ISSUE
+    gap: 6,
+  },
 
   navbar: {
     flexDirection: "row",

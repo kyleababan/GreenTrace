@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { doc, getDoc, runTransaction } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Alert, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 import Navbar from "../components/navbar";
 import { auth, db } from "../firebaseConfig";
@@ -20,6 +20,7 @@ export default function Volunteering() {
   const [joining, setJoining] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [imageAspectRatio, setImageAspectRatio] = useState(null);
+  const [showLockedModal, setShowLockedModal] = useState(false);
 
   useEffect(() => {
     const loadActivity = async () => {
@@ -64,9 +65,14 @@ export default function Volunteering() {
   const maxVolunteers = Number(activity?.maxVolunteers) || 0;
   const joinedCount = Number.isFinite(Number(activity?.joinedCount)) ? Number(activity.joinedCount) : members.length;
   const isFull = !isJoined && joinedCount >= maxVolunteers;
+  const isLocked = activity?.isLocked === true;
 
   const toggleVolunteer = async () => {
     if (joining || !activity || !currentUser) return;
+    if (isLocked && !isJoined) {
+      setShowLockedModal(true);
+      return;
+    }
 
     setJoining(true);
     try {
@@ -76,8 +82,6 @@ export default function Volunteering() {
         if (!snapshot.exists()) throw new Error("This activity no longer exists.");
 
         const data = snapshot.data();
-        if (data.status !== "open") throw new Error("This activity is closed.");
-
         const currentMembers = Array.isArray(data.volunteers) ? data.volunteers : [];
         const alreadyJoined = currentMembers.some((member) => getMemberId(member) === currentUser.id);
         let updatedMembers;
@@ -85,6 +89,9 @@ export default function Volunteering() {
         if (alreadyJoined) {
           updatedMembers = currentMembers.filter((member) => getMemberId(member) !== currentUser.id);
         } else {
+          if (data.status !== "open") throw new Error("This activity is closed.");
+          if (data.isLocked === true) throw new Error("This activity is locked.");
+
           const capacity = Number(data.maxVolunteers) || 0;
           if (currentMembers.length >= capacity) throw new Error("This activity is already full.");
 
@@ -113,7 +120,12 @@ export default function Volunteering() {
       });
     } catch (error) {
       console.error("Unable to update volunteer status:", error);
-      Alert.alert("Unable to update", error.message || "Please try again.");
+      if (error.message === "This activity is locked.") {
+        setActivity((currentActivity) => ({ ...currentActivity, isLocked: true }));
+        setShowLockedModal(true);
+      } else {
+        Alert.alert("Unable to update", error.message || "Please try again.");
+      }
     } finally {
       setJoining(false);
     }
@@ -158,13 +170,27 @@ export default function Volunteering() {
             {activity.requirements?.length ? activity.requirements.map((requirement, index) => <Text key={`${requirement}-${index}`} style={styles.reqItem}>• {requirement}</Text>) : <Text style={styles.emptyMembers}>No requirements listed.</Text>}
           </View>
 
-          <TouchableOpacity disabled={joining || isFull} style={[styles.mainButton, isJoined && styles.joinedButton, isFull && styles.disabledButton]} onPress={toggleVolunteer}>
-            <Text style={[styles.buttonText, isJoined && styles.joinedButtonText]}>{joining ? "Updating..." : isJoined ? "Leave activity" : isFull ? "Activity full" : "Volunteer"}</Text>
+          <TouchableOpacity disabled={joining || (isFull && !isLocked)} style={[styles.mainButton, isJoined && styles.joinedButton, isFull && styles.disabledButton, isLocked && !isJoined && styles.lockedButton]} onPress={toggleVolunteer}>
+            {isLocked && !isJoined ? <Ionicons name="lock-closed" size={19} color="#fff" /> : null}
+            <Text style={[styles.buttonText, isJoined && styles.joinedButtonText]}>{joining ? "Updating..." : isJoined ? "Leave activity" : isLocked ? "Activity locked" : isFull ? "Activity full" : "Volunteer"}</Text>
           </TouchableOpacity>
         </ScrollView>
 
         <View style={styles.navbarContainer}><Navbar /></View>
       </View>
+
+      <Modal visible={showLockedModal} transparent animationType="fade" onRequestClose={() => setShowLockedModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.lockedModal} accessibilityRole="alert">
+            <View style={styles.lockedIcon}><Ionicons name="lock-closed" size={30} color="#bf3030" /></View>
+            <Text style={styles.lockedTitle}>Activity locked</Text>
+            <Text style={styles.lockedMessage}>This volunteer activity is not accepting new volunteers right now.</Text>
+            <TouchableOpacity style={styles.modalButton} onPress={() => setShowLockedModal(false)}>
+              <Text style={styles.modalButtonText}>OK</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -196,10 +222,18 @@ const styles = StyleSheet.create({
   avatarText: { color: "#fff", fontWeight: "700", fontSize: 12 },
   emptyMembers: { color: "#718078", fontSize: 13, marginTop: 8 },
   reqItem: { color: "#435248", marginTop: 7 },
-  mainButton: { backgroundColor: "#5F9C76", paddingVertical: 14, borderRadius: 8, alignItems: "center", marginTop: 2 },
+  mainButton: { backgroundColor: "#5F9C76", paddingVertical: 14, borderRadius: 8, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8, marginTop: 2 },
   joinedButton: { backgroundColor: "#e7c853" },
   disabledButton: { backgroundColor: "#adb5af" },
+  lockedButton: { backgroundColor: "#bf3030" },
   buttonText: { color: "#fff", fontWeight: "700", fontSize: 16 },
   joinedButtonText: { color: "#373116" },
   navbarContainer: { borderTopWidth: 1, borderColor: "#ddd", backgroundColor: "#fff" },
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center", padding: 20 },
+  lockedModal: { width: "100%", maxWidth: 360, borderRadius: 14, backgroundColor: "#fff", padding: 24, alignItems: "center" },
+  lockedIcon: { width: 56, height: 56, borderRadius: 28, backgroundColor: "#fff0f0", alignItems: "center", justifyContent: "center" },
+  lockedTitle: { marginTop: 14, fontSize: 20, fontWeight: "700", color: "#172119" },
+  lockedMessage: { marginTop: 8, color: "#63756a", lineHeight: 20, textAlign: "center" },
+  modalButton: { width: "100%", marginTop: 22, paddingVertical: 12, borderRadius: 8, backgroundColor: "#5F9C76", alignItems: "center" },
+  modalButtonText: { color: "#fff", fontWeight: "700" },
 });

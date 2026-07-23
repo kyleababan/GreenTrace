@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs } from "firebase/firestore";
 import { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -32,9 +32,28 @@ export default function Volunteer() {
     setLoadError("");
     try {
       const snapshot = await getDocs(collection(db, "volunteer_posts"));
-      const openActivities = snapshot.docs
+      const volunteerActivities = snapshot.docs
         .map((activity) => ({ id: activity.id, ...activity.data() }))
-        .filter((activity) => activity.status === "open")
+        .filter((activity) => activity.status === "open");
+
+      const checkedActivities = await Promise.all(
+        volunteerActivities.map(async (activity) => {
+          if (!activity.postId) return activity;
+
+          try {
+            const sourcePost = await getDoc(doc(db, "posts", activity.postId));
+            return sourcePost.exists() && sourcePost.data().status !== "cleaned"
+              ? activity
+              : null;
+          } catch (error) {
+            console.error("Unable to check linked report status:", error);
+            return activity;
+          }
+        })
+      );
+
+      const openActivities = checkedActivities
+        .filter(Boolean)
         .sort((firstActivity, secondActivity) =>
           (secondActivity.createdAt?.seconds || 0) - (firstActivity.createdAt?.seconds || 0)
         );

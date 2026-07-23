@@ -1,7 +1,71 @@
 import { collection, getDocs } from "firebase/firestore";
-import { useEffect, useState } from "react";
-import { StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { Animated, Easing, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { db } from "../../firebaseConfig";
+
+function AnalyticsBar({ label, value, color, highestValue, chartHeight, index }) {
+  const progress = useRef(new Animated.Value(0)).current;
+  const [displayValue, setDisplayValue] = useState(0);
+  const barHeight =
+    value === 0
+      ? chartHeight * 0.14
+      : Math.max(chartHeight * 0.25, (value / highestValue) * chartHeight);
+
+  useEffect(() => {
+    progress.setValue(0);
+    setDisplayValue(0);
+
+    const animationDelay = setTimeout(() => {
+      Animated.timing(progress, {
+        toValue: 1,
+        duration: 700,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }).start();
+    }, index * 110);
+
+    const startTime = Date.now() + index * 110;
+    let frameId;
+
+    const countUp = () => {
+      const elapsed = Date.now() - startTime;
+      const nextValue = Math.min(value, Math.round((Math.max(0, elapsed) / 700) * value));
+      setDisplayValue(nextValue);
+
+      if (nextValue < value) frameId = requestAnimationFrame(countUp);
+    };
+
+    frameId = requestAnimationFrame(countUp);
+
+    return () => {
+      clearTimeout(animationDelay);
+      cancelAnimationFrame(frameId);
+    };
+  }, [index, progress, value]);
+
+  return (
+    <View style={styles.statColumn}>
+      <View style={[styles.barTrack, { height: chartHeight }]}>
+        <Animated.View
+          style={[
+            styles.bar,
+            {
+              backgroundColor: color,
+              height: progress.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0, barHeight],
+              }),
+            },
+          ]}
+        >
+          <Text style={styles.barValue}>{displayValue}</Text>
+        </Animated.View>
+      </View>
+      <Text style={styles.cardLabel}>{label}</Text>
+    </View>
+  );
+}
+
 export default function Dashboard() {
   const { width } = useWindowDimensions();
 
@@ -89,84 +153,38 @@ useEffect(() => {
     width >= 1024 ? 300 : Math.max(200, width * 0.25);
 
   const contentWidth = width - sidebarWidth;
+  const chartHeight = isDesktop ? 360 : 250;
+  const highestValue = Math.max(...Object.values(stats), 1);
+  const chartStats = [
+    { key: "critical", label: "Critical Situation", color: "#FF6666" },
+    { key: "moderate", label: "Moderate Situation", color: "#FFCF30" },
+    { key: "cleaned", label: "Cleaned", color: "#2DCC6F" },
+    { key: "ongoing", label: "On-going", color: "#A5A5A5" },
+  ];
 
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Dashboard</Text>
 
-      <View
-        style={[
-          styles.cards,
-          { flexWrap: isDesktop ? 'nowrap' : 'wrap' },
-        ]}
-      >
-        <View
-          style={[
-            styles.cardContainer,
-            {
-              width: isDesktop
-                ? contentWidth * 0.22
-                : contentWidth * 0.45,
-            },
-          ]}
-        >
-          <View style={[styles.card, styles.card1]}>
-            <Text style={cardTextStyle(isDesktop)}>{stats.critical}</Text>
+      <View style={[styles.cards, { flexWrap: isDesktop ? "nowrap" : "wrap" }]}>
+        {chartStats.map((stat, index) => (
+          <View
+            key={stat.key}
+            style={[
+              styles.cardContainer,
+              { width: isDesktop ? contentWidth * 0.22 : contentWidth * 0.45 },
+            ]}
+          >
+            <AnalyticsBar
+              label={stat.label}
+              value={stats[stat.key]}
+              color={stat.color}
+              highestValue={highestValue}
+              chartHeight={chartHeight}
+              index={index}
+            />
           </View>
-
-          <Text style={styles.cardLabel}>Critical Situation</Text>
-        </View>
-
-        <View
-          style={[
-            styles.cardContainer,
-            {
-              width: isDesktop
-                ? contentWidth * 0.22
-                : contentWidth * 0.45,
-            },
-          ]}
-        >
-          <View style={[styles.card, styles.card2]}>
-            <Text style={cardTextStyle(isDesktop)}>{stats.moderate}</Text>
-          </View>
-
-          <Text style={styles.cardLabel}>Moderate Situation</Text>
-        </View>
-
-        <View
-          style={[
-            styles.cardContainer,
-            {
-              width: isDesktop
-                ? contentWidth * 0.22
-                : contentWidth * 0.45,
-            },
-          ]}
-        >
-          <View style={[styles.card, styles.card3]}>
-            <Text style={cardTextStyle(isDesktop)}>{stats.cleaned}</Text>
-          </View>
-
-          <Text style={styles.cardLabel}>Cleaned</Text>
-        </View>
-
-        <View
-          style={[
-            styles.cardContainer,
-            {
-              width: isDesktop
-                ? contentWidth * 0.22
-                : contentWidth * 0.45,
-            },
-          ]}
-        >
-          <View style={[styles.card, styles.card4]}>
-            <Text style={cardTextStyle(isDesktop)}>{stats.ongoing}</Text>
-          </View>
-
-          <Text style={styles.cardLabel}>On-going</Text>
-        </View>
+        ))}
       </View>
     </View>
   );
@@ -195,12 +213,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 
-  card: {
+  statColumn: {
     width: '100%',
-    aspectRatio: 3 / 5,
+    alignItems: 'center',
+  },
+
+  barTrack: {
+    width: '100%',
+    justifyContent: 'flex-end',
+    overflow: 'hidden',
+    borderRadius: 14,
+    backgroundColor: '#E7ECE9',
+  },
+
+  bar: {
+    width: '100%',
+    minHeight: 1,
+    borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 12,
+  },
+
+  barValue: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#fff',
   },
 
   cardLabel: {
@@ -211,25 +248,4 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  card1: {
-    backgroundColor: '#FF6666',
-  },
-
-  card2: {
-    backgroundColor: '#FFCF30',
-  },
-
-  card3: {
-    backgroundColor: '#2DCC6F',
-  },
-
-  card4: {
-    backgroundColor: '#A5A5A5',
-  },
-});
-
-const cardTextStyle = (isDesktop) => ({
-  fontSize: isDesktop ? 32 : 24,
-  fontWeight: 'bold',
-  color: '#fff',
 });

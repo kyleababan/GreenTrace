@@ -12,6 +12,7 @@ import {
 import {
   collection,
   getDocs,
+  onSnapshot,
   orderBy,
   query,
 } from "firebase/firestore";
@@ -32,9 +33,24 @@ export default function AssessmentList({
   const isMobile = width < 600;
 
   const [posts, setPosts] = useState([]);
+  const [authorPoints, setAuthorPoints] = useState({});
 
   useEffect(() => {
     loadPosts();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, "users"), (snapshot) => {
+      const pointsByUserId = {};
+
+      snapshot.forEach((userDocument) => {
+        pointsByUserId[userDocument.id] = userDocument.data().points ?? 0;
+      });
+
+      setAuthorPoints(pointsByUserId);
+    });
+
+    return unsubscribe;
   }, []);
 
   const loadPosts = async () => { 
@@ -176,7 +192,7 @@ export default function AssessmentList({
   </View>
 
   <Text style={styles.pointsText}>
-    {post.points || 0} pts
+    {authorPoints[post.userId] ?? post.points ?? 0} pts
   </Text>
 
 </View>
@@ -302,17 +318,6 @@ pointsText:{
     fontWeight:"bold",
     fontSize:13,
 },
-
-  profileImage: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-  },
-
-  profileName: {
-    marginLeft: 10,
-    fontWeight: "bold",
-  },
 
   postDescription: {
     marginTop: 10,

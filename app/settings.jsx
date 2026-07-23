@@ -1,98 +1,147 @@
 import { useRouter } from "expo-router";
 import { signOut } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
-import { useEffect, useState } from "react";
-import { Image, Modal, SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Animated,
+  Image,
+  Modal,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import Navbar from "../components/navbar"; // Assuming your navbar is already styled
 import { auth, db } from "../firebaseConfig";
 
 export default function ProfileScreen() {
-
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [showEcoLabel, setShowEcoLabel] = useState(false);
+  const ecoLabelAnimation = useRef(new Animated.Value(0)).current;
 
   const router = useRouter();
 
+  const toggleEcoLabel = () => {
+    Animated.timing(ecoLabelAnimation, {
+      toValue: showEcoLabel ? 0 : 1,
+      duration: 320,
+      useNativeDriver: false,
+    }).start();
+
+    setShowEcoLabel((isVisible) => !isVisible);
+  };
+
   useEffect(() => {
     loadUser();
-}, []);
+  }, []);
 
-const loadUser = async () => {
-
+  const loadUser = async () => {
     const currentUser = auth.currentUser;
 
     const logout = async () => {
-
-    try {
-
+      try {
         await signOut(auth);
 
         router.replace("/signin");
-
-    } catch (error) {
-
+      } catch (error) {
         console.log(error);
-
-    }
-
-};
+      }
+    };
 
     if (!currentUser) return;
 
     try {
+      const snapshot = await getDoc(doc(db, "users", currentUser.uid));
 
-        const snapshot = await getDoc(
-            doc(db, "users", currentUser.uid)
-        );
-
-        if (snapshot.exists()) {
-
-            setUserData(snapshot.data());
-
-        }
-
+      if (snapshot.exists()) {
+        setUserData(snapshot.data());
+      }
     } catch (error) {
-
-        console.log(error);
-
+      console.log(error);
     }
-
-};
+  };
 
   // Placeholder data - replace with your actual state/props
   const [userData, setUserData] = useState(null);
 
-
- if (!userData) {
+  if (!userData) {
     return (
-        <View style={{flex:1,justifyContent:"center",alignItems:"center"}}>
-            <Text>Loading...</Text>
+      <SafeAreaView style={styles.wrapper}>
+        <View style={styles.container}>
+          <View style={styles.stateContainer}>
+            <ActivityIndicator size="large" color="#5F9C76" />
+          </View>
+          <View style={styles.navbarContainer}>
+            <Navbar />
+          </View>
         </View>
+      </SafeAreaView>
     );
-}
+  }
   return (
     <SafeAreaView style={styles.wrapper}>
       <View style={styles.container}>
-        
         {/* HEADER SECTION */}
         <View style={styles.header}>
-
           <View style={styles.userInfoContainer}>
             <Image
-              source={require("../assets/images/profile.png")} 
+              source={require("../assets/images/profile.png")}
               style={styles.profileAvatar}
             />
             <View style={styles.userTextDetails}>
               <Text style={styles.userName}>
-    {userData.firstName} {userData.lastName}
-</Text>
+                {userData.firstName} {userData.lastName}
+              </Text>
               <View style={styles.pointsRow}>
-                <Image source={require("../assets/images/ecopts.png")} style={styles.ecoIcon} />
-                <Text style={styles.ecoPointsLabel}>Eco Points</Text>
-               <Text style={styles.pointsValue}>
-    {userData.points ?? 0} pts
-</Text>
+                <TouchableOpacity
+                  onPress={toggleEcoLabel}
+                  activeOpacity={0.7}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    showEcoLabel
+                      ? "Hide Eco Points label"
+                      : "Show Eco Points label"
+                  }
+                >
+                  <Image
+                    source={require("../assets/images/ecopts.png")}
+                    style={styles.ecoIcon}
+                  />
+                </TouchableOpacity>
+                <Animated.View
+                  style={[
+                    styles.ecoLabelContainer,
+                    {
+                      width: ecoLabelAnimation.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0, 88],
+                      }),
+                      opacity: ecoLabelAnimation,
+                      transform: [
+                        {
+                          translateX: ecoLabelAnimation.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: [-14, 0],
+                          }),
+                        },
+                      ],
+                    },
+                  ]}
+                >
+                  <Text style={styles.ecoPointsLabel} numberOfLines={1}>
+                    Eco Points
+                  </Text>
+                </Animated.View>
+                <Text style={styles.pointsValue}>
+                  {userData.points ?? 0} pts
+                </Text>
               </View>
-              <Text style={styles.phonePlaceholder}>#{userData.cellNumber}</Text>
+              <Text style={styles.phonePlaceholder}>
+                #{userData.cellNumber}
+              </Text>
             </View>
           </View>
         </View>
@@ -101,108 +150,105 @@ const loadUser = async () => {
         <View style={styles.content}>
           <View style={styles.grid}>
             {/* Edit Profile */}
-            <TouchableOpacity style={styles.menuTile}
-            onPress={() => router.push("/edit_profile")}
+            <TouchableOpacity
+              style={styles.menuTile}
+              onPress={() => router.push("/edit_profile")}
             >
-              <Image source={require("../assets/images/EditProfile.png")} style={styles.tileIcon} resizeMode="contain" />
+              <Image
+                source={require("../assets/images/EditProfile.png")}
+                style={styles.tileIcon}
+                resizeMode="contain"
+              />
               <Text style={styles.tileText}>Edit Profile</Text>
-             
             </TouchableOpacity>
 
             {/* Report Posts */}
-            <TouchableOpacity style={styles.menuTile}
-             onPress={() => router.push("/report_post")}
+            <TouchableOpacity
+              style={styles.menuTile}
+              onPress={() => router.push("/report_post")}
             >
-               <Image source={require("../assets/images/post.png")} style={styles.tileIcon} resizeMode="contain" />
+              <Image
+                source={require("../assets/images/post.png")}
+                style={styles.tileIcon}
+                resizeMode="contain"
+              />
               <Text style={styles.tileText}>Report Posts</Text>
             </TouchableOpacity>
 
             {/* Security */}
-            <TouchableOpacity style={styles.menuTile}
-            onPress={() => router.push("/security")}
+            <TouchableOpacity
+              style={styles.menuTile}
+              onPress={() => router.push("/security")}
             >
-               <Image source={require("../assets/images/Securitiy.png")} style={styles.tileIcon} resizeMode="contain" />
+              <Image
+                source={require("../assets/images/Securitiy.png")}
+                style={styles.tileIcon}
+                resizeMode="contain"
+              />
               <Text style={styles.tileText}>Security</Text>
             </TouchableOpacity>
 
             {/* FAQ */}
-            <TouchableOpacity style={styles.menuTile}
-            onPress={() => router.push("/faq")}
+            <TouchableOpacity
+              style={styles.menuTile}
+              onPress={() => router.push("/faq")}
             >
-               <Image source={require("../assets/images/faq.png")} style={styles.tileIcon} resizeMode="contain" />
+              <Image
+                source={require("../assets/images/faq.png")}
+                style={styles.tileIcon}
+                resizeMode="contain"
+              />
               <Text style={styles.tileText}>FAQ</Text>
             </TouchableOpacity>
           </View>
 
           {/* LOGOUT BUTTON */}
           <TouchableOpacity
-    style={styles.logoutButton}
-    onPress={() => setShowLogoutModal(true)}
->
-    <Text style={styles.logoutText}>Log out</Text>
-</TouchableOpacity>
+            style={styles.logoutButton}
+            onPress={() => setShowLogoutModal(true)}
+          >
+            <Text style={styles.logoutText}>Log out</Text>
+          </TouchableOpacity>
         </View>
 
         {/* BOTTOM NAVBAR */}
         <View style={styles.navbarContainer}>
           <Navbar />
 
-          <Modal
-    visible={showLogoutModal}
-    transparent
-    animationType="fade"
->
-    <View style={styles.modalOverlay}>
+          <Modal visible={showLogoutModal} transparent animationType="fade">
+            <View style={styles.modalOverlay}>
+              <View style={styles.logoutModal}>
+                <Text style={styles.logoutTitle}>Log Out</Text>
 
-        <View style={styles.logoutModal}>
+                <Text style={styles.logoutMessage}>
+                  Are you sure you want to log out?
+                </Text>
 
-            <Text style={styles.logoutTitle}>
-                Log Out
-            </Text>
-
-            <Text style={styles.logoutMessage}>
-                Are you sure you want to log out?
-            </Text>
-
-            <TouchableOpacity
-                style={styles.confirmLogoutButton}
-                onPress={async () => {
-
+                <TouchableOpacity
+                  style={styles.confirmLogoutButton}
+                  onPress={async () => {
                     try {
+                      await signOut(auth);
 
-                        await signOut(auth);
+                      setShowLogoutModal(false);
 
-                        setShowLogoutModal(false);
-
-                        router.replace("/signin");
-
+                      router.replace("/signin");
                     } catch (error) {
+                      console.log(error);
 
-                        console.log(error);
-
-                        setShowLogoutModal(false);
-
+                      setShowLogoutModal(false);
                     }
+                  }}
+                >
+                  <Text style={styles.confirmLogoutText}>Log Out</Text>
+                </TouchableOpacity>
 
-                }}
-            >
-                <Text style={styles.confirmLogoutText}>
-                    Log Out
-                </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-                onPress={() => setShowLogoutModal(false)}
-            >
-                <Text style={styles.cancelLogoutText}>
-                    Cancel
-                </Text>
-            </TouchableOpacity>
-
-        </View>
-
-    </View>
-</Modal>
+                <TouchableOpacity onPress={() => setShowLogoutModal(false)}>
+                  <Text style={styles.cancelLogoutText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </Modal>
         </View>
       </View>
     </SafeAreaView>
@@ -210,65 +256,68 @@ const loadUser = async () => {
 }
 
 const styles = StyleSheet.create({
+  stateContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
 
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.45)",
     justifyContent: "center",
     alignItems: "center",
-},
+  },
 
-logoutModal: {
+  logoutModal: {
     width: 300,
     backgroundColor: "#fff",
     borderRadius: 18,
     padding: 25,
     alignItems: "center",
-},
+  },
 
-logoutTitle: {
+  logoutTitle: {
     fontSize: 22,
     fontWeight: "bold",
     marginBottom: 10,
-},
+  },
 
-logoutMessage: {
+  logoutMessage: {
     textAlign: "center",
     color: "#666",
     marginBottom: 25,
-},
+  },
 
-confirmLogoutButton: {
+  confirmLogoutButton: {
     width: "100%",
     backgroundColor: "#E74C3C",
     paddingVertical: 13,
     borderRadius: 10,
     alignItems: "center",
-},
+  },
 
-confirmLogoutText: {
+  confirmLogoutText: {
     color: "#fff",
     fontWeight: "bold",
     fontSize: 17,
-},
+  },
 
-cancelLogoutText: {
+  cancelLogoutText: {
     marginTop: 18,
     color: "#666",
     fontSize: 16,
-},
+  },
 
   wrapper: {
     flex: 1,
     alignItems: "center",
   },
   container: {
-    flex: 1,
     width: "100%",
     maxWidth: 500, // 👈 THIS PREVENTS STRETCHING
     flex: 1,
     backgroundColor: "#eeebeb",
-
   },
   header: {
     backgroundColor: "#5F9C76",
@@ -320,6 +369,9 @@ cancelLogoutText: {
     fontSize: 17,
     fontWeight: "600",
   },
+  ecoLabelContainer: {
+    overflow: "hidden",
+  },
   pointsValue: {
     color: "#2D5AF0", // Blue color for points
     fontWeight: "bold",
@@ -362,13 +414,13 @@ cancelLogoutText: {
     width: 40,
     height: 40,
     marginBottom: 10,
-    tintColor: '#5F9C76' // Forces your images to follow the green theme
+    tintColor: "#5F9C76", // Forces your images to follow the green theme
   },
   faqSymbol: {
     fontSize: 35,
-    color: '#5F9C76',
-    fontWeight: '300',
-    marginBottom: 5
+    color: "#5F9C76",
+    fontWeight: "300",
+    marginBottom: 5,
   },
   tileText: {
     color: "#5F9C76",

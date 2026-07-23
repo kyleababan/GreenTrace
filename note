@@ -2,5 +2,5 @@ a note for myself
 
 git init
 git add .
-git commit -m "migrated tommy's work"
+git commit -m ""
 git push -u origin main
