@@ -1,6 +1,12 @@
-import { useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
-
+import { Link, useRouter } from "expo-router";
+import {
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+  signOut,
+} from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
+import { useState } from "react";
 import {
   Image,
   Modal,
@@ -12,18 +18,11 @@ import {
   View,
 } from "react-native";
 
-import { Link, useRouter } from "expo-router";
-
-import { sendPasswordResetEmail, signInWithEmailAndPassword, signOut } from "firebase/auth";
-
-import { doc, getDoc } from "firebase/firestore";
-
 import { auth, db } from "../firebaseConfig";
 
 export default function Login() {
   const router = useRouter();
   const [email, setEmail] = useState("");
-
   const [password, setPassword] = useState("");
   const [showResetModal, setShowResetModal] = useState(false);
   const [showResetSentModal, setShowResetSentModal] = useState(false);
@@ -55,7 +54,9 @@ export default function Login() {
       setShowResetSentModal(true);
     } catch (error) {
       console.log("Unable to send password reset email:", error);
-      alert("We couldn't send a reset email. Please check the address and try again.");
+      alert(
+        "We couldn't send a reset email. Please check the address and try again.",
+      );
     } finally {
       setSendingResetEmail(false);
     }
@@ -66,13 +67,11 @@ export default function Login() {
 
     if (!email.trim()) {
       alert("Please enter your email");
-
       return;
     }
-    //sd
+
     if (!password.trim()) {
       alert("Please enter your password");
-
       return;
     }
 
@@ -81,22 +80,17 @@ export default function Login() {
     try {
       const userCredential = await signInWithEmailAndPassword(
         auth,
-
         email,
-
         password,
       );
 
       const uid = userCredential.user.uid;
-
       const userRef = doc(db, "users", uid);
-
       const userSnap = await getDoc(userRef);
 
       if (!userSnap.exists()) {
         await signOut(auth);
         alert("User data not found");
-
         return;
       }
 
@@ -120,6 +114,7 @@ export default function Login() {
       setLoggingIn(false);
     }
   };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
@@ -127,11 +122,12 @@ export default function Login() {
         <View style={styles.welcome}>
           {/* Logo + App Name (Row) */}
           <View style={styles.header}>
-            {/* <Image
-                      source={require("../assets/images/minicon.png")}
-                      style={styles.logo}
-                  /> */}
-            <View style={styles.logo} />
+            <View style={styles.logoContainer}>
+              <Image
+                source={require("../assets/images/logo.png")}
+                style={styles.logo}
+              />
+            </View>
 
             <View style={styles.logoText}>
               <Text style={styles.appName}>GreenTrace</Text>
@@ -140,13 +136,14 @@ export default function Login() {
               </Text>
             </View>
           </View>
+
           <Text style={styles.welcomeTitle}>Welcome to GreenTrace</Text>
           <Text style={styles.welcomeSubtitle}>
             Act Now for a Greener Tomorrow
           </Text>
         </View>
 
-        {/* Form Container (Width Controlled) */}
+        {/* Form Container */}
         <View style={styles.formWrapper}>
           <View style={styles.form}>
             <TextInput
@@ -155,6 +152,8 @@ export default function Login() {
               style={styles.input}
               value={email}
               onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
             />
 
             <TextInput
@@ -190,6 +189,7 @@ export default function Login() {
         </View>
       </View>
 
+      {/* Password Reset Modal */}
       <Modal
         visible={showResetModal}
         transparent
@@ -226,7 +226,10 @@ export default function Login() {
             />
 
             <TouchableOpacity
-              style={[styles.modalPrimaryButton, sendingResetEmail && styles.disabledButton]}
+              style={[
+                styles.modalPrimaryButton,
+                sendingResetEmail && styles.disabledButton,
+              ]}
               onPress={sendResetEmail}
               disabled={sendingResetEmail}
             >
@@ -238,6 +241,7 @@ export default function Login() {
         </View>
       </Modal>
 
+      {/* Password Reset Sent Modal */}
       <Modal
         visible={showResetSentModal}
         transparent
@@ -252,7 +256,8 @@ export default function Login() {
             />
             <Text style={styles.modalTitle}>Check your inbox</Text>
             <Text style={styles.modalDescription}>
-              A password reset email has been sent to {resetEmail}. Check your spam folder too.
+              A password reset email has been sent to {resetEmail}. Check your
+              spam folder too.
             </Text>
 
             <TouchableOpacity
@@ -265,6 +270,7 @@ export default function Login() {
         </View>
       </Modal>
 
+      {/* Banned Modal */}
       <Modal
         visible={showBannedModal}
         transparent
@@ -273,10 +279,18 @@ export default function Login() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard} accessibilityRole="alert">
-            <Ionicons name="ban-outline" size={52} color="#bf3030" style={styles.bannedIcon} />
+            <Ionicons
+              name="ban-outline"
+              size={52}
+              color="#bf3030"
+              style={styles.bannedIcon}
+            />
             <Text style={styles.bannedTitle}>Your account is banned</Text>
             <Text style={styles.modalDescription}>Reason: {banReason}</Text>
-            <TouchableOpacity style={styles.modalPrimaryButton} onPress={() => setShowBannedModal(false)}>
+            <TouchableOpacity
+              style={styles.modalPrimaryButton}
+              onPress={() => setShowBannedModal(false)}
+            >
               <Text style={styles.modalPrimaryButtonText}>CLOSE</Text>
             </TouchableOpacity>
           </View>
@@ -294,58 +308,68 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     justifyContent: "center",
+    alignItems: "center",
     paddingHorizontal: 24,
   },
 
-  /* Header */
+  /* Header & Welcome Container */
+  welcome: {
+    alignItems: "center",
+    width: "100%",
+    maxWidth: 360,
+    marginBottom: 24,
+  },
   header: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 32,
+    justifyContent: "center",
+    marginBottom: 16,
+    width: "100%",
   },
+  logoContainer: {},
   logo: {
-    width: 60,
-    height: 60,
-    marginRight: 20,
+    width: 100,
+    height: 100,
+    resizeMode: "contain",
+    tintColor: "#fff",
   },
-
   logoText: {
-    flexShrink: 1,
+    justifyContent: "center",
   },
   appName: {
-    fontSize: 24,
+    fontSize: 42,
     fontWeight: "700",
     color: "#FFFFFF",
+    lineHeight: 44,
   },
   tagline: {
     fontSize: 12,
     color: "#E6E6E6",
-    marginTop: 2,
+    maxWidth: 360,
   },
 
-  /* Welcome */
-  welcome: {
-    alignItems: "center",
-    marginBottom: 24,
-  },
+  /* Welcome Subtitles */
   welcomeTitle: {
     fontSize: 18,
     fontWeight: "600",
     color: "#FFFFFF",
+    textAlign: "center",
   },
   welcomeSubtitle: {
     fontSize: 13,
     color: "#E6E6E6",
-    marginTop: 4,
+    textAlign: "center",
+    marginTop: 2,
   },
 
   /* Form width control */
   formWrapper: {
+    width: "100%",
     alignItems: "center",
   },
   form: {
     width: "100%",
-    maxWidth: 360, // 👈 prevents stretching on web
+    maxWidth: 360,
   },
 
   input: {
@@ -384,6 +408,8 @@ const styles = StyleSheet.create({
     marginTop: 12,
     textAlign: "center",
   },
+
+  /* Modal Styles */
   modalOverlay: {
     flex: 1,
     alignItems: "center",
@@ -450,5 +476,10 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   bannedIcon: { alignSelf: "center", marginBottom: 12 },
-  bannedTitle: { color: "#bf3030", fontSize: 22, fontWeight: "700", textAlign: "center" },
+  bannedTitle: {
+    color: "#bf3030",
+    fontSize: 22,
+    fontWeight: "700",
+    textAlign: "center",
+  },
 });

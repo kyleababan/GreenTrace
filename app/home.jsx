@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import {
   Animated,
   Image,
+  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -62,36 +63,24 @@ const formatRelativeTime = (timestamp, now) => {
 export default function Home() {
   const router = useRouter();
 
-  const [imageSizes, setImageSizes] = useState({});
-
   const [posts, setPosts] = useState([]);
-
   const [search, setSearch] = useState("");
-
   const [filteredPosts, setFilteredPosts] = useState([]);
-
   const [userReactions, setUserReactions] = useState({});
-
   const [animations, setAnimations] = useState({});
-
   const [currentUserData, setCurrentUserData] = useState(null);
 
-  // Points belong to the user record. Posts only contain the value that existed
-  // when they were created, so keep a live lookup for the feed.
+  // Live lookup for points across feed
   const [authorPoints, setAuthorPoints] = useState({});
-
   const [reactionLoadingByPost, setReactionLoadingByPost] = useState({});
-
   const [now, setNow] = useState(() => Date.now());
 
   const loadCurrentUser = async () => {
     const currentUser = auth.currentUser;
-
     if (!currentUser) return;
 
     try {
       const snapshot = await getDoc(doc(db, "users", currentUser.uid));
-
       if (snapshot.exists()) {
         setCurrentUserData(snapshot.data());
       }
@@ -104,11 +93,9 @@ export default function Home() {
     const unsubscribe = loadPosts();
     const unsubscribeUsers = onSnapshot(collection(db, "users"), (snapshot) => {
       const pointsByUserId = {};
-
       snapshot.forEach((userDocument) => {
         pointsByUserId[userDocument.id] = userDocument.data().points ?? 0;
       });
-
       setAuthorPoints(pointsByUserId);
     });
 
@@ -119,20 +106,16 @@ export default function Home() {
       unsubscribe();
       unsubscribeUsers();
     };
-
-    // The post subscription is initialized once when the Home screen mounts.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30 * 1000);
-
     return () => clearInterval(timer);
   }, []);
 
   const loadUserReactions = async () => {
     const currentUser = auth.currentUser;
-
     if (!currentUser) return;
 
     const q = query(
@@ -141,7 +124,6 @@ export default function Home() {
     );
 
     const snapshot = await getDocs(q);
-
     const reacted = {};
 
     snapshot.forEach((doc) => {
@@ -153,7 +135,6 @@ export default function Home() {
 
   const playReactionAnimation = (postId) => {
     const scale = animations[postId];
-
     if (!scale) return;
 
     Animated.sequence([
@@ -179,12 +160,10 @@ export default function Home() {
     if (reactionLoadingByPost[postId]) return;
 
     setReactionLoadingByPost((current) => ({ ...current, [postId]: true }));
-
     playReactionAnimation(postId);
 
     try {
       const currentUser = auth.currentUser;
-
       if (!currentUser) return;
 
       const postRef = doc(db, "posts", postId);
@@ -197,9 +176,7 @@ export default function Home() {
         });
 
         const updated = { ...userReactions };
-
         delete updated[postId];
-
         setUserReactions(updated);
       } else {
         const reaction = await addDoc(collection(db, "post_reactions"), {
@@ -209,19 +186,9 @@ export default function Home() {
         });
 
         const postSnapshot = await getDoc(postRef);
-
-        console.log("Post exists:", postSnapshot.exists());
-        console.log("Post data:", postSnapshot.data());
-
         const postData = postSnapshot.data();
 
-        console.log("Current User:", currentUser.uid);
-        console.log("Post Owner:", postData.userId);
-        console.log("Current User Data:", currentUserData);
-
         if (postData.userId !== currentUser.uid) {
-          console.log("Entered notification block");
-
           const notificationQuery = query(
             collection(db, "notifications"),
             where("userId", "==", postData.userId),
@@ -231,8 +198,6 @@ export default function Home() {
 
           const notificationSnapshot = await getDocs(notificationQuery);
 
-          console.log("Creating NEW notification");
-
           if (!currentUserData) return;
 
           const actorName = `${currentUserData.firstName} ${currentUserData.lastName}`;
@@ -240,26 +205,16 @@ export default function Home() {
           if (notificationSnapshot.empty) {
             await addDoc(collection(db, "notifications"), {
               userId: postData.userId,
-
               actorId: currentUser.uid,
-
               actorNames: [actorName],
-
               type: "reaction",
-
               postId,
-
               createdAt: serverTimestamp(),
-
               read: false,
             });
           } else {
-            console.log("Updating EXISTING notification");
-
             const notificationDoc = notificationSnapshot.docs[0];
-
             const data = notificationDoc.data();
-
             let actorNames = data.actorNames || [];
 
             if (!actorNames.includes(actorName)) {
@@ -268,7 +223,6 @@ export default function Home() {
 
             await updateDoc(notificationDoc.ref, {
               actorNames,
-
               createdAt: serverTimestamp(),
             });
           }
@@ -332,384 +286,397 @@ export default function Home() {
   };
 
   return (
-    <View style={styles.wrapper}>
-      <View style={styles.container}>
-        {/* TOP SECTION */}
-        <View style={styles.topSection}>
-          <View style={styles.searchRow}>
-            <Image
-              source={require("../assets/images/minicon.png")}
-              style={{
-                width: 50,
-                height: 50,
-                marginRight: 10,
-              }}
-            />
-
-            <TextInput
-              placeholder="Search"
-              style={styles.searchInput}
-              value={search}
-              onChangeText={setSearch}
-            />
-            <TouchableOpacity
-              style={styles.addButton}
-              onPress={() => router.push("/create_post")}
-            >
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.wrapper}>
+        <View style={styles.container}>
+          {/* TOP HEADER / SEARCH SECTION */}
+          <View style={styles.topSection}>
+            <View style={styles.searchRow}>
               <Image
-                source={require("../assets/images/plus.png")}
-                style={styles.addText}
+                source={require("../assets/images/logo.png")}
+                style={styles.logoHeader}
               />
-            </TouchableOpacity>
-          </View>
-        </View>
 
-        {/* POSTS */}
-        <ScrollView style={styles.feed} showsVerticalScrollIndicator={false}>
-          {filteredPosts.map((post) => (
-            <View key={post.id} style={styles.card}>
-              <View style={styles.userRow}>
-                <Image
-                  source={require("../assets/images/profile2.png")}
-                  style={styles.avatar}
-                />
-
-                <View style={styles.userDetails}>
-                  <View style={styles.userHeader}>
-                    <Text style={styles.username}>
-                      {post.firstName} {post.lastName}
-                      <Text style={styles.points}>
-                        {" "}
-                        {authorPoints[post.userId] ?? post.points ?? 0} pts
-                      </Text>
-                    </Text>
-
-                    <Text style={styles.relativeTime}>
-                      {formatRelativeTime(post.createdAt, now)}
-                    </Text>
-                  </View>
-
-                  <View style={styles.locationRow}>
-                    <Image
-                      source={require("../assets/images/location.png")}
-                      style={styles.locationIcon}
-                    />
-
-                    <Text style={styles.locationText}>{post.locationName}</Text>
-                  </View>
-                </View>
-              </View>
-
-              <Text style={styles.caption}>{post.caption}</Text>
+              <TextInput
+                placeholder="Search..."
+                placeholderTextColor="#888"
+                style={styles.searchInput}
+                value={search}
+                onChangeText={setSearch}
+              />
 
               <TouchableOpacity
-                style={styles.imageContainer}
-                onPress={() =>
-                  router.push({
-                    pathname: "/post",
-                    params: {
-                      id: post.id,
-                    },
-                  })
-                }
+                style={styles.addButton}
+                activeOpacity={0.8}
+                onPress={() => router.push("/create_post")}
               >
                 <Image
-                  source={{ uri: post.imageUrl }}
-                  style={styles.postImage}
-                  resizeMode="cover"
-                />
-
-                <View
-                  style={[
-                    styles.statusDot,
-                    {
-                      backgroundColor:
-                        post.status === "critical"
-                          ? "#FF5B5B"
-                          : post.status === "moderate"
-                            ? "#FFC940"
-                            : post.status === "cleaned"
-                              ? "#34C759"
-                              : "#A5A5A5",
-                    },
-                  ]}
+                  source={require("../assets/images/plus.png")}
+                  style={styles.addIcon}
                 />
               </TouchableOpacity>
+            </View>
+          </View>
 
-              <View style={styles.actionsContainer}>
-                <TouchableOpacity
-                  disabled={reactionLoadingByPost[post.id]}
-                  style={{
-                    opacity: reactionLoadingByPost[post.id] ? 0.5 : 1,
-                    flexDirection: "row",
-                    alignItems: "center",
-                    marginRight: 10,
-                    gap: 6,
-                  }}
-                  onPress={() => toggleReaction(post.id)}
-                >
-                  <Animated.Image
-                    source={
-                      userReactions[post.id]
-                        ? require("../assets/images/priorityreact.png")
-                        : require("../assets/images/priorityreact_gray.png")
-                    }
-                    style={[
-                      styles.actionIcon,
-                      {
-                        transform: [
-                          {
-                            scale: animations[post.id] || 1,
-                          },
-                        ],
-                      },
-                    ]}
+          {/* POSTS FEED */}
+          <ScrollView
+            style={styles.feed}
+            contentContainerStyle={styles.feedContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {filteredPosts.map((post) => (
+              <View key={post.id} style={styles.card}>
+                {/* Author Info & Location */}
+                <View style={styles.userRow}>
+                  <Image
+                    source={require("../assets/images/profile2.png")}
+                    style={styles.avatar}
                   />
 
-                  <Text style={styles.actionText}>{post.reactionCount}</Text>
-                </TouchableOpacity>
+                  <View style={styles.userDetails}>
+                    <View style={styles.userHeader}>
+                      <Text style={styles.username}>
+                        {post.firstName} {post.lastName}
+                        <Text style={styles.points}>
+                          {" "}
+                          • {authorPoints[post.userId] ?? post.points ?? 0} pts
+                        </Text>
+                      </Text>
 
+                      <Text style={styles.relativeTime}>
+                        {formatRelativeTime(post.createdAt, now)}
+                      </Text>
+                    </View>
+
+                    <View style={styles.locationRow}>
+                      <Image
+                        source={require("../assets/images/location.png")}
+                        style={styles.locationIcon}
+                      />
+                      <Text style={styles.locationText}>
+                        {post.locationName || "Unknown location"}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+                {/* Caption */}
+                {Boolean(post.caption) && (
+                  <Text style={styles.caption}>{post.caption}</Text>
+                )}
+
+                {/* Image Container */}
                 <TouchableOpacity
-                  style={styles.commentBox}
+                  style={styles.imageContainer}
+                  activeOpacity={0.9}
                   onPress={() =>
                     router.push({
                       pathname: "/post",
-                      params: {
-                        id: post.id,
-                      },
+                      params: { id: post.id },
                     })
                   }
                 >
-                  <View style={styles.commentContent}>
-                    <Image
-                      source={require("../assets/images/comment.png")}
-                      style={styles.actionIcon}
+                  <Image
+                    source={{ uri: post.imageUrl }}
+                    style={styles.postImage}
+                    resizeMode="cover"
+                  />
+
+                  {/* Priority Status Badge */}
+                  <View
+                    style={[
+                      styles.statusDot,
+                      {
+                        backgroundColor:
+                          post.status === "critical"
+                            ? "#FF5B5B"
+                            : post.status === "moderate"
+                              ? "#FFC940"
+                              : post.status === "cleaned"
+                                ? "#34C759"
+                                : "#A5A5A5",
+                      },
+                    ]}
+                  />
+                </TouchableOpacity>
+
+                {/* Action Row */}
+                <View style={styles.actionsContainer}>
+                  {/* Reaction Button */}
+                  <TouchableOpacity
+                    disabled={reactionLoadingByPost[post.id]}
+                    style={[
+                      styles.reactionButton,
+                      { opacity: reactionLoadingByPost[post.id] ? 0.5 : 1 },
+                    ]}
+                    onPress={() => toggleReaction(post.id)}
+                  >
+                    <Animated.Image
+                      source={
+                        userReactions[post.id]
+                          ? require("../assets/images/priorityreact.png")
+                          : require("../assets/images/priorityreact_gray.png")
+                      }
+                      style={[
+                        styles.actionIcon,
+                        {
+                          transform: [
+                            {
+                              scale: animations[post.id] || 1,
+                            },
+                          ],
+                        },
+                      ]}
                     />
 
                     <Text style={styles.actionText}>
-                      {post.commentCount ?? 0}
+                      {post.reactionCount || 0}
                     </Text>
-                  </View>
-                </TouchableOpacity>
-              </View>
-            </View>
-          ))}
-        </ScrollView>
+                  </TouchableOpacity>
 
-        {/* BOTTOM NAVBAR */}
-        <View style={styles.navbarContainer}>
-          <Navbar />
+                  {/* Comment Box Route */}
+                  <TouchableOpacity
+                    style={styles.commentBox}
+                    activeOpacity={0.7}
+                    onPress={() =>
+                      router.push({
+                        pathname: "/post",
+                        params: { id: post.id },
+                      })
+                    }
+                  >
+                    <View style={styles.commentContent}>
+                      <Image
+                        source={require("../assets/images/comment.png")}
+                        style={styles.actionIcon}
+                      />
+                      <Text style={styles.actionText}>
+                        {post.commentCount ?? 0} Comments
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+          </ScrollView>
+
+          {/* BOTTOM NAVBAR */}
+          <View style={styles.navbar}>
+            <Navbar />
+          </View>
         </View>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  navbarContainer: {
-    borderTopWidth: 1,
-    borderColor: "#ddd",
-    backgroundColor: "#fff",
+  safeArea: {
+    flex: 1,
+    backgroundColor: "#5F9C76",
   },
   wrapper: {
     flex: 1,
-    // backgroundColor: "#FFFFFF",
     alignItems: "center",
+    backgroundColor: "#F4F6F8",
   },
-
   container: {
     flex: 1,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "#F4F6F8",
     width: "100%",
-    maxWidth: 500, // 👈 THIS PREVENTS STRETCHING
+    maxWidth: 480,
   },
 
+  /* Top Section */
   topSection: {
-    padding: 25,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     backgroundColor: "#5F9C76",
+    elevation: 3,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
   },
-
   searchRow: {
-    top: 15,
     flexDirection: "row",
     alignItems: "center",
   },
-
-  iconPlaceholder: {
-    width: 28,
-    height: 28,
-    right: 10,
-    borderRadius: 20,
+  logoHeader: {
+    width: 38,
+    height: 38,
+    resizeMode: "contain",
+    tintColor: "#FFFFFF",
     marginRight: 10,
   },
-
   searchInput: {
     flex: 1,
-    backgroundColor: "#fff",
+    backgroundColor: "#FFFFFF",
     borderRadius: 20,
-    paddingHorizontal: 23,
+    paddingHorizontal: 16,
     height: 40,
+    fontSize: 14,
+    color: "#333",
   },
-
   addButton: {
     marginLeft: 10,
-    width: 40,
-    height: 30,
-    borderRadius: 20,
     justifyContent: "center",
     alignItems: "center",
-    right: -10,
   },
-
-  addText: {
-    fontSize: 20,
-    fontWeight: "bold",
+  addIcon: {
     width: 50,
     height: 50,
+    resizeMode: "contain",
+    tintColor: "#FFFFFF",
   },
 
+  /* Feed / Cards */
   feed: {
     flex: 1,
-    paddingHorizontal: 16,
   },
-
+  feedContent: {
+    padding: 16,
+    paddingBottom: 24,
+  },
   card: {
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 12,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 14,
     marginBottom: 16,
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
   },
 
+  /* User Info */
   userRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 6,
+    marginBottom: 10,
   },
-
   avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 18,
-
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     marginRight: 10,
     resizeMode: "cover",
   },
-
-  username: {
-    fontWeight: "600",
-  },
-
   userDetails: {
     flex: 1,
   },
-
   userHeader: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
     justifyContent: "space-between",
   },
-
-  points: {
-    color: "blue",
+  username: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#222",
   },
-
+  points: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#2E7D32",
+  },
+  relativeTime: {
+    fontSize: 11,
+    color: "#888",
+  },
   locationRow: {
     flexDirection: "row",
     alignItems: "center",
+    marginTop: 2,
   },
-
   locationIcon: {
-    width: 14,
-    height: 14,
+    width: 12,
+    height: 12,
     marginRight: 4,
     resizeMode: "contain",
+    tintColor: "#666",
   },
-
   locationText: {
     fontSize: 12,
-    color: "gray",
+    color: "#666",
   },
 
-  relativeTime: {
-    marginLeft: 12,
-    fontSize: 11,
-    color: "#7A7A7A",
-  },
-
+  /* Post Content */
   caption: {
-    marginBottom: 8,
+    fontSize: 14,
+    color: "#333",
+    lineHeight: 20,
+    marginBottom: 10,
   },
-
   imageContainer: {
     width: "100%",
-    height: 250, // fixed card height
-    borderRadius: 10,
+    height: 240,
+    borderRadius: 12,
     overflow: "hidden",
-    backgroundColor: "#ddd",
+    backgroundColor: "#EBEBEB",
+    position: "relative",
   },
-
   postImage: {
     width: "100%",
     height: "100%",
   },
-
   statusDot: {
     position: "absolute",
-    top: 10,
-    right: 10,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    top: 12,
+    right: 12,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
   },
 
+  /* Actions */
   actionsContainer: {
     flexDirection: "row",
-    marginTop: 10,
+    marginTop: 12,
     alignItems: "center",
+    gap: 10,
   },
-
-  likeSection: {},
-
+  reactionButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    backgroundColor: "#F0F2F5",
+    gap: 6,
+  },
+  actionIcon: {
+    width: 20,
+    height: 20,
+    resizeMode: "contain",
+  },
+  actionText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#555",
+  },
   commentBox: {
     flex: 1,
-    backgroundColor: "#E5E5E5",
-    borderRadius: 8,
+    backgroundColor: "#F0F2F5",
+    borderRadius: 20,
     paddingVertical: 6,
-    paddingHorizontal: 30,
-    flexDirection: "row",
+    paddingHorizontal: 16,
     justifyContent: "center",
   },
-
   commentContent: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center", // 👈 THIS FIXES YOUR ISSUE
+    justifyContent: "center",
     gap: 6,
   },
 
-  navbar: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    backgroundColor: "#fff",
-    paddingVertical: 10,
-  },
-
-  navItem: {
-    alignItems: "center",
-  },
-
-  navIcon: {
-    width: 24,
-    height: 24,
-    backgroundColor: "#ccc",
-    borderRadius: 6,
-  },
-
-  activeLine: {
-    width: 20,
-    height: 3,
-    backgroundColor: "#5F9C76",
-    marginTop: 4,
-    borderRadius: 2,
+  /* Bottom Navbar Wrapper */
+  navbarContainer: {
+    borderTopWidth: 1,
+    borderColor: "#EBEBEB",
+    backgroundColor: "#FFFFFF",
   },
 });

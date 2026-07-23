@@ -82,7 +82,9 @@ export default function ProfileScreen() {
     <SafeAreaView style={styles.wrapper}>
       <View style={styles.container}>
         {/* HEADER SECTION */}
+
         <View style={styles.header}>
+          <Text style={styles.headerText}>Profile</Text>
           <View style={styles.userInfoContainer}>
             <Image
               source={require("../assets/images/profile.png")}
@@ -257,6 +259,14 @@ const styles = StyleSheet.create({
     backgroundColor: "#FAFAFA",
     alignItems: "center",
   },
+
+  headerText: {
+    fontSize: 24,
+    fontWeight: "700",
+    color: "#f9f9f9",
+    marginBottom: 16,
+  },
+
   container: {
     width: "100%",
     maxWidth: 480,
@@ -271,7 +281,7 @@ const styles = StyleSheet.create({
 
   /* HEADER STYLES */
   header: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "#5F9C76",
     paddingHorizontal: 24,
     paddingTop: 32,
     paddingBottom: 24,
@@ -286,7 +296,7 @@ const styles = StyleSheet.create({
     width: 68,
     height: 68,
     borderRadius: 34,
-    backgroundColor: "#E2E8F0",
+    backgroundColor: "#5F9C76",
   },
   userTextDetails: {
     marginLeft: 16,
@@ -295,7 +305,7 @@ const styles = StyleSheet.create({
   userName: {
     fontSize: 22,
     fontWeight: "700",
-    color: "#0F172A",
+    color: "#f9f9f9",
     letterSpacing: -0.3,
   },
   pointsRow: {
@@ -334,7 +344,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   phoneText: {
-    color: "#94A3B8",
+    color: "#f9f9f9",
     fontSize: 13,
     marginTop: 4,
     fontWeight: "500",

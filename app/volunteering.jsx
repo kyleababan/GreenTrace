@@ -2,14 +2,40 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { doc, getDoc, runTransaction } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 
 import Navbar from "../components/navbar";
 import { auth, db } from "../firebaseConfig";
 
-const getMemberId = (member) => typeof member === "string" ? member : member?.userId || member?.uid || member?.id || "";
-const getMemberName = (member) => typeof member === "string" ? "Volunteer" : [member?.firstName, member?.lastName].filter(Boolean).join(" ") || "Volunteer";
-const getInitials = (name) => name.split(" ").filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "V";
+const getMemberId = (member) =>
+  typeof member === "string"
+    ? member
+    : member?.userId || member?.uid || member?.id || "";
+
+const getMemberName = (member) =>
+  typeof member === "string"
+    ? "Volunteer"
+    : [member?.firstName, member?.lastName].filter(Boolean).join(" ") ||
+      "Volunteer";
+
+const getInitials = (name) =>
+  name
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase() || "V";
 
 export default function Volunteering() {
   const { volunteerId } = useLocalSearchParams();
@@ -44,7 +70,10 @@ export default function Volunteering() {
         }
 
         setActivity({ id: activitySnapshot.id, ...activitySnapshot.data() });
-        setCurrentUser({ id: signedInUser.uid, ...(userSnapshot.exists() ? userSnapshot.data() : {}) });
+        setCurrentUser({
+          id: signedInUser.uid,
+          ...(userSnapshot.exists() ? userSnapshot.data() : {}),
+        });
       } catch (error) {
         console.error("Unable to load volunteer activity:", error);
         setLoadError("Unable to load this volunteer activity.");
@@ -60,10 +89,17 @@ export default function Volunteering() {
     }
   }, [volunteerId]);
 
-  const members = useMemo(() => Array.isArray(activity?.volunteers) ? activity.volunteers : [], [activity?.volunteers]);
-  const isJoined = members.some((member) => getMemberId(member) === currentUser?.id);
+  const members = useMemo(
+    () => (Array.isArray(activity?.volunteers) ? activity.volunteers : []),
+    [activity?.volunteers],
+  );
+  const isJoined = members.some(
+    (member) => getMemberId(member) === currentUser?.id,
+  );
   const maxVolunteers = Number(activity?.maxVolunteers) || 0;
-  const joinedCount = Number.isFinite(Number(activity?.joinedCount)) ? Number(activity.joinedCount) : members.length;
+  const joinedCount = Number.isFinite(Number(activity?.joinedCount))
+    ? Number(activity.joinedCount)
+    : members.length;
   const isFull = !isJoined && joinedCount >= maxVolunteers;
   const isLocked = activity?.isLocked === true;
 
@@ -79,21 +115,31 @@ export default function Volunteering() {
       await runTransaction(db, async (transaction) => {
         const activityRef = doc(db, "volunteer_posts", activity.id);
         const snapshot = await transaction.get(activityRef);
-        if (!snapshot.exists()) throw new Error("This activity no longer exists.");
+        if (!snapshot.exists())
+          throw new Error("This activity no longer exists.");
 
         const data = snapshot.data();
-        const currentMembers = Array.isArray(data.volunteers) ? data.volunteers : [];
-        const alreadyJoined = currentMembers.some((member) => getMemberId(member) === currentUser.id);
+        const currentMembers = Array.isArray(data.volunteers)
+          ? data.volunteers
+          : [];
+        const alreadyJoined = currentMembers.some(
+          (member) => getMemberId(member) === currentUser.id,
+        );
         let updatedMembers;
 
         if (alreadyJoined) {
-          updatedMembers = currentMembers.filter((member) => getMemberId(member) !== currentUser.id);
+          updatedMembers = currentMembers.filter(
+            (member) => getMemberId(member) !== currentUser.id,
+          );
         } else {
-          if (data.status !== "open") throw new Error("This activity is closed.");
-          if (data.isLocked === true) throw new Error("This activity is locked.");
+          if (data.status !== "open")
+            throw new Error("This activity is closed.");
+          if (data.isLocked === true)
+            throw new Error("This activity is locked.");
 
           const capacity = Number(data.maxVolunteers) || 0;
-          if (currentMembers.length >= capacity) throw new Error("This activity is already full.");
+          if (currentMembers.length >= capacity)
+            throw new Error("This activity is already full.");
 
           updatedMembers = [
             ...currentMembers,
@@ -106,22 +152,46 @@ export default function Volunteering() {
           ];
         }
 
-        transaction.update(activityRef, { volunteers: updatedMembers, joinedCount: updatedMembers.length });
+        transaction.update(activityRef, {
+          volunteers: updatedMembers,
+          joinedCount: updatedMembers.length,
+        });
       });
 
       setActivity((currentActivity) => {
-        const currentMembers = Array.isArray(currentActivity.volunteers) ? currentActivity.volunteers : [];
-        const alreadyJoined = currentMembers.some((member) => getMemberId(member) === currentUser.id);
+        const currentMembers = Array.isArray(currentActivity.volunteers)
+          ? currentActivity.volunteers
+          : [];
+        const alreadyJoined = currentMembers.some(
+          (member) => getMemberId(member) === currentUser.id,
+        );
         const updatedMembers = alreadyJoined
-          ? currentMembers.filter((member) => getMemberId(member) !== currentUser.id)
-          : [...currentMembers, { userId: currentUser.id, firstName: currentUser.firstName || "", lastName: currentUser.lastName || "", email: currentUser.email || "" }];
+          ? currentMembers.filter(
+              (member) => getMemberId(member) !== currentUser.id,
+            )
+          : [
+              ...currentMembers,
+              {
+                userId: currentUser.id,
+                firstName: currentUser.firstName || "",
+                lastName: currentUser.lastName || "",
+                email: currentUser.email || "",
+              },
+            ];
 
-        return { ...currentActivity, volunteers: updatedMembers, joinedCount: updatedMembers.length };
+        return {
+          ...currentActivity,
+          volunteers: updatedMembers,
+          joinedCount: updatedMembers.length,
+        };
       });
     } catch (error) {
       console.error("Unable to update volunteer status:", error);
       if (error.message === "This activity is locked.") {
-        setActivity((currentActivity) => ({ ...currentActivity, isLocked: true }));
+        setActivity((currentActivity) => ({
+          ...currentActivity,
+          isLocked: true,
+        }));
         setShowLockedModal(true);
       } else {
         Alert.alert("Unable to update", error.message || "Please try again.");
@@ -131,62 +201,205 @@ export default function Volunteering() {
     }
   };
 
-  if (loading) return <View style={styles.stateContainer}><ActivityIndicator size="large" color="#5F9C76" /></View>;
-  if (!activity) return <View style={styles.stateContainer}><Text style={styles.stateText}>{loadError || "Volunteer activity not found."}</Text><TouchableOpacity style={styles.backButton} onPress={() => router.back()}><Text style={styles.backButtonText}>Go back</Text></TouchableOpacity></View>;
+  if (loading)
+    return (
+      <View style={styles.stateContainer}>
+        <ActivityIndicator size="small" color="#5F9C76" />
+      </View>
+    );
+
+  if (!activity)
+    return (
+      <View style={styles.stateContainer}>
+        <Text style={styles.stateText}>
+          {loadError || "Volunteer activity not found."}
+        </Text>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.back()}
+        >
+          <Text style={styles.backButtonText}>Go back</Text>
+        </TouchableOpacity>
+      </View>
+    );
 
   return (
     <View style={styles.wrapper}>
       <View style={styles.container}>
+        {/* HEADER SECTION */}
         <View style={styles.topSection}>
-          <TouchableOpacity style={styles.backIconButton} onPress={() => router.back()} accessibilityLabel="Go back"><Ionicons name="arrow-back" size={22} color="#fff" /></TouchableOpacity>
+          <TouchableOpacity
+            style={styles.backIconButton}
+            onPress={() => router.back()}
+            accessibilityLabel="Go back"
+            activeOpacity={0.8}
+          >
+            <Image source={require("../assets/images/back.png")} />
+          </TouchableOpacity>
         </View>
 
-        <ScrollView style={styles.feed} contentContainerStyle={styles.feedContent} showsVerticalScrollIndicator={false}>
-          <Text style={styles.title}>{activity.title || "Volunteer activity"}</Text>
-          <Text style={styles.description}>{activity.description || "No description provided."}</Text>
+        <ScrollView
+          style={styles.feed}
+          contentContainerStyle={styles.feedContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* TITLE & DESCRIPTION */}
+          <View style={styles.titleSection}>
+            <Text style={styles.title}>
+              {activity.title || "Volunteer Activity"}
+            </Text>
+            <Text style={styles.description}>
+              {activity.description || "No description provided."}
+            </Text>
+          </View>
+
+          {/* MAIN IMAGE */}
           {activity.imageUrl ? (
             <Image
               source={{ uri: activity.imageUrl }}
-              style={[styles.mainImage, imageAspectRatio && { aspectRatio: imageAspectRatio }]}
-              resizeMode="contain"
+              style={[
+                styles.mainImage,
+                imageAspectRatio && { aspectRatio: imageAspectRatio },
+              ]}
+              resizeMode="cover"
               onLoad={({ nativeEvent }) => {
                 const { width, height } = nativeEvent?.source || {};
                 if (width && height) setImageAspectRatio(width / height);
               }}
             />
-          ) : <View style={styles.imagePlaceholder}><Ionicons name="image-outline" size={42} color="#71907d" /><Text style={styles.placeholderText}>No image available</Text></View>}
+          ) : (
+            <View style={styles.imagePlaceholder}>
+              <Ionicons name="image-outline" size={32} color="#CBD5E1" />
+              <Text style={styles.placeholderText}>No image provided</Text>
+            </View>
+          )}
 
-          <View style={styles.locationRow}><Ionicons name="location-outline" size={18} color="#276344" /><Text style={styles.locationText}>{activity.locationName || "Location not specified"}</Text></View>
+          {/* LOCATION */}
+          <View style={styles.locationRow}>
+            <Ionicons name="location-outline" size={16} color="#5F9C76" />
+            <Text style={styles.locationText}>
+              {activity.locationName || "Location not specified"}
+            </Text>
+          </View>
 
-          <View style={styles.infoBox}>
-            <View style={styles.labelRow}><Text style={styles.label}>Volunteers</Text><Text style={styles.count}>{joinedCount} / {maxVolunteers}</Text></View>
+          {/* VOLUNTEERS CARD */}
+          <View style={styles.infoCard}>
+            <View style={styles.cardHeader}>
+              <Text style={styles.cardLabel}>Volunteers Joined</Text>
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>
+                  {joinedCount} / {maxVolunteers}
+                </Text>
+              </View>
+            </View>
+
             <View style={styles.avatarRow}>
-              {members.length ? members.slice(0, 8).map((member, index) => { const name = getMemberName(member); return <View key={`${getMemberId(member)}-${index}`} style={styles.avatarCircle}><Text style={styles.avatarText}>{getInitials(name)}</Text></View>; }) : <Text style={styles.emptyMembers}>No volunteers have joined yet.</Text>}
+              {members.length ? (
+                members.slice(0, 8).map((member, index) => {
+                  const name = getMemberName(member);
+                  return (
+                    <View
+                      key={`${getMemberId(member)}-${index}`}
+                      style={[
+                        styles.avatarCircle,
+                        index !== 0 && { marginLeft: -8 },
+                      ]}
+                    >
+                      <Text style={styles.avatarText}>{getInitials(name)}</Text>
+                    </View>
+                  );
+                })
+              ) : (
+                <Text style={styles.emptyText}>
+                  No volunteers have joined yet.
+                </Text>
+              )}
             </View>
           </View>
 
-          <View style={styles.infoBox}>
-            <Text style={styles.label}>Requirements</Text>
-            {activity.requirements?.length ? activity.requirements.map((requirement, index) => <Text key={`${requirement}-${index}`} style={styles.reqItem}>• {requirement}</Text>) : <Text style={styles.emptyMembers}>No requirements listed.</Text>}
+          {/* REQUIREMENTS CARD */}
+          <View style={styles.infoCard}>
+            <Text style={styles.cardLabel}>Requirements</Text>
+            <View style={styles.reqList}>
+              {activity.requirements?.length ? (
+                activity.requirements.map((requirement, index) => (
+                  <View
+                    key={`${requirement}-${index}`}
+                    style={styles.reqItemRow}
+                  >
+                    <View style={styles.bulletPoint} />
+                    <Text style={styles.reqText}>{requirement}</Text>
+                  </View>
+                ))
+              ) : (
+                <Text style={styles.emptyText}>No requirements listed.</Text>
+              )}
+            </View>
           </View>
 
-          <TouchableOpacity disabled={joining || (isFull && !isLocked)} style={[styles.mainButton, isJoined && styles.joinedButton, isFull && styles.disabledButton, isLocked && !isJoined && styles.lockedButton]} onPress={toggleVolunteer}>
-            {isLocked && !isJoined ? <Ionicons name="lock-closed" size={19} color="#fff" /> : null}
-            <Text style={[styles.buttonText, isJoined && styles.joinedButtonText]}>{joining ? "Updating..." : isJoined ? "Leave activity" : isLocked ? "Activity locked" : isFull ? "Activity full" : "Volunteer"}</Text>
+          {/* JOIN / LEAVE BUTTON */}
+          <TouchableOpacity
+            disabled={joining || (isFull && !isLocked)}
+            style={[
+              styles.mainButton,
+              isJoined && styles.joinedButton,
+              isFull && styles.disabledButton,
+              isLocked && !isJoined && styles.lockedButton,
+            ]}
+            onPress={toggleVolunteer}
+            activeOpacity={0.8}
+          >
+            {isLocked && !isJoined ? (
+              <Ionicons name="lock-closed-outline" size={18} color="#EF4444" />
+            ) : null}
+            <Text
+              style={[
+                styles.buttonText,
+                isJoined && styles.joinedButtonText,
+                isLocked && !isJoined && styles.lockedButtonText,
+              ]}
+            >
+              {joining
+                ? "Updating..."
+                : isJoined
+                  ? "Leave activity"
+                  : isLocked
+                    ? "Activity locked"
+                    : isFull
+                      ? "Activity full"
+                      : "Volunteer Now"}
+            </Text>
           </TouchableOpacity>
         </ScrollView>
 
-        <View style={styles.navbarContainer}><Navbar /></View>
+        <View style={styles.navbarContainer}>
+          <Navbar />
+        </View>
       </View>
 
-      <Modal visible={showLockedModal} transparent animationType="fade" onRequestClose={() => setShowLockedModal(false)}>
+      {/* LOCKED MODAL */}
+      <Modal
+        visible={showLockedModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowLockedModal(false)}
+      >
         <View style={styles.modalOverlay}>
           <View style={styles.lockedModal} accessibilityRole="alert">
-            <View style={styles.lockedIcon}><Ionicons name="lock-closed" size={30} color="#bf3030" /></View>
-            <Text style={styles.lockedTitle}>Activity locked</Text>
-            <Text style={styles.lockedMessage}>This volunteer activity is not accepting new volunteers right now.</Text>
-            <TouchableOpacity style={styles.modalButton} onPress={() => setShowLockedModal(false)}>
-              <Text style={styles.modalButtonText}>OK</Text>
+            <View style={styles.lockedIcon}>
+              <Ionicons name="lock-closed" size={26} color="#EF4444" />
+            </View>
+            <Text style={styles.lockedTitle}>Activity Locked</Text>
+            <Text style={styles.lockedMessage}>
+              This volunteer activity is currently not accepting new
+              participants.
+            </Text>
+            <TouchableOpacity
+              style={styles.modalButton}
+              onPress={() => setShowLockedModal(false)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.modalButtonText}>Got it</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -196,44 +409,286 @@ export default function Volunteering() {
 }
 
 const styles = StyleSheet.create({
-  wrapper: { flex: 1, alignItems: "center", backgroundColor: "#fff" },
-  container: { flex: 1, width: "100%", maxWidth: 500, backgroundColor: "#fff" },
-  topSection: { padding: 20, backgroundColor: "#5F9C76" },
-  backIconButton: { width: 42, height: 42, borderRadius: 21, backgroundColor: "rgba(255,255,255,0.2)", alignItems: "center", justifyContent: "center" },
-  stateContainer: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 16 },
-  stateText: { color: "#5d6b61", textAlign: "center" },
-  backButton: { backgroundColor: "#5F9C76", borderRadius: 8, paddingHorizontal: 18, paddingVertical: 10 },
-  backButtonText: { color: "#fff", fontWeight: "700" },
-  feed: { flex: 1 },
-  feedContent: { padding: 16, gap: 14 },
-  title: { fontSize: 25, fontWeight: "700", color: "#1d2b21" },
-  description: { fontSize: 15, color: "#46564b", lineHeight: 21 },
-  mainImage: { width: "100%", aspectRatio: 16 / 9, borderRadius: 10, backgroundColor: "#dfe8e2" },
-  imagePlaceholder: { width: "100%", height: 210, borderRadius: 10, backgroundColor: "#dfe8e2", alignItems: "center", justifyContent: "center", gap: 8 },
-  placeholderText: { color: "#577061" },
-  locationRow: { flexDirection: "row", alignItems: "center", gap: 7 },
-  locationText: { flex: 1, color: "#276344", fontWeight: "600" },
-  infoBox: { backgroundColor: "#f3f6f4", padding: 14, borderRadius: 10 },
-  labelRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  label: { color: "#1d2b21", fontWeight: "700", fontSize: 15 },
-  count: { color: "#27734d", fontWeight: "700" },
-  avatarRow: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 11 },
-  avatarCircle: { width: 34, height: 34, borderRadius: 17, backgroundColor: "#5F9C76", justifyContent: "center", alignItems: "center" },
-  avatarText: { color: "#fff", fontWeight: "700", fontSize: 12 },
-  emptyMembers: { color: "#718078", fontSize: 13, marginTop: 8 },
-  reqItem: { color: "#435248", marginTop: 7 },
-  mainButton: { backgroundColor: "#5F9C76", paddingVertical: 14, borderRadius: 8, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 8, marginTop: 2 },
-  joinedButton: { backgroundColor: "#e7c853" },
-  disabledButton: { backgroundColor: "#adb5af" },
-  lockedButton: { backgroundColor: "#bf3030" },
-  buttonText: { color: "#fff", fontWeight: "700", fontSize: 16 },
-  joinedButtonText: { color: "#373116" },
-  navbarContainer: { borderTopWidth: 1, borderColor: "#ddd", backgroundColor: "#fff" },
-  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center", padding: 20 },
-  lockedModal: { width: "100%", maxWidth: 360, borderRadius: 14, backgroundColor: "#fff", padding: 24, alignItems: "center" },
-  lockedIcon: { width: 56, height: 56, borderRadius: 28, backgroundColor: "#fff0f0", alignItems: "center", justifyContent: "center" },
-  lockedTitle: { marginTop: 14, fontSize: 20, fontWeight: "700", color: "#172119" },
-  lockedMessage: { marginTop: 8, color: "#63756a", lineHeight: 20, textAlign: "center" },
-  modalButton: { width: "100%", marginTop: 22, paddingVertical: 12, borderRadius: 8, backgroundColor: "#5F9C76", alignItems: "center" },
-  modalButtonText: { color: "#fff", fontWeight: "700" },
+  wrapper: {
+    flex: 1,
+    alignItems: "center",
+    backgroundColor: "#f6f6f6",
+  },
+  container: {
+    flex: 1,
+    width: "100%",
+    maxWidth: 480,
+    backgroundColor: "#f6f6f6",
+  },
+
+  /* HEADER STYLES */
+  topSection: {
+    paddingHorizontal: 16,
+    paddingVertical: 22,
+    backgroundColor: "#5F9C76",
+  },
+  backIconButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  /* STATE STYLES */
+  stateContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+    gap: 12,
+  },
+  stateText: {
+    color: "#64748B",
+    fontSize: 14,
+    textAlign: "center",
+  },
+  backButton: {
+    backgroundColor: "#5F9C76",
+    borderRadius: 10,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+  },
+  backButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "600",
+    fontSize: 14,
+  },
+
+  /* MAIN FEED */
+  feed: {
+    flex: 1,
+  },
+  feedContent: {
+    padding: 16,
+    gap: 16,
+  },
+  titleSection: {
+    gap: 6,
+  },
+  title: {
+    fontSize: 22,
+    fontWeight: "700",
+    color: "#0F172A",
+    letterSpacing: -0.3,
+  },
+  description: {
+    fontSize: 14,
+    color: "#64748B",
+    lineHeight: 20,
+  },
+
+  /* MEDIA & LOCATION */
+  mainImage: {
+    width: "100%",
+    minHeight: 180,
+    borderRadius: 16,
+    backgroundColor: "#E2E8F0",
+  },
+  imagePlaceholder: {
+    width: "100%",
+    height: 180,
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  placeholderText: {
+    color: "#94A3B8",
+    fontSize: 13,
+  },
+  locationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  locationText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "500",
+    color: "#0F172A",
+  },
+
+  /* CARDS */
+  infoCard: {
+    backgroundColor: "#FFFFFF",
+    padding: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    gap: 10,
+  },
+  cardHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  cardLabel: {
+    color: "#0F172A",
+    fontWeight: "600",
+    fontSize: 14,
+  },
+  badge: {
+    backgroundColor: "#F0FDF4",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#DCFCE7",
+  },
+  badgeText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#5F9C76",
+  },
+  avatarRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 2,
+  },
+  avatarCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#5F9C76",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
+  },
+  avatarText: {
+    color: "#FFFFFF",
+    fontWeight: "600",
+    fontSize: 11,
+  },
+  reqList: {
+    gap: 8,
+  },
+  reqItemRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  bulletPoint: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: "#5F9C76",
+  },
+  reqText: {
+    fontSize: 13,
+    color: "#475569",
+    flex: 1,
+  },
+  emptyText: {
+    color: "#94A3B8",
+    fontSize: 13,
+  },
+
+  /* ACTION BUTTON */
+  mainButton: {
+    backgroundColor: "#5F9C76",
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 4,
+  },
+  joinedButton: {
+    backgroundColor: "#FEF9C3",
+    borderWidth: 1,
+    borderColor: "#FEF08A",
+  },
+  disabledButton: {
+    backgroundColor: "#E2E8F0",
+  },
+  lockedButton: {
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+  },
+  buttonText: {
+    color: "#FFFFFF",
+    fontWeight: "600",
+    fontSize: 15,
+  },
+  joinedButtonText: {
+    color: "#854D0E",
+  },
+  lockedButtonText: {
+    color: "#EF4444",
+  },
+
+  /* NAVBAR & MODAL */
+  navbarContainer: {
+    borderTopWidth: 1,
+    borderColor: "#E2E8F0",
+    backgroundColor: "#FFFFFF",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(15, 23, 42, 0.4)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 20,
+  },
+  lockedModal: {
+    width: "100%",
+    maxWidth: 320,
+    borderRadius: 18,
+    backgroundColor: "#FFFFFF",
+    padding: 20,
+    alignItems: "center",
+  },
+  lockedIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#FEF2F2",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  lockedTitle: {
+    marginTop: 12,
+    fontSize: 17,
+    fontWeight: "700",
+    color: "#0F172A",
+  },
+  lockedMessage: {
+    marginTop: 6,
+    fontSize: 13,
+    color: "#64748B",
+    lineHeight: 18,
+    textAlign: "center",
+  },
+  modalButton: {
+    width: "100%",
+    marginTop: 18,
+    paddingVertical: 11,
+    borderRadius: 10,
+    backgroundColor: "#5F9C76",
+    alignItems: "center",
+  },
+  modalButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "600",
+    fontSize: 14,
+  },
 });
