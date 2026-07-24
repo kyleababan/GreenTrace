@@ -49,19 +49,23 @@ export default function Volunteer() {
             console.error("Unable to check linked report status:", error);
             return activity;
           }
-        })
+        }),
       );
 
       const openActivities = checkedActivities
         .filter(Boolean)
-        .sort((firstActivity, secondActivity) =>
-          (secondActivity.createdAt?.seconds || 0) - (firstActivity.createdAt?.seconds || 0)
+        .sort(
+          (firstActivity, secondActivity) =>
+            (secondActivity.createdAt?.seconds || 0) -
+            (firstActivity.createdAt?.seconds || 0),
         );
 
       setActivities(openActivities);
     } catch (error) {
       console.error("Unable to load volunteer activities:", error);
-      setLoadError("Unable to load volunteer activities. Please pull to refresh.");
+      setLoadError(
+        "Unable to load volunteer activities. Please pull to refresh.",
+      );
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -71,7 +75,7 @@ export default function Volunteer() {
   useFocusEffect(
     useCallback(() => {
       loadActivities();
-    }, [loadActivities])
+    }, [loadActivities]),
   );
 
   const filteredActivities = useMemo(() => {
@@ -81,92 +85,300 @@ export default function Volunteer() {
     return activities.filter((activity) =>
       [activity.title, activity.description, activity.locationName]
         .filter(Boolean)
-        .some((value) => value.toLowerCase().includes(keyword))
+        .some((value) => value.toLowerCase().includes(keyword)),
     );
   }, [activities, search]);
 
   return (
     <View style={styles.wrapper}>
       <View style={styles.container}>
+        {/* HOME-STYLE VOLUNTEER HEADER */}
         <View style={styles.topSection}>
-          <View style={styles.searchRow}>
-            <Image source={require("../assets/images/minicon.png")} style={styles.logo} />
+          <View style={styles.headerRow}>
+            <Image
+              source={require("../assets/images/logo.png")}
+              style={styles.logo}
+              resizeMode="contain"
+            />
             <View style={styles.searchBox}>
-              <Ionicons name="search" size={19} color="#6b7b70" />
-              <TextInput placeholder="Search volunteer activities" style={styles.searchInput} placeholderTextColor="#6b7b70" value={search} onChangeText={setSearch} />
+              <Ionicons name="search" size={18} color="#6B7B70" />
+              <TextInput
+                placeholder="Search volunteer activities..."
+                style={styles.searchInput}
+                placeholderTextColor="#6B7B70"
+                value={search}
+                onChangeText={setSearch}
+              />
+              {search.length > 0 && (
+                <TouchableOpacity onPress={() => setSearch("")} hitSlop={8}>
+                  <Ionicons name="close-circle" size={16} color="#94A3B8" />
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         </View>
 
         {loading ? (
-          <View style={styles.stateContainer}><ActivityIndicator size="large" color="#5F9C76" /></View>
+          <View style={styles.stateContainer}>
+            <ActivityIndicator size="small" color="#5F9C76" />
+          </View>
         ) : (
           <ScrollView
             style={styles.feed}
             contentContainerStyle={styles.feedContent}
             showsVerticalScrollIndicator={false}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => loadActivities(true)} colors={["#5F9C76"]} />}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={() => loadActivities(true)}
+                colors={["#5F9C76"]}
+              />
+            }
           >
-            {loadError ? <Text style={styles.emptyText}>{loadError}</Text> : null}
+            {loadError ? (
+              <Text style={styles.emptyText}>{loadError}</Text>
+            ) : null}
             {filteredActivities.map((activity) => {
-              const memberCount = Number.isFinite(Number(activity.joinedCount)) ? Number(activity.joinedCount) : activity.volunteers?.length || 0;
+              const memberCount = Number.isFinite(Number(activity.joinedCount))
+                ? Number(activity.joinedCount)
+                : activity.volunteers?.length || 0;
               const maxVolunteers = activity.maxVolunteers || 0;
 
               return (
                 <TouchableOpacity
                   key={activity.id}
                   style={styles.card}
-                  onPress={() => router.push({ pathname: "/volunteering", params: { volunteerId: activity.id } })}
+                  activeOpacity={0.7}
+                  onPress={() =>
+                    router.push({
+                      pathname: "/volunteering",
+                      params: { volunteerId: activity.id },
+                    })
+                  }
                 >
                   <View style={styles.cardLeft}>
-                    <Text style={styles.cardTitle} numberOfLines={1}>{activity.title || "Volunteer activity"}</Text>
-                    <Text style={styles.cardDescription} numberOfLines={3}>{activity.description || "No description provided."}</Text>
-                    <View style={styles.locationRow}>
-                      <Ionicons name="location-outline" size={15} color="#4d6756" />
-                      <Text style={styles.locationText} numberOfLines={1}>{activity.locationName || "Location not specified"}</Text>
+                    <View style={styles.cardHeader}>
+                      <Text style={styles.cardTitle} numberOfLines={1}>
+                        {activity.title || "Volunteer Activity"}
+                      </Text>
+                      <View style={styles.badge}>
+                        <Text style={styles.badgeText}>
+                          {memberCount}/{maxVolunteers}
+                        </Text>
+                      </View>
                     </View>
+
+                    <Text style={styles.cardDescription} numberOfLines={2}>
+                      {activity.description || "No description provided."}
+                    </Text>
+
                     <View style={styles.cardFooter}>
-                      <Text style={styles.memberCount}>{memberCount} / {maxVolunteers} joined</Text>
-                      <View style={styles.volunteerButton}><Text style={styles.volunteerButtonText}>View</Text></View>
+                      <View style={styles.locationRow}>
+                        <Ionicons
+                          name="location-outline"
+                          size={14}
+                          color="#64748B"
+                        />
+                        <Text style={styles.locationText} numberOfLines={1}>
+                          {activity.locationName || "Location not specified"}
+                        </Text>
+                      </View>
+                      <Text style={styles.viewLink}>View details ›</Text>
                     </View>
                   </View>
-                  {activity.imageUrl ? <Image source={{ uri: activity.imageUrl }} style={styles.cardImage} /> : <View style={styles.imagePlaceholder}><Ionicons name="image-outline" size={28} color="#71907d" /></View>}
+
+                  {activity.imageUrl ? (
+                    <Image
+                      source={{ uri: activity.imageUrl }}
+                      style={styles.cardImage}
+                    />
+                  ) : (
+                    <View style={styles.imagePlaceholder}>
+                      <Ionicons
+                        name="image-outline"
+                        size={22}
+                        color="#CBD5E1"
+                      />
+                    </View>
+                  )}
                 </TouchableOpacity>
               );
             })}
-            {!loadError && !filteredActivities.length ? <Text style={styles.emptyText}>No open volunteer activities found.</Text> : null}
+            {!loadError && !filteredActivities.length ? (
+              <Text style={styles.emptyText}>
+                No open volunteer activities found.
+              </Text>
+            ) : null}
           </ScrollView>
         )}
 
-        <View style={styles.navbarContainer}><Navbar /></View>
+        <View style={styles.navbarContainer}>
+          <Navbar />
+        </View>
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  wrapper: { flex: 1, alignItems: "center", backgroundColor: "#f5f6f5" },
-  container: { flex: 1, width: "100%", maxWidth: 500, backgroundColor: "#f5f6f5" },
-  topSection: { padding: 20, backgroundColor: "#5F9C76" },
-  searchRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  logo: { width: 46, height: 46 },
-  searchBox: { flex: 1, flexDirection: "row", alignItems: "center", gap: 7, backgroundColor: "#fff", borderRadius: 20, paddingHorizontal: 14 },
-  searchInput: { flex: 1, height: 42, color: "#223229" },
-  stateContainer: { flex: 1, alignItems: "center", justifyContent: "center" },
-  feed: { flex: 1, paddingHorizontal: 16 },
-  feedContent: { paddingVertical: 16, gap: 12, flexGrow: 1 },
-  card: { flexDirection: "row", backgroundColor: "#fff", borderRadius: 12, padding: 12, gap: 12, minHeight: 138 },
-  cardLeft: { flex: 1, justifyContent: "space-between", minWidth: 0 },
-  cardTitle: { fontSize: 16, fontWeight: "700", color: "#1d2b21" },
-  cardDescription: { fontSize: 12, color: "#4c5d51", lineHeight: 17, marginTop: 5 },
-  locationRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 8 },
-  locationText: { flex: 1, fontSize: 12, color: "#4d6756" },
-  cardFooter: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 9 },
-  memberCount: { fontSize: 12, color: "#27734d", fontWeight: "700" },
-  volunteerButton: { backgroundColor: "#5F9C76", paddingVertical: 7, paddingHorizontal: 15, borderRadius: 7 },
-  volunteerButtonText: { color: "#fff", fontWeight: "700", fontSize: 12 },
-  cardImage: { width: 102, height: 102, borderRadius: 9, alignSelf: "center" },
-  imagePlaceholder: { width: 102, height: 102, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: "#dfe8e2", alignSelf: "center" },
-  emptyText: { textAlign: "center", color: "#63756a", marginTop: 28, paddingHorizontal: 20 },
-  navbarContainer: { borderTopWidth: 1, borderColor: "#ddd", backgroundColor: "#fff" },
+  wrapper: {
+    flex: 1,
+    alignItems: "center",
+    backgroundColor: "#f6f6f6",
+  },
+  container: {
+    flex: 1,
+    width: "100%",
+    maxWidth: 480,
+    backgroundColor: "#f6f6f6",
+  },
+
+  /* HEADER STYLES - ALIGNED WITH HOME FEED */
+  topSection: {
+    backgroundColor: "#5F9C76",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  logo: {
+    width: 38,
+    height: 38,
+    tintColor: "#f6f6f6",
+  },
+  searchBox: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 42,
+    gap: 8,
+  },
+  searchInput: {
+    flex: 1,
+    height: "100%",
+    color: "#0F172A",
+    fontSize: 14,
+  },
+
+  /* CONTENT STYLES */
+  stateContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  feed: {
+    flex: 1,
+    paddingHorizontal: 16,
+  },
+  feedContent: {
+    paddingVertical: 16,
+    gap: 12,
+    flexGrow: 1,
+  },
+
+  /* CARD STYLES */
+  card: {
+    flexDirection: "row",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 14,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  cardLeft: {
+    flex: 1,
+    justifyContent: "space-between",
+  },
+  cardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  cardTitle: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#0F172A",
+    letterSpacing: -0.2,
+  },
+  badge: {
+    backgroundColor: "#F0FDF4",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#DCFCE7",
+  },
+  badgeText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#5F9C76",
+  },
+  cardDescription: {
+    fontSize: 13,
+    color: "#64748B",
+    lineHeight: 18,
+    marginTop: 4,
+  },
+  cardFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 10,
+  },
+  locationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    flex: 1,
+    marginRight: 8,
+  },
+  locationText: {
+    fontSize: 12,
+    color: "#64748B",
+    fontWeight: "400",
+  },
+  viewLink: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#5F9C76",
+  },
+  cardImage: {
+    width: 84,
+    height: 84,
+    borderRadius: 10,
+    backgroundColor: "#F1F5F9",
+  },
+  imagePlaceholder: {
+    width: 84,
+    height: 84,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#F1F5F9",
+  },
+  emptyText: {
+    textAlign: "center",
+    color: "#94A3B8",
+    fontSize: 14,
+    marginTop: 32,
+    paddingHorizontal: 20,
+  },
+
+  /* NAVBAR CONTAINER */
+  navbarContainer: {
+    borderTopWidth: 1,
+    borderColor: "#E2E8F0",
+    backgroundColor: "#FFFFFF",
+  },
 });

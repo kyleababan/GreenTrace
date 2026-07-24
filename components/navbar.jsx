@@ -1,5 +1,5 @@
-import { View, StyleSheet, TouchableOpacity, Image } from "react-native";
-import { useRouter, usePathname } from "expo-router";
+import { usePathname, useRouter } from "expo-router";
+import { Image, StyleSheet, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function Navbar() {
@@ -23,32 +23,32 @@ export default function Navbar() {
       icon: require("../assets/images/notif.png"), // TODO
     },
     {
-      name: "settings",
-      route: "/settings",
+      name: "profile",
+      route: "/profile",
       icon: require("../assets/images/acc.png"), // TODO
     },
   ];
 
   return (
     <SafeAreaView edges={["bottom"]} style={styles.safeArea}>
-  <View style={styles.navbar}>
-      {tabs.map((tab, index) => {
-        const isActive = pathname === tab.route;
+      <View style={styles.navbar}>
+        {tabs.map((tab, index) => {
+          const isActive = pathname === tab.route;
 
-        return (
-          <TouchableOpacity
-            key={index}
-            style={styles.navItem}
-            onPress={() => router.push(tab.route)}
-          >
-            <Image source={tab.icon} style={styles.icon} />
+          return (
+            <TouchableOpacity
+              key={index}
+              style={styles.navItem}
+              onPress={() => router.push(tab.route)}
+            >
+              <Image source={tab.icon} style={styles.icon} />
 
-            {/* Active underline */}
-            {isActive && <View style={styles.activeLine} />}
-          </TouchableOpacity>
-        );
-      })}
-    </View>
+              {/* Active underline */}
+              {isActive && <View style={styles.activeLine} />}
+            </TouchableOpacity>
+          );
+        })}
+      </View>
     </SafeAreaView>
   );
 }
@@ -67,7 +67,6 @@ const styles = StyleSheet.create({
   navItem: {
     alignItems: "center",
     paddingHorizontal: 35,
-    
   },
 
   icon: {
