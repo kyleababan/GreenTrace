@@ -32,19 +32,22 @@ export default function Navbar() {
   return (
     <SafeAreaView edges={["bottom"]} style={styles.safeArea}>
       <View style={styles.navbar}>
-        {tabs.map((tab, index) => {
+        {tabs.map((tab) => {
           const isActive = pathname === tab.route;
 
           return (
             <TouchableOpacity
-              key={index}
+              key={tab.route}
               style={styles.navItem}
-              onPress={() => router.push(tab.route)}
+              disabled={isActive}
+              onPress={() => router.replace(tab.route)}
             >
               <Image source={tab.icon} style={styles.icon} />
 
-              {/* Active underline */}
-              {isActive && <View style={styles.activeLine} />}
+              {/* Keep the indicator mounted so tab changes do not shift or flash. */}
+              <View
+                style={[styles.activeLine, !isActive && styles.inactiveLine]}
+              />
             </TouchableOpacity>
           );
         })}
@@ -81,5 +84,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#5F9C76",
     marginTop: 4,
     borderRadius: 2,
+  },
+
+  inactiveLine: {
+    opacity: 0,
   },
 });

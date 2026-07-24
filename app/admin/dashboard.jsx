@@ -1,6 +1,14 @@
 import { collection, getDocs } from "firebase/firestore";
 import { useEffect, useRef, useState } from "react";
-import { Animated, Easing, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import {
+  ActivityIndicator,
+  Animated,
+  Easing,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import { db } from "../../firebaseConfig";
 
 function AnalyticsBar({ label, value, color, highestValue, chartHeight, index }) {
@@ -69,17 +77,7 @@ function AnalyticsBar({ label, value, color, highestValue, chartHeight, index })
 export default function Dashboard() {
   const { width } = useWindowDimensions();
 
-  const [stats, setStats] = useState({
-
-    critical: 0,
-
-    moderate: 0,
-
-    cleaned: 0,
-
-    ongoing: 0,
-
-});
+  const [stats, setStats] = useState(null);
 
 const loadDashboard = async () => {
 
@@ -135,6 +133,12 @@ const loadDashboard = async () => {
     } catch (error) {
 
         console.log(error);
+        setStats({
+            critical: 0,
+            moderate: 0,
+            cleaned: 0,
+            ongoing: 0,
+        });
 
     }
 
@@ -154,7 +158,9 @@ useEffect(() => {
 
   const contentWidth = width - sidebarWidth;
   const chartHeight = isDesktop ? 360 : 250;
-  const highestValue = Math.max(...Object.values(stats), 1);
+  const highestValue = stats
+    ? Math.max(...Object.values(stats), 1)
+    : 1;
   const chartStats = [
     { key: "critical", label: "Critical Situation", color: "#FF6666" },
     { key: "moderate", label: "Moderate Situation", color: "#FFCF30" },
@@ -166,26 +172,38 @@ useEffect(() => {
     <View style={styles.container}>
       <Text style={styles.title}>Dashboard</Text>
 
-      <View style={[styles.cards, { flexWrap: isDesktop ? "nowrap" : "wrap" }]}>
-        {chartStats.map((stat, index) => (
-          <View
-            key={stat.key}
-            style={[
-              styles.cardContainer,
-              { width: isDesktop ? contentWidth * 0.22 : contentWidth * 0.45 },
-            ]}
-          >
-            <AnalyticsBar
-              label={stat.label}
-              value={stats[stat.key]}
-              color={stat.color}
-              highestValue={highestValue}
-              chartHeight={chartHeight}
-              index={index}
-            />
-          </View>
-        ))}
-      </View>
+      {stats ? (
+        <View
+          style={[styles.cards, { flexWrap: isDesktop ? "nowrap" : "wrap" }]}
+        >
+          {chartStats.map((stat, index) => (
+            <View
+              key={stat.key}
+              style={[
+                styles.cardContainer,
+                {
+                  width: isDesktop
+                    ? contentWidth * 0.22
+                    : contentWidth * 0.45,
+                },
+              ]}
+            >
+              <AnalyticsBar
+                label={stat.label}
+                value={stats[stat.key]}
+                color={stat.color}
+                highestValue={highestValue}
+                chartHeight={chartHeight}
+                index={index}
+              />
+            </View>
+          ))}
+        </View>
+      ) : (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#599A74" />
+        </View>
+      )}
     </View>
   );
 }
@@ -201,6 +219,12 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 50,
     color: '#599A74',
+  },
+
+  loadingContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   cards: {

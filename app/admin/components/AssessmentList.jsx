@@ -152,12 +152,12 @@ export default function AssessmentList({
         styles.statusCircle,
         {
             backgroundColor:
-                status === "critical"
-                    ? "#FF3B30"
-                    : status === "moderate"
-                    ? "#FFC107"
-                    : status === "cleaned"
-                    ? "#2DCC6F"
+                post.status === "critical"
+                    ? "#FF5B5B"
+                    : post.status === "moderate"
+                    ? "#FFC940"
+                    : post.status === "cleaned"
+                    ? "#34C759"
                     : "#A5A5A5",
         },
     ]}
@@ -325,11 +325,13 @@ pointsText:{
 
     statusCircle: {
     position: "absolute",
-    top: 10,
-    right: 10,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    top: 12,
+    right: 12,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
     zIndex: 5,
 },
 

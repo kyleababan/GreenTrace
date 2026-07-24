@@ -723,8 +723,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   backIcon: {
-    width: 22,
-    height: 22,
+    width: 32,
+    height: 32,
     resizeMode: "contain",
     tintColor: "#FFFFFF",
   },

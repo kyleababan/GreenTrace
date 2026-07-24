@@ -37,6 +37,34 @@ export default function Signup() {
     return /^09\d{9}$/.test(phone.trim());
   };
 
+  const formatBirthDate = (value) => {
+    const digits = value.replace(/\D/g, "").slice(0, 8);
+
+    if (digits.length >= 4) {
+      return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+    }
+
+    if (digits.length >= 2) {
+      return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+    }
+
+    return digits;
+  };
+
+  const handleBirthDateChange = (value) => {
+    const removedAutoSlash =
+      value.length < birthDate.length &&
+      birthDate.endsWith("/") &&
+      value === birthDate.slice(0, -1);
+
+    if (removedAutoSlash) {
+      setBirthDate(formatBirthDate(value.slice(0, -1)));
+      return;
+    }
+
+    setBirthDate(formatBirthDate(value));
+  };
+
   const isValidBirthDate = (date) => {
     if (
       !/^(0[1-9]|1[0-2])\/(0[1-9]|[12][0-9]|3[01])\/\d{4}$/.test(date.trim())
@@ -194,7 +222,7 @@ export default function Signup() {
                 style={styles.input}
                 value={cellNumber}
                 onChangeText={setCellNumber}
-                placeholder="Cell Number (e.g. 09123456789)"
+                placeholder="Phone Number (e.g. 09123456789)"
                 placeholderTextColor="#888"
                 keyboardType="phone-pad"
                 maxLength={11}
@@ -202,10 +230,10 @@ export default function Signup() {
               <TextInput
                 style={styles.input}
                 value={birthDate}
-                onChangeText={setBirthDate}
+                onChangeText={handleBirthDateChange}
                 placeholder="Birth Date (MM/DD/YYYY)"
                 placeholderTextColor="#888"
-                keyboardType="numbers-and-punctuation"
+                keyboardType="number-pad"
                 maxLength={10}
               />
 
@@ -240,8 +268,8 @@ export default function Signup() {
               {/* Switch to Login */}
               <Text style={styles.loginText}>
                 Already have an account?{" "}
-                <Link href="/login" asChild>
-                  <Text style={styles.loginLink}>Log In</Text>
+                <Link href="/signin" asChild>
+                  <Text style={styles.loginLink}>Sign In</Text>
                 </Link>
               </Text>
             </View>
@@ -395,6 +423,5 @@ const styles = StyleSheet.create({
   },
   loginLink: {
     fontWeight: "700",
-    textDecorationLine: "underline",
   },
 });

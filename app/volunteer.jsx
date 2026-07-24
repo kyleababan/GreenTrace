@@ -6,6 +6,7 @@ import {
   ActivityIndicator,
   Image,
   RefreshControl,
+  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -90,137 +91,145 @@ export default function Volunteer() {
   }, [activities, search]);
 
   return (
-    <View style={styles.wrapper}>
-      <View style={styles.container}>
-        {/* HOME-STYLE VOLUNTEER HEADER */}
-        <View style={styles.topSection}>
-          <View style={styles.headerRow}>
-            <Image
-              source={require("../assets/images/logo.png")}
-              style={styles.logo}
-              resizeMode="contain"
-            />
-            <View style={styles.searchBox}>
-              <Ionicons name="search" size={18} color="#6B7B70" />
-              <TextInput
-                placeholder="Search volunteer activities..."
-                style={styles.searchInput}
-                placeholderTextColor="#6B7B70"
-                value={search}
-                onChangeText={setSearch}
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.wrapper}>
+        <View style={styles.container}>
+          {/* HOME-STYLE VOLUNTEER HEADER */}
+          <View style={styles.topSection}>
+            <View style={styles.headerRow}>
+              <Image
+                source={require("../assets/images/logo.png")}
+                style={styles.logo}
+                resizeMode="contain"
               />
-              {search.length > 0 && (
-                <TouchableOpacity onPress={() => setSearch("")} hitSlop={8}>
-                  <Ionicons name="close-circle" size={16} color="#94A3B8" />
-                </TouchableOpacity>
-              )}
+              <View style={styles.searchBox}>
+                <Ionicons name="search" size={18} color="#6B7B70" />
+                <TextInput
+                  placeholder="Search volunteer activities..."
+                  style={styles.searchInput}
+                  placeholderTextColor="#6B7B70"
+                  value={search}
+                  onChangeText={setSearch}
+                />
+                {search.length > 0 && (
+                  <TouchableOpacity onPress={() => setSearch("")} hitSlop={8}>
+                    <Ionicons name="close-circle" size={16} color="#94A3B8" />
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
           </View>
-        </View>
 
-        {loading ? (
-          <View style={styles.stateContainer}>
-            <ActivityIndicator size="small" color="#5F9C76" />
-          </View>
-        ) : (
-          <ScrollView
-            style={styles.feed}
-            contentContainerStyle={styles.feedContent}
-            showsVerticalScrollIndicator={false}
-            refreshControl={
-              <RefreshControl
-                refreshing={refreshing}
-                onRefresh={() => loadActivities(true)}
-                colors={["#5F9C76"]}
-              />
-            }
-          >
-            {loadError ? (
-              <Text style={styles.emptyText}>{loadError}</Text>
-            ) : null}
-            {filteredActivities.map((activity) => {
-              const memberCount = Number.isFinite(Number(activity.joinedCount))
-                ? Number(activity.joinedCount)
-                : activity.volunteers?.length || 0;
-              const maxVolunteers = activity.maxVolunteers || 0;
+          {loading ? (
+            <View style={styles.stateContainer}>
+              <ActivityIndicator size="small" color="#5F9C76" />
+            </View>
+          ) : (
+            <ScrollView
+              style={styles.feed}
+              contentContainerStyle={styles.feedContent}
+              showsVerticalScrollIndicator={false}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={() => loadActivities(true)}
+                  colors={["#5F9C76"]}
+                />
+              }
+            >
+              {loadError ? (
+                <Text style={styles.emptyText}>{loadError}</Text>
+              ) : null}
+              {filteredActivities.map((activity) => {
+                const memberCount = Number.isFinite(
+                  Number(activity.joinedCount),
+                )
+                  ? Number(activity.joinedCount)
+                  : activity.volunteers?.length || 0;
+                const maxVolunteers = activity.maxVolunteers || 0;
 
-              return (
-                <TouchableOpacity
-                  key={activity.id}
-                  style={styles.card}
-                  activeOpacity={0.7}
-                  onPress={() =>
-                    router.push({
-                      pathname: "/volunteering",
-                      params: { volunteerId: activity.id },
-                    })
-                  }
-                >
-                  <View style={styles.cardLeft}>
-                    <View style={styles.cardHeader}>
-                      <Text style={styles.cardTitle} numberOfLines={1}>
-                        {activity.title || "Volunteer Activity"}
+                return (
+                  <TouchableOpacity
+                    key={activity.id}
+                    style={styles.card}
+                    activeOpacity={0.7}
+                    onPress={() =>
+                      router.push({
+                        pathname: "/volunteering",
+                        params: { volunteerId: activity.id },
+                      })
+                    }
+                  >
+                    <View style={styles.cardLeft}>
+                      <View style={styles.cardHeader}>
+                        <Text style={styles.cardTitle} numberOfLines={1}>
+                          {activity.title || "Volunteer Activity"}
+                        </Text>
+                        <View style={styles.badge}>
+                          <Text style={styles.badgeText}>
+                            {memberCount}/{maxVolunteers}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <Text style={styles.cardDescription} numberOfLines={2}>
+                        {activity.description || "No description provided."}
                       </Text>
-                      <View style={styles.badge}>
-                        <Text style={styles.badgeText}>
-                          {memberCount}/{maxVolunteers}
-                        </Text>
+
+                      <View style={styles.cardFooter}>
+                        <View style={styles.locationRow}>
+                          <Ionicons
+                            name="location-outline"
+                            size={14}
+                            color="#64748B"
+                          />
+                          <Text style={styles.locationText} numberOfLines={1}>
+                            {activity.locationName || "Location not specified"}
+                          </Text>
+                        </View>
+                        <Text style={styles.viewLink}>View details ›</Text>
                       </View>
                     </View>
 
-                    <Text style={styles.cardDescription} numberOfLines={2}>
-                      {activity.description || "No description provided."}
-                    </Text>
-
-                    <View style={styles.cardFooter}>
-                      <View style={styles.locationRow}>
-                        <Ionicons
-                          name="location-outline"
-                          size={14}
-                          color="#64748B"
-                        />
-                        <Text style={styles.locationText} numberOfLines={1}>
-                          {activity.locationName || "Location not specified"}
-                        </Text>
-                      </View>
-                      <Text style={styles.viewLink}>View details ›</Text>
-                    </View>
-                  </View>
-
-                  {activity.imageUrl ? (
-                    <Image
-                      source={{ uri: activity.imageUrl }}
-                      style={styles.cardImage}
-                    />
-                  ) : (
-                    <View style={styles.imagePlaceholder}>
-                      <Ionicons
-                        name="image-outline"
-                        size={22}
-                        color="#CBD5E1"
+                    {activity.imageUrl ? (
+                      <Image
+                        source={{ uri: activity.imageUrl }}
+                        style={styles.cardImage}
                       />
-                    </View>
-                  )}
-                </TouchableOpacity>
-              );
-            })}
-            {!loadError && !filteredActivities.length ? (
-              <Text style={styles.emptyText}>
-                No open volunteer activities found.
-              </Text>
-            ) : null}
-          </ScrollView>
-        )}
+                    ) : (
+                      <View style={styles.imagePlaceholder}>
+                        <Ionicons
+                          name="image-outline"
+                          size={22}
+                          color="#CBD5E1"
+                        />
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+              {!loadError && !filteredActivities.length ? (
+                <Text style={styles.emptyText}>
+                  No open volunteer activities found.
+                </Text>
+              ) : null}
+            </ScrollView>
+          )}
 
-        <View style={styles.navbarContainer}>
-          <Navbar />
+          <View style={styles.navbarContainer}>
+            <Navbar />
+          </View>
         </View>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: "#5F9C76",
+  },
   wrapper: {
     flex: 1,
     alignItems: "center",
@@ -229,7 +238,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     width: "100%",
-    maxWidth: 480,
+    maxWidth: 500,
     backgroundColor: "#f6f6f6",
   },
 
@@ -237,7 +246,12 @@ const styles = StyleSheet.create({
   topSection: {
     backgroundColor: "#5F9C76",
     paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingVertical: 20,
+    elevation: 3,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
   },
   headerRow: {
     flexDirection: "row",

@@ -71,7 +71,7 @@ export default function CreateReport() {
   const router = useRouter();
 
   const { id } = useLocalSearchParams();
-  const [status, setStatus] = useState("red");
+  const [status, setStatus] = useState("critical");
   const [caption, setCaption] = useState("");
 
 const [image, setImage] = useState(null);
@@ -131,11 +131,7 @@ const loadPost = async () => {
 
         setLocationName(data.locationName);
 
-        setStatus(
-            data.status === "critical"
-                ? "red"
-                : "yellow"
-        );
+        setStatus((data.status || "moderate").toLowerCase());
 
         setImage({
             uri: data.imageUrl,
@@ -214,22 +210,25 @@ const updatePost = async () => {
 
         setUploading(true);
 
+        const statusIsLocked =
+          status === "ongoing" ||
+          status === "on-going" ||
+          status === "cleaned";
+
+        const updates = {
+          caption,
+          locationName,
+        };
+
+        if (!statusIsLocked) {
+          updates.status = status;
+        }
+
         await updateDoc(
 
             doc(db, "posts", id),
 
-            {
-
-                caption,
-
-                locationName,
-
-                status:
-                    status === "red"
-                        ? "critical"
-                        : "moderate",
-
-            }
+            updates
 
         );
 
@@ -334,16 +333,28 @@ const updatePost = async () => {
               
               {/* STATUS DOT */}
               <TouchableOpacity
-  onPress={() =>
-    setStatus(status === "red" ? "yellow" : "red")
-  }
-  style={[
-    styles.statusDot,
-    status === "red"
-      ? styles.statusRed
-      : styles.statusYellow,
-  ]}
-/>
+                disabled={
+                  status === "ongoing" ||
+                  status === "on-going" ||
+                  status === "cleaned"
+                }
+                onPress={() =>
+                  setStatus(status === "critical" ? "moderate" : "critical")
+                }
+                style={[
+                  styles.statusDot,
+                  {
+                    backgroundColor:
+                      status === "critical"
+                        ? "#FF5B5B"
+                        : status === "moderate"
+                          ? "#FFC940"
+                          : status === "cleaned"
+                            ? "#34C759"
+                            : "#A5A5A5",
+                  },
+                ]}
+              />
 
   {image ? (
 
@@ -613,24 +624,17 @@ navbarContainer: {
   },
 
   statusDot: {
-  width: 30,
-  height: 30,
-  borderRadius: 20,
-  position: "absolute",
-  top: 10,
-  right: 10,
-
-  zIndex: 999,
-  elevation: 999,
-},
-    
-statusRed: {
-  backgroundColor: "red",
-},
-
-statusYellow: {
-  backgroundColor: "yellow",
-},
+    position: "absolute",
+    top: 12,
+    right: 12,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
+    zIndex: 999,
+    elevation: 999,
+  },
 
 modalBackground: {
   flex: 1,

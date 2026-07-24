@@ -484,7 +484,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#F4F6F8",
     width: "100%",
-    maxWidth: 480,
+    maxWidth: 500,
   },
 
   /* Top Section */
