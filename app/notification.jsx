@@ -1,8 +1,10 @@
 import { useRouter } from "expo-router";
 import {
+  ActivityIndicator,
+  Animated,
+  Easing,
   Image,
   SafeAreaView,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -10,7 +12,7 @@ import {
 } from "react-native";
 import Navbar from "../components/navbar";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   collection,
@@ -28,6 +30,7 @@ export default function Notification() {
   const router = useRouter();
 
   const currentUser = auth.currentUser;
+  const listEntrance = useRef(new Animated.Value(0)).current;
 
   const getActorText = (item) => {
     const names = item.actorNames || [];
@@ -43,43 +46,65 @@ export default function Notification() {
 
   // This creates 5 placeholder notifications
   const [notifications, setNotifications] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const loadNotifications = async () => {
-    if (!currentUser) return;
+  const loadNotifications = useCallback(async () => {
+    if (!currentUser) {
+      setLoading(false);
+      return;
+    }
 
-    const q = query(
-      collection(db, "notifications"),
-      where("userId", "==", currentUser.uid),
-      orderBy("createdAt", "desc"),
-    );
+    try {
+      const q = query(
+        collection(db, "notifications"),
+        where("userId", "==", currentUser.uid),
+        orderBy("createdAt", "desc"),
+      );
 
-    const snapshot = await getDocs(q);
+      const snapshot = await getDocs(q);
 
-    const data = await Promise.all(
-      snapshot.docs.map(async (notification) => {
-        const item = {
-          id: notification.id,
-          ...notification.data(),
-        };
+      const data = await Promise.all(
+        snapshot.docs.map(async (notification) => {
+          const item = {
+            id: notification.id,
+            ...notification.data(),
+          };
 
-        try {
-          const postSnap = await getDoc(doc(db, "posts", item.postId));
+          try {
+            const postSnap = await getDoc(doc(db, "posts", item.postId));
 
-          if (postSnap.exists()) {
-            item.postImage = postSnap.data().imageUrl;
-          }
-        } catch (e) {}
+            if (postSnap.exists()) {
+              item.postImage = postSnap.data().imageUrl;
+            }
+          } catch (_error) {}
 
-        return item;
-      }),
-    );
+          return item;
+        }),
+      );
 
-    setNotifications(data);
-  };
+      setNotifications(data);
+    } catch (error) {
+      console.log("Error loading notifications:", error);
+    } finally {
+      setLoading(false);
+    }
+  }, [currentUser]);
 
   useEffect(() => {
     loadNotifications();
-  }, []);
+  }, [loadNotifications]);
+
+  useEffect(() => {
+    if (loading) return;
+
+    listEntrance.setValue(0);
+    Animated.timing(listEntrance, {
+      toValue: 1,
+      duration: 450,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [listEntrance, loading]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -93,21 +118,42 @@ export default function Notification() {
           </View>
 
           {/* CONTENT */}
-          <ScrollView style={styles.feed} showsVerticalScrollIndicator={false}>
-            {notifications.map((item) => (
-              <TouchableOpacity
-                key={item.id}
-                style={styles.notificationCard}
-                activeOpacity={0.8}
-                onPress={() =>
-                  router.push({
-                    pathname: "/post",
-                    params: {
-                      id: item.postId,
+          {loading ? (
+            <View style={styles.stateContainer}>
+              <ActivityIndicator size="small" color="#5F9C76" />
+            </View>
+          ) : (
+            <Animated.ScrollView
+              style={[
+                styles.feed,
+                {
+                  opacity: listEntrance,
+                  transform: [
+                    {
+                      translateY: listEntrance.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [28, 0],
+                      }),
                     },
-                  })
-                }
-              >
+                  ],
+                },
+              ]}
+              showsVerticalScrollIndicator={false}
+            >
+              {notifications.map((item) => (
+                <TouchableOpacity
+                  key={item.id}
+                  style={styles.notificationCard}
+                  activeOpacity={0.8}
+                  onPress={() =>
+                    router.push({
+                      pathname: "/post",
+                      params: {
+                        id: item.postId,
+                      },
+                    })
+                  }
+                >
                 {/* LEFT: Avatar/Profile Icon */}
                 <Image
                   source={require("../assets/images/profile2.png")}
@@ -140,27 +186,16 @@ export default function Notification() {
                 ) : (
                   <View style={styles.postThumbnail} />
                 )}
-              </TouchableOpacity>
-            ))}
+                </TouchableOpacity>
+              ))}
 
-            {notifications.length === 0 && (
-              <View
-                style={{
-                  marginTop: 60,
-                  alignItems: "center",
-                }}
-              >
-                <Text
-                  style={{
-                    color: "#777",
-                    fontSize: 16,
-                  }}
-                >
-                  No notifications yet.
-                </Text>
-              </View>
-            )}
-          </ScrollView>
+              {notifications.length === 0 && (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyText}>No notifications yet.</Text>
+                </View>
+              )}
+            </Animated.ScrollView>
+          )}
 
           {/* NAVBAR */}
           <View style={styles.navbarContainer}>
@@ -194,6 +229,11 @@ const styles = StyleSheet.create({
     width: "100%",
     maxWidth: 500,
     backgroundColor: "#F5F5F5",
+  },
+  stateContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
   },
   topSection: {
     paddingHorizontal: 25,
@@ -250,6 +290,14 @@ const styles = StyleSheet.create({
   userAction: {
     fontSize: 12,
     color: "#666",
+  },
+  emptyState: {
+    marginTop: 60,
+    alignItems: "center",
+  },
+  emptyText: {
+    color: "#777",
+    fontSize: 16,
   },
 
   navbarContainer: {
