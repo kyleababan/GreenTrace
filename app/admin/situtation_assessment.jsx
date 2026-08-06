@@ -6,7 +6,7 @@ import VolunteerPostCreate from "./assessments/post_view/VolunteerPostCreate";
 import AssessmentList from "./components/AssessmentList";
 
 export default function SituationAssessment() {
-  const [activeTab, setActiveTab] = useState('ongoing');
+  const [activeTab, setActiveTab] = useState('pending');
   const [selectedPost, setSelectedPost] = useState(null);
 const [search, setSearch] = useState("");
 const [selectedVolunteerPost, setSelectedVolunteerPost] = useState(null);
@@ -57,25 +57,31 @@ const renderContent = () => {
         <>
           <View style={styles.cardsRow}>
             <Text
-              style={[{ backgroundColor: '#FF6666', color: '#fff', borderRadius: 5, width: '24%', height: '100%', textAlign: 'center', paddingVertical: 10 }, activeTab === 'critical' && styles.activeTab]}
+              style={[{ backgroundColor: '#A5A5A5', color: '#fff', borderRadius: 5, width: '19%', height: '100%', textAlign: 'center', paddingVertical: 10 }, activeTab === 'pending' && styles.activeTab]}
+              onPress={() => { setActiveTab('pending'); setSelectedPost(null); }}
+            >
+              Not Assessed
+            </Text>
+            <Text
+              style={[{ backgroundColor: '#FF6666', color: '#fff', borderRadius: 5, width: '19%', height: '100%', textAlign: 'center', paddingVertical: 10 }, activeTab === 'critical' && styles.activeTab]}
               onPress={() => { setActiveTab('critical'); setSelectedPost(null); }}
             >
               Critical
             </Text>
             <Text
-              style={[{ backgroundColor: '#FFCF30', color: '#fff', borderRadius: 5, width: '24%', height: '100%', textAlign: 'center', paddingVertical: 10 }, activeTab === 'moderate' && styles.activeTab]}
+              style={[{ backgroundColor: '#FFCF30', color: '#fff', borderRadius: 5, width: '19%', height: '100%', textAlign: 'center', paddingVertical: 10 }, activeTab === 'moderate' && styles.activeTab]}
               onPress={() => { setActiveTab('moderate'); setSelectedPost(null); }}
             >
               Moderate
             </Text>
             <Text
-              style={[{ backgroundColor: '#2DCC6F', color: '#fff', borderRadius: 5, width: '24%', height: '100%', textAlign: 'center', paddingVertical: 10 }, activeTab === 'cleaned' && styles.activeTab]}
+              style={[{ backgroundColor: '#2DCC6F', color: '#fff', borderRadius: 5, width: '19%', height: '100%', textAlign: 'center', paddingVertical: 10 }, activeTab === 'cleaned' && styles.activeTab]}
               onPress={() => { setActiveTab('cleaned'); setSelectedPost(null); }}
             >
               Cleaned
             </Text>
             <Text
-              style={[{ backgroundColor: '#A5A5A5', color: '#fff', borderRadius: 5, width: '24%', height: '100%', textAlign: 'center', paddingVertical: 10 }, activeTab === 'ongoing' && styles.activeTab]}
+              style={[{ backgroundColor: '#7DD3FC', color: '#0F172A', borderRadius: 5, width: '19%', height: '100%', textAlign: 'center', paddingVertical: 10 }, activeTab === 'ongoing' && styles.activeTab]}
               onPress={() => { setActiveTab('ongoing'); setSelectedPost(null); }}
             >
               On-going

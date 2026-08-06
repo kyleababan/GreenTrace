@@ -1,14 +1,15 @@
 import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useState } from 'react';
+import { useEffect, useState } from "react";
 import {
-    Image,
-    Modal,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  Image,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import Navbar from "../components/navbar";
 
@@ -16,54 +17,37 @@ import * as Location from "expo-location";
 
 import { auth, db } from "../firebaseConfig";
 
+import { doc, getDoc, updateDoc } from "firebase/firestore";
 
-import {
-    doc,
-    getDoc,
-    updateDoc,
-} from "firebase/firestore";
+const formatPostedAt = (timestamp) => {
+  if (!timestamp) return "Posted just now";
+  const date = typeof timestamp.toDate === "function" ? timestamp.toDate() : new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return "Posted just now";
+  return `Posted ${date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
+};
 
 export default function CreateReport() {
-
-  
-
   useEffect(() => {
+    const loadUser = async () => {
+      try {
+        const currentUser = auth.currentUser;
 
-  const loadUser = async () => {
+        if (!currentUser) return;
 
-    try {
+        const userSnap = await getDoc(doc(db, "users", currentUser.uid));
 
-      const currentUser = auth.currentUser;
+        if (userSnap.exists()) {
+          const data = userSnap.data();
 
-      if (!currentUser) return;
-
-      const userSnap = await getDoc(
-        doc(db, "users", currentUser.uid)
-      );
-
-      if (userSnap.exists()) {
-
-        const data = userSnap.data();
-
-        setUserName(
-          `${data.firstName} ${data.lastName}`
-        );
-
+          setUserName(`${data.firstName} ${data.lastName}`);
+        }
+      } catch (error) {
+        console.log(error);
       }
+    };
 
-    }
-
-    catch (error) {
-
-      console.log(error);
-
-    }
-
-  };
-
-  loadUser();
-
-}, []);
+    loadUser();
+  }, []);
 
   const [uploading, setUploading] = useState(false);
 
@@ -73,196 +57,146 @@ export default function CreateReport() {
   const { id } = useLocalSearchParams();
   const [status, setStatus] = useState("critical");
   const [caption, setCaption] = useState("");
+  const [createdAt, setCreatedAt] = useState(null);
 
-const [image, setImage] = useState(null);
+  const [image, setImage] = useState(null);
 
+  const [locationModalVisible, setLocationModalVisible] = useState(false);
+  const [manualLocation, setManualLocation] = useState("");
+  const [manualLocationModal, setManualLocationModal] = useState(false);
+  const [locationName, setLocationName] = useState("Set Location...");
 
-const [locationModalVisible, setLocationModalVisible] = useState(false);
-const [manualLocation, setManualLocation] = useState("");
-const [manualLocationModal, setManualLocationModal] = useState(false);
-const [locationName, setLocationName] =
-  useState("Set Location...");
+  const pickImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      quality: 0.8,
+      allowsEditing: true,
+    });
 
-const pickImage = async () => {
-  const result = await ImagePicker.launchImageLibraryAsync({
-    mediaTypes: ["images"],
-    quality: 0.8,
-    allowsEditing: true,
-  });
+    if (result.canceled) return;
 
-  if (result.canceled) return;
+    const asset = result.assets[0];
 
-  const asset = result.assets[0];
-
-  // Reject videos
-  if (asset.type === "video") {
-    alert("Videos are not supported.");
-    return;
-  }
-
-  // 2.5 MB limit
-  if (asset.fileSize && asset.fileSize > 2.5 * 1024 * 1024) {
-    alert("Image must be smaller than 2.5 MB.");
-    return;
-  }
-
-  setImage(asset);
-};
-
-useEffect(() => {
-
-    loadPost();
-
-}, []);
-
-const loadPost = async () => {
-
-    try {
-
-        const snapshot = await getDoc(
-            doc(db, "posts", id)
-        );
-
-        if (!snapshot.exists()) return;
-
-        const data = snapshot.data();
-
-        setCaption(data.caption);
-
-        setLocationName(data.locationName);
-
-        setStatus((data.status || "moderate").toLowerCase());
-
-        setImage({
-            uri: data.imageUrl,
-        });
-
-    }
-
-    catch (error) {
-
-        console.log(error);
-
-    }
-
-};
-
-const getCurrentLocation = async () => {
-
-  try {
-
-    const { status } =
-      await Location.requestForegroundPermissionsAsync();
-
-    if (status !== "granted") {
-
-      alert("Location permission denied");
-
+    // Reject videos
+    if (asset.type === "video") {
+      alert("Videos are not supported.");
       return;
-
     }
 
-    const location =
-      await Location.getCurrentPositionAsync({});
+    // 2.5 MB limit
+    if (asset.fileSize && asset.fileSize > 2.5 * 1024 * 1024) {
+      alert("Image must be smaller than 2.5 MB.");
+      return;
+    }
 
-    const address =
-      await Location.reverseGeocodeAsync({
+    setImage(asset);
+  };
 
-        latitude:
-          location.coords.latitude,
+  useEffect(() => {
+    loadPost();
+  }, []);
 
-        longitude:
-          location.coords.longitude,
+  const loadPost = async () => {
+    try {
+      const snapshot = await getDoc(doc(db, "posts", id));
 
+      if (!snapshot.exists()) return;
+
+      const data = snapshot.data();
+
+      setCaption(data.caption);
+      setCreatedAt(data.createdAt || null);
+
+      setLocationName(data.locationName);
+
+      setStatus((data.status || "moderate").toLowerCase());
+
+      setImage({
+        uri: data.imageUrl,
+      });
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
+  const getCurrentLocation = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+
+      if (status !== "granted") {
+        alert("Location permission denied");
+
+        return;
+      }
+
+      const location = await Location.getCurrentPositionAsync({});
+
+      const address = await Location.reverseGeocodeAsync({
+        latitude: location.coords.latitude,
+
+        longitude: location.coords.longitude,
       });
 
-    if (address.length > 0) {
-
+      if (address.length > 0) {
         const place = [
-  address[0].name,
-  address[0].street,
-  address[0].district,
-  address[0].subregion,
-  address[0].city,
-]
-.filter(Boolean)
-.join(", ");
+          address[0].name,
+          address[0].street,
+          address[0].district,
+          address[0].subregion,
+          address[0].city,
+        ]
+          .filter(Boolean)
+          .join(", ");
 
-      setLocationName(place);
-
+        setLocationName(place);
+      }
+    } catch (error) {
+      console.log(error);
     }
+  };
 
-  }
-
-  catch (error) {
-
-    console.log(error);
-
-  }
-
-};
-
-const updatePost = async () => {
-
+  const updatePost = async () => {
     if (uploading) return;
 
     try {
+      setUploading(true);
 
-        setUploading(true);
+      const statusIsLocked =
+        status === "ongoing" || status === "on-going" || status === "cleaned";
 
-        const statusIsLocked =
-          status === "ongoing" ||
-          status === "on-going" ||
-          status === "cleaned";
+      const updates = {
+        caption,
+        locationName,
+      };
 
-        const updates = {
-          caption,
-          locationName,
-        };
+      if (!statusIsLocked) {
+        updates.status = status;
+      }
 
-        if (!statusIsLocked) {
-          updates.status = status;
-        }
+      await updateDoc(
+        doc(db, "posts", id),
 
-        await updateDoc(
+        updates,
+      );
 
-            doc(db, "posts", id),
+      alert("Post updated!");
 
-            updates
-
-        );
-
-        alert("Post updated!");
-
-        router.back();
-
+      router.back();
+    } catch (error) {
+      console.log(error);
+    } finally {
+      setUploading(false);
     }
-
-    catch(error){
-
-        console.log(error);
-
-    }
-
-    finally{
-
-        setUploading(false);
-
-    }
-
-};
+  };
 
   return (
     <View style={styles.wrapper}>
       <View style={styles.container}>
-
         {/* CONTENT WRAPPER */}
         <View style={styles.contentWrapper}>
-
           {/* HEADER */}
           <View style={styles.topSection}>
             <View style={styles.headerRow}>
-              
               <TouchableOpacity onPress={() => router.back()}>
                 <Image
                   source={require("../assets/images/close.png")}
@@ -275,8 +209,7 @@ const updatePost = async () => {
           </View>
 
           {/* MAIN CONTENT */}
-          <View style={styles.content}>
-
+          <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             {/* USER + POST BUTTON */}
             <View style={styles.userRow}>
               <View style={styles.userInfo}>
@@ -284,63 +217,45 @@ const updatePost = async () => {
                   source={require("../assets/images/profile2.png")}
                   style={styles.avatar}
                 />
-                <Text style={styles.username}>
-  {userName}
-</Text>
+                <Text style={styles.username}>{userName}</Text>
               </View>
 
               <TouchableOpacity
-  style={[
-    styles.postButton,
-    uploading && { opacity: 0.6 },
-  ]}
-  onPress={updatePost}
-  disabled={uploading}
->
+                style={[styles.postButton, uploading && { opacity: 0.6 }]}
+                onPress={updatePost}
+                disabled={uploading}
+              >
                 <Text style={styles.postText}>
-  {uploading ? "POSTING..." : "POST"}
-</Text>
+                  {uploading ? "POSTING..." : "POST"}
+                </Text>
               </TouchableOpacity>
             </View>
 
             {/* LOCATION */}
             <TouchableOpacity
-  style={styles.locationRow}
-  onPress={() => setLocationModalVisible(true)}
->
+              style={styles.locationRow}
+              onPress={() => setLocationModalVisible(true)}
+            >
               <Image
                 source={require("../assets/images/location.png")}
                 style={styles.locationIcon}
               />
-              <Text style={styles.locationText}>
-  {locationName}
-</Text>
+              <Text style={styles.locationText}>{locationName}</Text>
             </TouchableOpacity>
+            <Text style={styles.postedAt}>{formatPostedAt(createdAt)}</Text>
 
             {/* CAPTION */}
             <TextInput
-  placeholder="Write Something..."
-  multiline
-  style={styles.captionInput}
-  value={caption}
-  onChangeText={setCaption}
-/>
+              placeholder="Write Something..."
+              multiline
+              style={styles.captionInput}
+              value={caption}
+              onChangeText={setCaption}
+            />
 
             {/* IMAGE PICKER */}
-            <View
-  style={styles.imageBox}
->
-              
-              {/* STATUS DOT */}
-              <TouchableOpacity
-                disabled={
-                  status === "ongoing" ||
-                  status === "on-going" ||
-                  status === "cleaned"
-                }
-                onPress={() =>
-                  setStatus(status === "critical" ? "moderate" : "critical")
-                }
+            <View style={styles.imageBox}>
+              <View
                 style={[
                   styles.statusDot,
                   {
@@ -351,152 +266,124 @@ const updatePost = async () => {
                           ? "#FFC940"
                           : status === "cleaned"
                             ? "#34C759"
-                            : "#A5A5A5",
+                            : status === "ongoing"
+                              ? "#7DD3FC"
+                              : "#A5A5A5",
                   },
                 ]}
-              />
-
-  {image ? (
-
-    <Image
-  source={{ uri: image.uri }}
-  style={{
-    width: "100%",
-    height: "100%",
-    borderRadius: 10,
-  }}
-  resizeMode="cover"
-/>
-
-  ) : (
-
-    <View style={styles.imagePlaceholderContent}>
-      <Image
-        source={require("../assets/images/image.png")}
-        style={styles.imageIcon}
-      />
-      <Text style={styles.imageText}>
-        Choose Image or Video
-      </Text>
-    </View>
-
-  )}
-
-</View>
-
-          </View>
+              >
+                <Text style={styles.statusText}>{status === "critical" ? "Critical" : status === "moderate" ? "Moderate" : status === "ongoing" ? "On-going" : status === "cleaned" ? "Cleaned" : "Pending"}</Text>
+              </View>
+              {image ? (
+                <>
+                  <Image source={{ uri: image.uri }} style={styles.previewImage} resizeMode="cover" />
+                  <TouchableOpacity style={styles.changePhotoButton} onPress={pickImage}>
+                    <Text style={styles.changePhotoText}>Change photo</Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <TouchableOpacity style={styles.imagePlaceholderContent} onPress={pickImage}>
+                  <Image
+                    source={require("../assets/images/image.png")}
+                    style={styles.imageIcon}
+                  />
+                  <Text style={styles.imageText}>Choose Image</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </ScrollView>
         </View>
 
         {/* NAVBAR (ALWAYS AT BOTTOM) */}
-        <Modal
-  visible={locationModalVisible}
-  transparent
-  animationType="fade"
->
-  <View style={styles.modalBackground}>
-    <View style={styles.modalBox}>
+        <Modal visible={locationModalVisible} transparent animationType="fade">
+          <View style={styles.modalBackground}>
+            <View style={styles.modalBox}>
+              <Text style={styles.modalTitle}>Choose Location</Text>
 
-      <Text style={styles.modalTitle}>
-        Choose Location
-      </Text>
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={() => {
+                  setLocationModalVisible(false);
+                  getCurrentLocation();
+                }}
+              >
+                <Text>📍 Use Current GPS</Text>
+              </TouchableOpacity>
 
-      <TouchableOpacity
-        style={styles.modalButton}
-        onPress={() => {
-          setLocationModalVisible(false);
-          getCurrentLocation();
-        }}
-      >
-        <Text>📍 Use Current GPS</Text>
-      </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={() => {
+                  setLocationModalVisible(false);
+                  setManualLocationModal(true);
+                }}
+              >
+                <Text>✏ Type Manually</Text>
+              </TouchableOpacity>
 
-      <TouchableOpacity
-        style={styles.modalButton}
-        onPress={() => {
-          setLocationModalVisible(false);
-          setManualLocationModal(true);
-        }}
-      >
-        <Text>✏ Type Manually</Text>
-      </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalCancel}
+                onPress={() => setLocationModalVisible(false)}
+              >
+                <Text>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
 
-      <TouchableOpacity
-        style={styles.modalCancel}
-        onPress={() => setLocationModalVisible(false)}
-      >
-        <Text>Cancel</Text>
-      </TouchableOpacity>
+        <Modal visible={manualLocationModal} transparent animationType="fade">
+          <View style={styles.modalBackground}>
+            <View style={styles.modalBox}>
+              <Text style={styles.modalTitle}>Enter Location</Text>
 
-    </View>
-  </View>
-</Modal>
+              <TextInput
+                placeholder="Example: Poblacion, Pinamungajan"
+                value={manualLocation}
+                onChangeText={setManualLocation}
+                style={styles.manualInput}
+              />
 
-<Modal
-  visible={manualLocationModal}
-  transparent
-  animationType="fade"
->
-  <View style={styles.modalBackground}>
-    <View style={styles.modalBox}>
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={() => {
+                  if (manualLocation.trim()) {
+                    setLocationName(manualLocation);
+                  }
 
-      <Text style={styles.modalTitle}>
-        Enter Location
-      </Text>
+                  setManualLocation("");
+                  setManualLocationModal(false);
+                }}
+              >
+                <Text>Save</Text>
+              </TouchableOpacity>
 
-      <TextInput
-        placeholder="Example: Poblacion, Pinamungajan"
-        value={manualLocation}
-        onChangeText={setManualLocation}
-        style={styles.manualInput}
-      />
-
-      <TouchableOpacity
-        style={styles.modalButton}
-        onPress={() => {
-
-          if (manualLocation.trim()) {
-            setLocationName(manualLocation);
-          }
-
-          setManualLocation("");
-          setManualLocationModal(false);
-
-        }}
-      >
-        <Text>Save</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        style={styles.modalCancel}
-        onPress={() => setManualLocationModal(false)}
-      >
-        <Text>Cancel</Text>
-      </TouchableOpacity>
-
-    </View>
-  </View>
-</Modal>
+              <TouchableOpacity
+                style={styles.modalCancel}
+                onPress={() => setManualLocationModal(false)}
+              >
+                <Text>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
         <View style={styles.navbarContainer}>
           <Navbar />
         </View>
-
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-
   contentWrapper: {
-  flex: 1, // 👈 THIS PUSHES NAVBAR DOWN
-},
+    flex: 1, // 👈 THIS PUSHES NAVBAR DOWN
+  },
 
-navbarContainer: {
-  borderTopWidth: 1,
-  borderColor: "#ddd",
-  backgroundColor: "#fff",
-},
-    
+  navbarContainer: {
+    borderTopWidth: 1,
+    borderColor: "#ddd",
+    backgroundColor: "#fff",
+  },
+
   wrapper: {
     flex: 1,
     alignItems: "center",
@@ -536,7 +423,11 @@ navbarContainer: {
   },
 
   content: {
+    flex: 1,
+  },
+  contentContainer: {
     padding: 15,
+    paddingBottom: 24,
   },
 
   userRow: {
@@ -588,6 +479,12 @@ navbarContainer: {
   locationText: {
     color: "#555",
   },
+  postedAt: {
+    color: "#8A8A8A",
+    fontSize: 12,
+    marginTop: 4,
+    marginLeft: 21,
+  },
 
   captionInput: {
     backgroundColor: "#E5E5E5",
@@ -599,7 +496,8 @@ navbarContainer: {
   },
 
   imageBox: {
-    height: 200,
+    width: "100%",
+    aspectRatio: 4 / 3,
     backgroundColor: "#F2F2F2",
     borderRadius: 10,
     marginTop: 15,
@@ -609,7 +507,10 @@ navbarContainer: {
   },
 
   imagePlaceholderContent: {
+    flex: 1,
+    width: "100%",
     alignItems: "center",
+    justifyContent: "center",
   },
 
   imageIcon: {
@@ -619,62 +520,66 @@ navbarContainer: {
   },
 
   imageText: {
-    fontSize: 12,
+    fontSize: 15,
+    fontWeight: "700",
     color: "#555",
   },
+  previewImage: { width: "100%", height: "100%", borderRadius: 10 },
+  changePhotoButton: { position: "absolute", left: 12, bottom: 12, backgroundColor: "rgba(0, 0, 0, 0.65)", borderRadius: 18, paddingHorizontal: 14, paddingVertical: 8 },
+  changePhotoText: { color: "#FFFFFF", fontSize: 12, fontWeight: "700" },
 
   statusDot: {
     position: "absolute",
     top: 12,
     right: 12,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    borderWidth: 2,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 14,
+    borderWidth: 1,
     borderColor: "#FFFFFF",
     zIndex: 999,
     elevation: 999,
   },
+  statusText: { color: "#FFFFFF", fontSize: 10, fontWeight: "700" },
 
-modalBackground: {
-  flex: 1,
-  justifyContent: "center",
-  alignItems: "center",
-  backgroundColor: "rgba(0,0,0,0.4)",
-},
+  modalBackground: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.4)",
+  },
 
-modalBox: {
-  width: "85%",
-  backgroundColor: "#fff",
-  borderRadius: 10,
-  padding: 20,
-},
+  modalBox: {
+    width: "85%",
+    backgroundColor: "#fff",
+    borderRadius: 10,
+    padding: 20,
+  },
 
-modalTitle: {
-  fontSize: 18,
-  fontWeight: "bold",
-  marginBottom: 15,
-},
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    marginBottom: 15,
+  },
 
-modalButton: {
-  backgroundColor: "#5F9C76",
-  padding: 12,
-  borderRadius: 8,
-  marginTop: 10,
-  alignItems: "center",
-},
+  modalButton: {
+    backgroundColor: "#5F9C76",
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 10,
+    alignItems: "center",
+  },
 
-modalCancel: {
-  padding: 12,
-  alignItems: "center",
-  marginTop: 10,
-},
+  modalCancel: {
+    padding: 12,
+    alignItems: "center",
+    marginTop: 10,
+  },
 
-manualInput: {
-  borderWidth: 1,
-  borderColor: "#ccc",
-  borderRadius: 8,
-  padding: 10,
-},
-
+  manualInput: {
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderRadius: 8,
+    padding: 10,
+  },
 });
