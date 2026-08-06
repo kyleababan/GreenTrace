@@ -1,5 +1,11 @@
 import { useRouter } from "expo-router";
-import { collection, getDocs, orderBy, query, where } from "firebase/firestore";
+import {
+  collection,
+  getDocs,
+  orderBy,
+  query,
+  where,
+} from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
   Image,
@@ -8,48 +14,59 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
 import Navbar from "../components/navbar";
 import { auth, db } from "../firebaseConfig";
 
 export default function ReportPosts() {
   const router = useRouter();
-  const [reportPosts, setReportPosts] = useState([]);
-  const loadReportPosts = async () => {
+const [reportPosts, setReportPosts] = useState([]);
+const loadReportPosts = async () => {
+
     try {
-      const currentUser = auth.currentUser;
 
-      if (!currentUser) return;
+        const currentUser = auth.currentUser;
 
-      const q = query(
-        collection(db, "posts"),
+        if (!currentUser) return;
 
-        where("userId", "==", currentUser.uid),
+        const q = query(
 
-        orderBy("createdAt", "desc"),
-      );
+            collection(db, "posts"),
 
-      const snapshot = await getDocs(q);
+            where("userId", "==", currentUser.uid),
 
-      const posts = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
+            orderBy("createdAt", "desc")
 
-      setReportPosts(posts);
+        );
+
+        const snapshot = await getDocs(q);
+
+        const posts = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+        }));
+
+        setReportPosts(posts);
+
     } catch (error) {
-      console.log(error);
-    }
-  };
 
-  useEffect(() => {
+        console.log(error);
+
+    }
+
+};
+
+useEffect(() => {
+
     loadReportPosts();
-  }, []);
+
+}, []);
 
   return (
     <SafeAreaView style={styles.wrapper}>
       <View style={styles.container}>
+        
         {/* HEADER SECTION */}
         <View style={styles.topSection}>
           <View style={styles.headerRow}>
@@ -66,66 +83,93 @@ export default function ReportPosts() {
         {/* FEED SECTION */}
         <ScrollView style={styles.feed} showsVerticalScrollIndicator={false}>
           {reportPosts.length === 0 && (
-            <View
-              style={{
-                alignItems: "center",
-                marginTop: 50,
-              }}
-            >
-              <Text
-                style={{
-                  color: "#777",
-                  fontSize: 16,
-                }}
-              >
-                You haven't created any reports yet.
-              </Text>
-            </View>
-          )}
+
+<View
+    style={{
+        alignItems: "center",
+        marginTop: 50,
+    }}
+>
+
+<Text
+    style={{
+        color: "#777",
+        fontSize: 16,
+    }}
+>
+You haven't created any reports yet.
+</Text>
+
+</View>
+
+)}
           {reportPosts.map((post) => (
-            <View key={post.id} style={styles.reportCard}>
-              <View style={styles.cardLeft}>
-                <Text style={styles.userName}>
-                  {post.firstName} {post.lastName}
-                </Text>
+<View key={post.id} style={styles.reportCard}>
 
-                <Text style={styles.reportDescription} numberOfLines={2}>
-                  {post.caption}
-                </Text>
+    <View style={styles.cardLeft}>
 
-                <View style={styles.locationRow}>
-                  <Image
-                    source={require("../assets/images/location.png")}
-                    style={styles.locationIcon}
-                  />
+        <Text style={styles.userName}>
+            {post.firstName} {post.lastName}
+        </Text>
 
-                  <Text style={styles.locationText}>{post.locationName}</Text>
-                </View>
+        <Text
+            style={styles.reportDescription}
+            numberOfLines={2}
+        >
+            {post.caption}
+        </Text>
 
-                <TouchableOpacity
-                  style={styles.seePostButton}
-                  onPress={() =>
-                    router.push({
-                      pathname: "/post",
-                      params: {
+        <View style={styles.locationRow}>
+
+            <Image
+                source={require("../assets/images/location.png")}
+                style={styles.locationIcon}
+            />
+
+            <Text style={styles.locationText}>
+                {post.locationName}
+            </Text>
+
+        </View>
+
+        <TouchableOpacity
+
+            style={styles.seePostButton}
+
+            onPress={() =>
+                router.push({
+                    pathname: "/post",
+                    params: {
                         id: post.id,
-                      },
-                    })
-                  }
-                >
-                  <Text style={styles.seePostText}>See Post</Text>
-                </TouchableOpacity>
-              </View>
+                    },
+                })
+            }
 
-              <View style={styles.cardRight}>
-                <Image
-                  source={{
-                    uri: post.imageUrl,
-                  }}
-                  style={styles.postImage}
-                />
-              </View>
-            </View>
+        >
+
+            <Text style={styles.seePostText}>
+                See Post
+            </Text>
+
+        </TouchableOpacity>
+
+    </View>
+
+    <View style={styles.cardRight}>
+
+        <Image
+
+            source={{
+                uri: post.imageUrl,
+            }}
+
+            style={styles.postImage}
+
+        />
+
+    </View>
+
+</View>
           ))}
         </ScrollView>
 
@@ -188,7 +232,7 @@ const styles = StyleSheet.create({
   },
   cardLeft: {
     flex: 1,
-    justifyContent: "space-between",
+    justifyContent: 'space-between',
   },
   userName: {
     fontWeight: "bold",
@@ -209,11 +253,11 @@ const styles = StyleSheet.create({
     width: 14,
     height: 14,
     marginRight: 5,
-    tintColor: "#000",
+    tintColor: '#000',
   },
   locationText: {
     fontSize: 11,
-    fontWeight: "500",
+    fontWeight: '500',
     color: "#000",
   },
   seePostButton: {
@@ -221,7 +265,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 15,
     borderRadius: 6,
-    alignSelf: "flex-start",
+    alignSelf: 'flex-start',
   },
   seePostText: {
     color: "#fff",
