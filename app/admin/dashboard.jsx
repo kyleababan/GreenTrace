@@ -88,7 +88,6 @@ const loadDashboard = async () => {
         );
 
         let critical = 0;
-        let pending = 0;
         let moderate = 0;
         let cleaned = 0;
         let ongoing = 0;
@@ -98,10 +97,6 @@ const loadDashboard = async () => {
             const post = doc.data();
 
             switch (post.status) {
-
-                case "pending":
-                    pending++;
-                    break;
 
                 case "critical":
                     critical++;
@@ -127,8 +122,6 @@ const loadDashboard = async () => {
 
             critical,
 
-            pending,
-
             moderate,
 
             cleaned,
@@ -142,7 +135,6 @@ const loadDashboard = async () => {
         console.log(error);
         setStats({
             critical: 0,
-            pending: 0,
             moderate: 0,
             cleaned: 0,
             ongoing: 0,
@@ -160,16 +152,20 @@ useEffect(() => {
 
   const isDesktop = width >= 1024;
 
+  // keep your calculations
+  const sidebarWidth =
+    width >= 1024 ? 300 : Math.max(200, width * 0.25);
+
+  const contentWidth = width - sidebarWidth;
   const chartHeight = isDesktop ? 360 : 250;
   const highestValue = stats
     ? Math.max(...Object.values(stats), 1)
     : 1;
   const chartStats = [
-    { key: "pending", label: "Not Yet Assessed", color: "#A5A5A5" },
     { key: "critical", label: "Critical Situation", color: "#FF6666" },
     { key: "moderate", label: "Moderate Situation", color: "#FFCF30" },
     { key: "cleaned", label: "Cleaned", color: "#2DCC6F" },
-    { key: "ongoing", label: "On-going", color: "#7DD3FC" },
+    { key: "ongoing", label: "On-going", color: "#A5A5A5" },
   ];
 
   return (
@@ -177,9 +173,21 @@ useEffect(() => {
       <Text style={styles.title}>Dashboard</Text>
 
       {stats ? (
-        <View style={styles.cards}>
+        <View
+          style={[styles.cards, { flexWrap: isDesktop ? "nowrap" : "wrap" }]}
+        >
           {chartStats.map((stat, index) => (
-            <View key={stat.key} style={styles.cardContainer}>
+            <View
+              key={stat.key}
+              style={[
+                styles.cardContainer,
+                {
+                  width: isDesktop
+                    ? contentWidth * 0.22
+                    : contentWidth * 0.45,
+                },
+              ]}
+            >
               <AnalyticsBar
                 label={stat.label}
                 value={stats[stat.key]}
@@ -221,14 +229,11 @@ const styles = StyleSheet.create({
 
   cards: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    alignItems: 'flex-start',
+    justifyContent: 'center',
+    gap: 20,
   },
 
   cardContainer: {
-    flexGrow: 1,
-    flexBasis: 140,
     alignItems: 'center',
   },
 

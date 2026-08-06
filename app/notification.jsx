@@ -154,38 +154,38 @@ export default function Notification() {
                     })
                   }
                 >
-                  {/* LEFT: Avatar/Profile Icon */}
+                {/* LEFT: Avatar/Profile Icon */}
+                <Image
+                  source={require("../assets/images/profile2.png")}
+                  style={styles.avatar}
+                />
+
+                {/* CENTER: Text Content */}
+                <View style={styles.textContainer}>
+                  <Text style={styles.userName}>
+                    {item.type === "deleted_post"
+                      ? "GreenTrace LGU"
+                      : getActorText(item)}
+                  </Text>
+
+                  <Text style={styles.userAction}>
+                    {item.type === "comment"
+                      ? "commented on your post."
+                      : item.type === "reaction" || item.type === "priority"
+                        ? "Increased your priority."
+                        : item.message}
+                  </Text>
+                </View>
+
+                {/* RIGHT: Small Thumbnail of the post */}
+                {item.postImage ? (
                   <Image
-                    source={require("../assets/images/profile2.png")}
-                    style={styles.avatar}
+                    source={{ uri: item.postImage }}
+                    style={styles.postThumbnail}
                   />
-
-                  {/* CENTER: Text Content */}
-                  <View style={styles.textContainer}>
-                    <Text style={styles.userName}>
-                      {item.type === "deleted_post"
-                        ? "GreenTrace LGU"
-                        : getActorText(item)}
-                    </Text>
-
-                    <Text style={styles.userAction}>
-                      {item.type === "comment"
-                        ? "commented on your post."
-                        : item.type === "reaction" || item.type === "priority"
-                          ? "Increased your priority."
-                          : item.message}
-                    </Text>
-                  </View>
-
-                  {/* RIGHT: Small Thumbnail of the post */}
-                  {item.postImage ? (
-                    <Image
-                      source={{ uri: item.postImage }}
-                      style={styles.postThumbnail}
-                    />
-                  ) : (
-                    <View style={styles.postThumbnail} />
-                  )}
+                ) : (
+                  <View style={styles.postThumbnail} />
+                )}
                 </TouchableOpacity>
               ))}
 
@@ -236,8 +236,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   topSection: {
-    height: 82,
-    justifyContent: "center",
     paddingHorizontal: 25,
     paddingVertical: 25,
     backgroundColor: "#5F9C76",
