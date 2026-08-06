@@ -229,7 +229,8 @@ export default function Post() {
           ...enrichedComments.filter((item) => !currentIds.has(item.id)),
         ];
       });
-      lastCommentDocRef.current = snapshot.docs[snapshot.docs.length - 1] || null;
+      lastCommentDocRef.current =
+        snapshot.docs[snapshot.docs.length - 1] || null;
       setHasMoreComments(snapshot.docs.length === COMMENTS_PER_PAGE);
     } catch (error) {
       console.error("Error loading comments:", error);
@@ -408,8 +409,12 @@ export default function Post() {
             showsVerticalScrollIndicator={false}
             scrollEventThrottle={200}
             onScroll={({ nativeEvent }) => {
-              const { contentOffset, contentSize, layoutMeasurement } = nativeEvent;
-              if (layoutMeasurement.height + contentOffset.y >= contentSize.height - 160) {
+              const { contentOffset, contentSize, layoutMeasurement } =
+                nativeEvent;
+              if (
+                layoutMeasurement.height + contentOffset.y >=
+                contentSize.height - 160
+              ) {
                 loadComments();
               }
             }}
@@ -500,7 +505,9 @@ export default function Post() {
                     {post.caption}
                   </Text>
                   {post.caption.length > 140 && (
-                    <TouchableOpacity onPress={() => setExpandedCaption((current) => !current)}>
+                    <TouchableOpacity
+                      onPress={() => setExpandedCaption((current) => !current)}
+                    >
                       <Text style={styles.captionToggle}>
                         {expandedCaption ? "See less" : "See more"}
                       </Text>
@@ -537,7 +544,17 @@ export default function Post() {
                     },
                   ]}
                 >
-                  <Text style={styles.statusText}>{post.status === "critical" ? "Critical" : post.status === "moderate" ? "Moderate" : post.status === "ongoing" ? "On-going" : post.status === "cleaned" ? "Cleaned" : "Pending"}</Text>
+                  <Text style={styles.statusText}>
+                    {post.status === "critical"
+                      ? "Critical"
+                      : post.status === "moderate"
+                        ? "Moderate"
+                        : post.status === "ongoing"
+                          ? "On-going"
+                          : post.status === "cleaned"
+                            ? "Cleaned"
+                            : "Pending"}
+                  </Text>
                 </View>
               </TouchableOpacity>
             </View>
@@ -1124,3 +1141,4 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
 });
+//test
