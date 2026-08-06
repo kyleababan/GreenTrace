@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   Image,
   Modal,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -27,18 +28,30 @@ import {
 } from "firebase/firestore";
 
 export default function CreateReport() {
+  const [uploading, setUploading] = useState(false);
+
+  const [userName, setUserName] = useState("");
+  const router = useRouter();
+  const [caption, setCaption] = useState("");
+
+  const [image, setImage] = useState(null);
+
+  const [locationModalVisible, setLocationModalVisible] = useState(false);
+  const [manualLocation, setManualLocation] = useState("");
+  const [manualStreet, setManualStreet] = useState("");
+  const [manualPurok, setManualPurok] = useState("");
+  const [manualLocationModal, setManualLocationModal] = useState(false);
+  const [locationName, setLocationName] = useState("");
+
   useEffect(() => {
     const loadUser = async () => {
       try {
         const currentUser = auth.currentUser;
-
         if (!currentUser) return;
 
         const userSnap = await getDoc(doc(db, "users", currentUser.uid));
-
         if (userSnap.exists()) {
           const data = userSnap.data();
-
           setUserName(`${data.firstName} ${data.lastName}`);
         }
       } catch (error) {
@@ -48,20 +61,6 @@ export default function CreateReport() {
 
     loadUser();
   }, []);
-
-  const [uploading, setUploading] = useState(false);
-
-  const [userName, setUserName] = useState("");
-  const router = useRouter();
-  const [status, setStatus] = useState("red");
-  const [caption, setCaption] = useState("");
-
-  const [image, setImage] = useState(null);
-
-  const [locationModalVisible, setLocationModalVisible] = useState(false);
-  const [manualLocation, setManualLocation] = useState("");
-  const [manualLocationModal, setManualLocationModal] = useState(false);
-  const [locationName, setLocationName] = useState("");
 
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -180,7 +179,7 @@ export default function CreateReport() {
 
           locationName,
 
-          status: status === "red" ? "critical" : "moderate",
+          status: "pending",
 
           reactionCount: 0,
 
@@ -222,7 +221,12 @@ export default function CreateReport() {
           </View>
 
           {/* MAIN CONTENT */}
-          <View style={styles.content}>
+          <ScrollView
+            style={styles.content}
+            contentContainerStyle={styles.contentContainer}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
             {/* USER + POST BUTTON */}
             <View style={styles.userRow}>
               <View style={styles.userInfo}>
@@ -268,37 +272,30 @@ export default function CreateReport() {
             />
 
             {/* IMAGE PICKER */}
-            <TouchableOpacity style={styles.imageBox} onPress={pickImage}>
-              {/* STATUS DOT */}
-              <TouchableOpacity
-                onPress={() => setStatus(status === "red" ? "yellow" : "red")}
-                style={[
-                  styles.statusDot,
-                  status === "red" ? styles.statusRed : styles.statusYellow,
-                ]}
-              />
-
+            <View style={styles.imageBox}>
               {image ? (
-                <Image
-                  source={{ uri: image.uri }}
-                  style={{
-                    width: "100%",
-                    height: "100%",
-                    borderRadius: 10,
-                  }}
-                  resizeMode="cover"
-                />
+                <>
+                  <Image
+                    source={{ uri: image.uri }}
+                    style={styles.previewImage}
+                    resizeMode="cover"
+                  />
+                  <TouchableOpacity style={styles.changePhotoButton} onPress={pickImage}>
+                    <Text style={styles.changePhotoText}>Change photo</Text>
+                  </TouchableOpacity>
+                </>
               ) : (
-                <View style={styles.imagePlaceholderContent}>
+                <TouchableOpacity style={styles.imagePlaceholderContent} onPress={pickImage}>
                   <Image
                     source={require("../assets/images/image.png")}
                     style={styles.imageIcon}
                   />
                   <Text style={styles.imageText}>Choose Image</Text>
-                </View>
+                  <Text style={styles.imageHint}>Add a clear photo of the concern</Text>
+                </TouchableOpacity>
               )}
-            </TouchableOpacity>
-          </View>
+            </View>
+          </ScrollView>
         </View>
 
         {/* NAVBAR (ALWAYS AT BOTTOM) */}
@@ -355,7 +352,21 @@ export default function CreateReport() {
               <Text style={styles.modalTitle}>Enter Location</Text>
 
               <TextInput
-                placeholder="Example: Poblacion, Pinamungajan"
+                placeholder="Street (example: Rizal Street)"
+                value={manualStreet}
+                onChangeText={setManualStreet}
+                style={styles.manualInput}
+              />
+
+              <TextInput
+                placeholder="Purok (example: Purok 3)"
+                value={manualPurok}
+                onChangeText={setManualPurok}
+                style={styles.manualInput}
+              />
+
+              <TextInput
+                placeholder="Barangay / City or Municipality"
                 value={manualLocation}
                 onChangeText={setManualLocation}
                 style={styles.manualInput}
@@ -364,11 +375,16 @@ export default function CreateReport() {
               <TouchableOpacity
                 style={styles.modalButton}
                 onPress={() => {
-                  if (manualLocation.trim()) {
-                    setLocationName(manualLocation);
+                  const locationParts = [manualStreet, manualPurok, manualLocation]
+                    .map((value) => value.trim())
+                    .filter(Boolean);
+                  if (locationParts.length) {
+                    setLocationName(locationParts.join(", "));
                   }
 
                   setManualLocation("");
+                  setManualStreet("");
+                  setManualPurok("");
                   setManualLocationModal(false);
                 }}
               >
@@ -442,7 +458,11 @@ const styles = StyleSheet.create({
   },
 
   content: {
+    flex: 1,
+  },
+  contentContainer: {
     padding: 15,
+    paddingBottom: 24,
   },
 
   userRow: {
@@ -510,7 +530,8 @@ const styles = StyleSheet.create({
   },
 
   imageBox: {
-    height: 200,
+    width: "100%",
+    aspectRatio: 4 / 3,
     backgroundColor: "#F2F2F2",
     borderRadius: 10,
     marginTop: 15,
@@ -520,7 +541,10 @@ const styles = StyleSheet.create({
   },
 
   imagePlaceholderContent: {
+    flex: 1,
+    width: "100%",
     alignItems: "center",
+    justifyContent: "center",
   },
 
   imageIcon: {
@@ -530,29 +554,31 @@ const styles = StyleSheet.create({
   },
 
   imageText: {
-    fontSize: 12,
+    fontSize: 15,
+    fontWeight: "700",
     color: "#555",
   },
-
-  statusDot: {
-    width: 30,
-    height: 30,
-    borderRadius: 20,
+  imageHint: {
+    fontSize: 12,
+    color: "#8A8A8A",
+    marginTop: 4,
+  },
+  previewImage: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 10,
+  },
+  changePhotoButton: {
     position: "absolute",
-    top: 10,
-    right: 10,
-
-    zIndex: 999,
-    elevation: 999,
+    left: 12,
+    bottom: 12,
+    backgroundColor: "rgba(0, 0, 0, 0.65)",
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
   },
+  changePhotoText: { color: "#FFFFFF", fontSize: 12, fontWeight: "700" },
 
-  statusRed: {
-    backgroundColor: "red",
-  },
-
-  statusYellow: {
-    backgroundColor: "yellow",
-  },
 
   modalBackground: {
     flex: 1,
@@ -600,5 +626,6 @@ const styles = StyleSheet.create({
     borderColor: "#ccc",
     borderRadius: 8,
     padding: 10,
+    marginBottom: 10,
   },
 });

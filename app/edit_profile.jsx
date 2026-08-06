@@ -1,18 +1,14 @@
 import { useRouter } from "expo-router";
-import {
-    doc,
-    getDoc,
-    updateDoc,
-} from "firebase/firestore";
+import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
-    Image,
-    SafeAreaView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Image,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import Navbar from "../components/navbar";
 
@@ -23,292 +19,212 @@ export default function EditProfile() {
 
   const currentUser = auth.currentUser;
 
-const [firstName, setFirstName] = useState("");
-const [lastName, setLastName] = useState("");
-const [email, setEmail] = useState("");
-const [cellNumber, setcellNumber] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState("");
+  const [cellNumber, setcellNumber] = useState("");
 
-const [editable, setEditable] = useState({
+  const [editable, setEditable] = useState({
     firstName: false,
     lastName: false,
     email: false,
     cellNumber: false,
-});
+  });
 
-const loadCurrentUser = async () => {
-
+  const loadCurrentUser = async () => {
     if (!currentUser) return;
 
-    const snapshot = await getDoc(
-        doc(db, "users", currentUser.uid)
-    );
+    const snapshot = await getDoc(doc(db, "users", currentUser.uid));
 
     if (snapshot.exists()) {
+      const data = snapshot.data();
 
-        const data = snapshot.data();
-
-        setFirstName(data.firstName || "");
-        setLastName(data.lastName || "");
-        setEmail(data.email || "");
-        setcellNumber(data.cellNumber || "");
-
+      setFirstName(data.firstName || "");
+      setLastName(data.lastName || "");
+      setEmail(data.email || "");
+      setcellNumber(data.cellNumber || "");
     }
+  };
 
-};
-
-const saveProfile = async () => {
-
+  const saveProfile = async () => {
     if (!currentUser) return;
 
     setSaving(true);
 
     try {
+      await updateDoc(doc(db, "users", currentUser.uid), {
+        firstName,
+        lastName,
+        email,
+        cellNumber,
+      });
 
-        await updateDoc(
-            doc(db, "users", currentUser.uid),
-            {
-                firstName,
-                lastName,
-                email,
-                cellNumber,
-            }
-        );
-
-        setEditable({
-            firstName: false,
-            lastName: false,
-            email: false,
-            cellNumber: false,
-        });
-
+      setEditable({
+        firstName: false,
+        lastName: false,
+        email: false,
+        cellNumber: false,
+      });
     } catch (error) {
-
-        console.log(error);
-
+      console.log(error);
     } finally {
-
-        setSaving(false);
-
+      setSaving(false);
     }
+  };
 
-};
-
-useEffect(() => {
-
+  useEffect(() => {
     loadCurrentUser();
+  }, []);
 
-}, []);
-
-const [saving, setSaving] = useState(false);
+  const [saving, setSaving] = useState(false);
   return (
     <SafeAreaView style={styles.wrapper}>
       <View style={styles.container}>
-        
         {/* HEADER */}
         <View style={styles.header}>
-
-    <TouchableOpacity onPress={() => router.back()}>
-        <Image
-            source={require("../assets/images/back.png")}
-            style={styles.backIcon}
-        />
-    </TouchableOpacity>
-
-    <View style={styles.userInfoContainer}>
-
-        <View style={styles.avatarWrapper}>
-
+          <TouchableOpacity onPress={() => router.back()}>
             <Image
-                source={require("../assets/images/profile.png")}
-                style={styles.profileAvatar}
+              source={require("../assets/images/back.png")}
+              style={styles.backIcon}
             />
+          </TouchableOpacity>
 
         </View>
-
-        <Text style={styles.userName}>
-            {firstName} {lastName}
-        </Text>
-
-    </View>
-
-</View>
 
         {/* FORM */}
         <View style={styles.formContainer}>
           <Text style={styles.title}>Edit Profile</Text>
 
           <View style={styles.inputGroup}>
+            <Text style={styles.label}>First Name</Text>
 
-    <Text style={styles.label}>
-        First Name
-    </Text>
+            <View style={styles.inputWrapper}>
+              <TextInput
+                style={[
+                  styles.input,
+                  editable.firstName && styles.inputEditing,
+                ]}
+                value={firstName}
+                onChangeText={setFirstName}
+                editable={editable.firstName}
+              />
 
-    <View style={styles.inputWrapper}>
-
-        <TextInput
-            style={[
-                styles.input,
-                editable.firstName && styles.inputEditing,
-            ]}
-            value={firstName}
-            onChangeText={setFirstName}
-            editable={editable.firstName}
-        />
-
-        <TouchableOpacity
-            onPress={() =>
-                setEditable(prev => ({
+              <TouchableOpacity
+                onPress={() =>
+                  setEditable((prev) => ({
                     ...prev,
                     firstName: !prev.firstName,
-                }))
-            }
-        >
+                  }))
+                }
+              >
+                <Image
+                  source={require("../assets/images/editlabel.png")}
+                  style={styles.fieldEditIcon}
+                />
+              </TouchableOpacity>
+            </View>
+          </View>
 
-            <Image
-                source={require("../assets/images/editlabel.png")}
-                style={styles.fieldEditIcon}
-            />
+          {/* LAST NAME */}
 
-        </TouchableOpacity>
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Last Name</Text>
 
-    </View>
+            <View style={styles.inputWrapper}>
+              <TextInput
+                style={[styles.input, editable.lastName && styles.inputEditing]}
+                value={lastName}
+                onChangeText={setLastName}
+                editable={editable.lastName}
+              />
 
-</View>
-
-{/* LAST NAME */}
-
-<View style={styles.inputGroup}>
-
-    <Text style={styles.label}>
-        Last Name
-    </Text>
-
-    <View style={styles.inputWrapper}>
-
-        <TextInput
-            style={[
-                styles.input,
-                editable.lastName && styles.inputEditing,
-            ]}
-            value={lastName}
-            onChangeText={setLastName}
-            editable={editable.lastName}
-        />
-
-        <TouchableOpacity
-            onPress={() =>
-                setEditable(prev => ({
+              <TouchableOpacity
+                onPress={() =>
+                  setEditable((prev) => ({
                     ...prev,
                     lastName: !prev.lastName,
-                }))
-            }
-        >
+                  }))
+                }
+              >
+                <Image
+                  source={require("../assets/images/editlabel.png")}
+                  style={styles.fieldEditIcon}
+                />
+              </TouchableOpacity>
+            </View>
+          </View>
 
-            <Image
-                source={require("../assets/images/editlabel.png")}
-                style={styles.fieldEditIcon}
-            />
+          {/* EMAIL */}
 
-        </TouchableOpacity>
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Email</Text>
 
-    </View>
+            <View style={styles.inputWrapper}>
+              <TextInput
+                style={[styles.input, editable.email && styles.inputEditing]}
+                value={email}
+                onChangeText={setEmail}
+                editable={editable.email}
+              />
 
-</View>
-
-{/* EMAIL */}
-
-<View style={styles.inputGroup}>
-
-    <Text style={styles.label}>
-        Email
-    </Text>
-
-    <View style={styles.inputWrapper}>
-
-        <TextInput
-            style={[
-                styles.input,
-                editable.email && styles.inputEditing,
-            ]}
-            value={email}
-            onChangeText={setEmail}
-            editable={editable.email}
-        />
-
-        <TouchableOpacity
-            onPress={() =>
-                setEditable(prev => ({
+              <TouchableOpacity
+                onPress={() =>
+                  setEditable((prev) => ({
                     ...prev,
                     email: !prev.email,
-                }))
-            }
-        >
+                  }))
+                }
+              >
+                <Image
+                  source={require("../assets/images/editlabel.png")}
+                  style={styles.fieldEditIcon}
+                />
+              </TouchableOpacity>
+            </View>
+          </View>
 
-            <Image
-                source={require("../assets/images/editlabel.png")}
-                style={styles.fieldEditIcon}
-            />
+          {/* PHONE */}
 
-        </TouchableOpacity>
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Phone Number</Text>
 
-    </View>
+            <View style={styles.inputWrapper}>
+              <TextInput
+                style={[
+                  styles.input,
+                  editable.cellNumber && styles.inputEditing,
+                ]}
+                value={cellNumber}
+                onChangeText={setcellNumber}
+                editable={editable.cellNumber}
+              />
 
-</View>
-
-{/* PHONE */}
-
-<View style={styles.inputGroup}>
-
-    <Text style={styles.label}>
-        Phone Number
-    </Text>
-
-    <View style={styles.inputWrapper}>
-
-        <TextInput
-            style={[
-                styles.input,
-                editable.cellNumber && styles.inputEditing,
-            ]}
-            value={cellNumber}
-            onChangeText={setcellNumber}
-            editable={editable.cellNumber}
-        />
-
-        <TouchableOpacity
-            onPress={() =>
-                setEditable(prev => ({
+              <TouchableOpacity
+                onPress={() =>
+                  setEditable((prev) => ({
                     ...prev,
                     cellNumber: !prev.cellNumber,
-                }))
-            }
-        >
-
-            <Image
-                source={require("../assets/images/editlabel.png")}
-                style={styles.fieldEditIcon}
-            />
-
-        </TouchableOpacity>
-
-    </View>
-
-</View>
+                  }))
+                }
+              >
+                <Image
+                  source={require("../assets/images/editlabel.png")}
+                  style={styles.fieldEditIcon}
+                />
+              </TouchableOpacity>
+            </View>
+          </View>
 
           {/* BUTTON */}
-         <TouchableOpacity
-    style={styles.confirmButton}
-    onPress={saveProfile}
-    disabled={saving}
->
-
-    <Text style={styles.confirmButtonText}>
-        {saving
-            ? "Saving..."
-            : "Confirm Changes"}
-    </Text>
-
-</TouchableOpacity>
+          <TouchableOpacity
+            style={styles.confirmButton}
+            onPress={saveProfile}
+            disabled={saving}
+          >
+            <Text style={styles.confirmButtonText}>
+              {saving ? "Saving..." : "Confirm Changes"}
+            </Text>
+          </TouchableOpacity>
         </View>
 
         {/* NAVBAR */}
@@ -341,7 +257,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 55,
     paddingBottom: 25,
-},
+  },
 
   backButton: {
     backgroundColor: "#FFF",
@@ -357,18 +273,17 @@ const styles = StyleSheet.create({
     width: 45,
     height: 45,
     resizeMode: "contain",
-},
+  },
 
- userInfoContainer: {
+  userInfoContainer: {
     flexDirection: "row",
     alignItems: "center",
     marginLeft: 15,
     flex: 1,
-},
+  },
 
   avatarWrapper: {
     position: "relative",
-
   },
 
   profileAvatar: {
@@ -434,12 +349,12 @@ const styles = StyleSheet.create({
     height: 38,
   },
 
- input: {
+  input: {
     flex: 1,
     fontSize: 15,
     fontWeight: "700",
     color: "#111",
-},
+  },
 
   fieldEditIcon: {
     width: 14,
@@ -468,12 +383,11 @@ const styles = StyleSheet.create({
   },
   inputEditing: {
     color: "#666",
-},
-fieldEditIcon: {
+  },
+  fieldEditIcon: {
     width: 22,
     height: 22,
     marginLeft: 10,
     resizeMode: "contain",
-},
-
+  },
 });
