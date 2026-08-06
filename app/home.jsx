@@ -1,8 +1,7 @@
 import { useRouter } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Animated,
-  ActivityIndicator,
   Image,
   SafeAreaView,
   ScrollView,
@@ -22,12 +21,10 @@ import {
   getDoc,
   getDocs,
   increment,
-  limit,
   onSnapshot,
   orderBy,
   query,
   serverTimestamp,
-  startAfter,
   updateDoc,
   where,
 } from "firebase/firestore";
@@ -63,8 +60,6 @@ const formatRelativeTime = (timestamp, now) => {
   return `${dateLabel} • ${relativeTime}`;
 };
 
-const POSTS_PER_PAGE = 10;
-
 export default function Home() {
   const router = useRouter();
 
@@ -79,11 +74,6 @@ export default function Home() {
   const [authorPoints, setAuthorPoints] = useState({});
   const [reactionLoadingByPost, setReactionLoadingByPost] = useState({});
   const [now, setNow] = useState(() => Date.now());
-  const [expandedPosts, setExpandedPosts] = useState({});
-  const [loadingMorePosts, setLoadingMorePosts] = useState(false);
-  const lastPostDocRef = useRef(null);
-  const hasMorePostsRef = useRef(true);
-  const loadingPostsRef = useRef(false);
 
   const loadCurrentUser = async () => {
     const currentUser = auth.currentUser;
@@ -100,7 +90,7 @@ export default function Home() {
   };
 
   useEffect(() => {
-    loadPosts(true);
+    const unsubscribe = loadPosts();
     const unsubscribeUsers = onSnapshot(collection(db, "users"), (snapshot) => {
       const pointsByUserId = {};
       snapshot.forEach((userDocument) => {
@@ -113,6 +103,7 @@ export default function Home() {
     loadCurrentUser();
 
     return () => {
+      unsubscribe();
       unsubscribeUsers();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -272,50 +263,26 @@ export default function Home() {
     setFilteredPosts(filtered);
   }, [search, posts]);
 
-  const loadPosts = async (reset = false) => {
-    if (loadingPostsRef.current || (!reset && !hasMorePostsRef.current)) return;
+  const loadPosts = () => {
+    const q = query(collection(db, "posts"), orderBy("createdAt", "desc"));
 
-    loadingPostsRef.current = true;
-    setLoadingMorePosts(true);
-
-    try {
-      const constraints = [orderBy("createdAt", "desc"), limit(POSTS_PER_PAGE)];
-      if (!reset && lastPostDocRef.current) {
-        constraints.splice(1, 0, startAfter(lastPostDocRef.current));
-      }
-
-      const snapshot = await getDocs(query(collection(db, "posts"), ...constraints));
-      const data = snapshot.docs.map((postDocument) => ({
-        id: postDocument.id,
-        ...postDocument.data(),
+    return onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
       }));
 
-      setPosts((currentPosts) => {
-        if (reset) return data;
-        const currentIds = new Set(currentPosts.map((post) => post.id));
-        return [...currentPosts, ...data.filter((post) => !currentIds.has(post.id))];
+      setPosts(data);
+      setFilteredPosts(data);
+
+      const anims = {};
+
+      data.forEach((post) => {
+        anims[post.id] = animations[post.id] || new Animated.Value(1);
       });
 
-      setAnimations((currentAnimations) => {
-        const nextAnimations = { ...currentAnimations };
-        data.forEach((post) => {
-          if (!nextAnimations[post.id]) nextAnimations[post.id] = new Animated.Value(1);
-        });
-        return nextAnimations;
-      });
-
-      lastPostDocRef.current = snapshot.docs[snapshot.docs.length - 1] || null;
-      hasMorePostsRef.current = snapshot.docs.length === POSTS_PER_PAGE;
-    } catch (error) {
-      console.error("Error loading posts:", error);
-    } finally {
-      loadingPostsRef.current = false;
-      setLoadingMorePosts(false);
-    }
-  };
-
-  const togglePostCaption = (postId) => {
-    setExpandedPosts((current) => ({ ...current, [postId]: !current[postId] }));
+      setAnimations(anims);
+    });
   };
 
   return (
@@ -356,13 +323,6 @@ export default function Home() {
             style={styles.feed}
             contentContainerStyle={styles.feedContent}
             showsVerticalScrollIndicator={false}
-            scrollEventThrottle={200}
-            onScroll={({ nativeEvent }) => {
-              const { contentOffset, contentSize, layoutMeasurement } = nativeEvent;
-              if (layoutMeasurement.height + contentOffset.y >= contentSize.height - 160) {
-                loadPosts();
-              }
-            }}
           >
             {filteredPosts.map((post) => (
               <View key={post.id} style={styles.card}>
@@ -402,21 +362,7 @@ export default function Home() {
 
                 {/* Caption */}
                 {Boolean(post.caption) && (
-                  <View>
-                    <Text
-                      style={styles.caption}
-                      numberOfLines={expandedPosts[post.id] ? undefined : 3}
-                    >
-                      {post.caption}
-                    </Text>
-                    {post.caption.length > 140 && (
-                      <TouchableOpacity onPress={() => togglePostCaption(post.id)}>
-                        <Text style={styles.captionToggle}>
-                          {expandedPosts[post.id] ? "See less" : "See more"}
-                        </Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
+                  <Text style={styles.caption}>{post.caption}</Text>
                 )}
 
                 {/* Image Container */}
@@ -448,14 +394,10 @@ export default function Home() {
                               ? "#FFC940"
                               : post.status === "cleaned"
                                 ? "#34C759"
-                                : post.status === "ongoing"
-                                  ? "#7DD3FC"
-                                  : "#A5A5A5",
+                                : "#A5A5A5",
                       },
                     ]}
-                  >
-                    <Text style={styles.statusText}>{post.status === "critical" ? "Critical" : post.status === "moderate" ? "Moderate" : post.status === "ongoing" ? "On-going" : post.status === "cleaned" ? "Cleaned" : "Pending"}</Text>
-                  </View>
+                  />
                 </TouchableOpacity>
 
                 {/* Action Row */}
@@ -516,7 +458,6 @@ export default function Home() {
                 </View>
               </View>
             ))}
-            {loadingMorePosts && <ActivityIndicator color="#5F9C76" />}
           </ScrollView>
 
           {/* BOTTOM NAVBAR */}
@@ -548,8 +489,6 @@ const styles = StyleSheet.create({
 
   /* Top Section */
   topSection: {
-    height: 82,
-    justifyContent: "center",
     paddingHorizontal: 16,
     paddingVertical: 14,
     backgroundColor: "#5F9C76",
@@ -670,13 +609,6 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 10,
   },
-  captionToggle: {
-    color: "#397A51",
-    fontSize: 13,
-    fontWeight: "700",
-    marginTop: -6,
-    marginBottom: 10,
-  },
   imageContainer: {
     width: "100%",
     height: 240,
@@ -693,13 +625,12 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 12,
     right: 12,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-    borderRadius: 14,
-    borderWidth: 1,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
     borderColor: "#FFFFFF",
   },
-  statusText: { color: "#FFFFFF", fontSize: 10, fontWeight: "700" },
 
   /* Actions */
   actionsContainer: {
