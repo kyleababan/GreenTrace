@@ -23,6 +23,11 @@ export default function Navbar() {
       icon: require("../assets/images/notif.png"), // TODO
     },
     {
+      name: "rank",
+      route: "/rank",
+      icon: require("../assets/images/rank.png"),
+    },
+    {
       name: "profile",
       route: "/profile",
       icon: require("../assets/images/acc.png"), // TODO
@@ -68,8 +73,9 @@ const styles = StyleSheet.create({
   },
 
   navItem: {
+    flex: 1,
     alignItems: "center",
-    paddingHorizontal: 35,
+    paddingHorizontal: 8,
   },
 
   icon: {

@@ -1,6 +1,12 @@
 import { useRouter } from "expo-router";
 import { signOut } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  updateDoc,
+} from "firebase/firestore";
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -14,12 +20,19 @@ import {
   View,
 } from "react-native";
 import Navbar from "../components/navbar";
+import {
+  BADGES,
+  getUserContributionStats,
+  isBadgeEarned,
+} from "../constants/badges";
 import { auth, db } from "../firebaseConfig";
 
 export default function ProfileScreen() {
   const [userData, setUserData] = useState(null);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [showEcoLabel, setShowEcoLabel] = useState(false);
+  const [badgeStats, setBadgeStats] = useState(null);
+  const [editingBadgeSlot, setEditingBadgeSlot] = useState(null);
   const ecoLabelAnimation = useRef(new Animated.Value(0)).current;
 
   const router = useRouter();
@@ -43,9 +56,21 @@ export default function ProfileScreen() {
     if (!currentUser) return;
 
     try {
-      const snapshot = await getDoc(doc(db, "users", currentUser.uid));
+      const [snapshot, postsSnapshot, volunteerPostsSnapshot] =
+        await Promise.all([
+          getDoc(doc(db, "users", currentUser.uid)),
+          getDocs(collection(db, "posts")),
+          getDocs(collection(db, "volunteer_posts")),
+        ]);
       if (snapshot.exists()) {
         setUserData(snapshot.data());
+        setBadgeStats(
+          getUserContributionStats(
+            currentUser.uid,
+            postsSnapshot.docs.map((post) => post.data()),
+            volunteerPostsSnapshot.docs.map((post) => post.data()),
+          ),
+        );
       }
     } catch (error) {
       console.log("Error loading user:", error);
@@ -60,6 +85,24 @@ export default function ProfileScreen() {
     } catch (error) {
       console.log("Logout error:", error);
       setShowLogoutModal(false);
+    }
+  };
+
+  const selectBadge = async (badgeId) => {
+    const slots = Array.from(
+      { length: 3 },
+      (_, slot) => userData.selectedBadges?.[slot] || null,
+    );
+    slots[editingBadgeSlot] = badgeId;
+    const selectedBadges = slots;
+    try {
+      await updateDoc(doc(db, "users", auth.currentUser.uid), {
+        selectedBadges,
+      });
+      setUserData((current) => ({ ...current, selectedBadges }));
+      setEditingBadgeSlot(null);
+    } catch (error) {
+      console.log("Unable to save badge:", error);
     }
   };
 
@@ -94,6 +137,25 @@ export default function ProfileScreen() {
               <Text style={styles.userName}>
                 {userData.firstName} {userData.lastName}
               </Text>
+
+              <View style={styles.badgeSlots}>
+                {[0, 1, 2].map((slot) => {
+                  const badge = BADGES.find(
+                    (item) => item.id === userData.selectedBadges?.[slot],
+                  );
+                  return (
+                    <TouchableOpacity
+                      key={slot}
+                      style={styles.badgeSlot}
+                      onPress={() => setEditingBadgeSlot(slot)}
+                    >
+                      <Text style={styles.badgeSlotIcon}>
+                        {badge?.icon || "+"}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
 
               <View style={styles.pointsRow}>
                 <TouchableOpacity
@@ -176,6 +238,18 @@ export default function ProfileScreen() {
             <TouchableOpacity
               style={styles.menuRow}
               activeOpacity={0.6}
+              onPress={() => router.push("/badges")}
+            >
+              <View style={styles.menuRowLeft}>
+                <Text style={styles.badgeMenuIcon}>🏅</Text>
+                <Text style={styles.menuText}>Badge List</Text>
+              </View>
+              <Text style={styles.chevron}>›</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.menuRow}
+              activeOpacity={0.6}
               onPress={() => router.push("/security")}
             >
               <View style={styles.menuRowLeft}>
@@ -241,6 +315,53 @@ export default function ProfileScreen() {
                   style={styles.cancelButton}
                   activeOpacity={0.6}
                   onPress={() => setShowLogoutModal(false)}
+                >
+                  <Text style={styles.cancelLogoutText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </Modal>
+
+          <Modal
+            visible={editingBadgeSlot !== null}
+            transparent
+            animationType="slide"
+          >
+            <View style={styles.modalOverlay}>
+              <View style={styles.badgeModal}>
+                <Text style={styles.logoutTitle}>
+                  Choose badge for slot {(editingBadgeSlot ?? 0) + 1}
+                </Text>
+                <Text style={styles.badgeModalText}>
+                  Only badges you have earned can be equipped.
+                </Text>
+                {BADGES.map((badge) => {
+                  const earned = badgeStats && isBadgeEarned(badge, badgeStats);
+                  return (
+                    <TouchableOpacity
+                      key={badge.id}
+                      disabled={!earned}
+                      onPress={() => selectBadge(badge.id)}
+                      style={[
+                        styles.badgeOption,
+                        !earned && styles.badgeOptionLocked,
+                      ]}
+                    >
+                      <Text style={styles.badgeOptionIcon}>{badge.icon}</Text>
+                      <View style={styles.badgeOptionDetails}>
+                        <Text style={styles.badgeOptionTitle}>
+                          {badge.title}
+                        </Text>
+                        <Text style={styles.badgeOptionStatus}>
+                          {earned ? "Tap to equip" : badge.description}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+                <TouchableOpacity
+                  style={styles.cancelButton}
+                  onPress={() => setEditingBadgeSlot(null)}
                 >
                   <Text style={styles.cancelLogoutText}>Cancel</Text>
                 </TouchableOpacity>
@@ -349,6 +470,18 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontWeight: "500",
   },
+  badgeSlots: { flexDirection: "row", marginTop: 8, gap: 7 },
+  badgeSlot: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F0FDF4",
+    borderWidth: 1,
+    borderColor: "#DCFCE7",
+  },
+  badgeSlotIcon: { fontSize: 15, color: "#5F9C76", fontWeight: "700" },
 
   /* CONTENT & LIST STYLES */
   content: {
@@ -384,6 +517,12 @@ const styles = StyleSheet.create({
     height: 20,
     tintColor: "#5F9C76",
     marginRight: 14,
+  },
+  badgeMenuIcon: {
+    width: 20,
+    marginRight: 14,
+    fontSize: 18,
+    textAlign: "center",
   },
   menuText: {
     fontSize: 15,
@@ -428,6 +567,27 @@ const styles = StyleSheet.create({
     padding: 24,
     alignItems: "center",
   },
+  badgeModal: {
+    width: "100%",
+    maxWidth: 340,
+    maxHeight: "80%",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    padding: 20,
+  },
+  badgeModalText: { color: "#64748B", fontSize: 13, marginBottom: 12 },
+  badgeOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderColor: "#F1F5F9",
+  },
+  badgeOptionLocked: { opacity: 0.45 },
+  badgeOptionIcon: { fontSize: 25, marginRight: 11 },
+  badgeOptionDetails: { flex: 1 },
+  badgeOptionTitle: { color: "#334155", fontWeight: "700", fontSize: 14 },
+  badgeOptionStatus: { color: "#64748B", fontSize: 12, marginTop: 2 },
   logoutTitle: {
     fontSize: 18,
     fontWeight: "700",

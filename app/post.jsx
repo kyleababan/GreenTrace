@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   ActivityIndicator,
@@ -24,10 +24,12 @@ import {
   getDoc,
   getDocs,
   increment,
+  limit,
   onSnapshot,
   orderBy,
   query,
   serverTimestamp,
+  startAfter,
   updateDoc,
   where,
 } from "firebase/firestore";
@@ -55,6 +57,8 @@ const formatPostedAt = (timestamp) => {
   })}`;
 };
 
+const COMMENTS_PER_PAGE = 10;
+
 export default function Post() {
   const { id } = useLocalSearchParams();
 
@@ -72,9 +76,11 @@ export default function Post() {
   const [sendingComment, setSendingComment] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [reactionLoading, setReactionLoading] = useState(false);
-
-  // Pagination state for comments (show 5 at a time)
-  const [visibleCommentsCount, setVisibleCommentsCount] = useState(5);
+  const [expandedCaption, setExpandedCaption] = useState(false);
+  const [hasMoreComments, setHasMoreComments] = useState(true);
+  const [loadingMoreComments, setLoadingMoreComments] = useState(false);
+  const lastCommentDocRef = useRef(null);
+  const loadingCommentsRef = useRef(false);
 
   const currentUser = auth.currentUser;
 
@@ -123,7 +129,7 @@ export default function Post() {
 
   useEffect(() => {
     loadPost();
-    loadComments();
+    loadComments(true);
     loadReaction();
     loadCurrentUser();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -171,13 +177,22 @@ export default function Post() {
   };
 
   // FETCH COMMENTS AND DYNAMICALLY ATTACH CURRENT USER POINTS
-  const loadComments = async () => {
+  const loadComments = async (reset = false) => {
+    if (loadingCommentsRef.current || (!reset && !hasMoreComments)) return;
+
+    loadingCommentsRef.current = true;
+    setLoadingMoreComments(true);
     try {
-      const q = query(
-        collection(db, "comments"),
+      const constraints = [
         where("postId", "==", id),
         orderBy("createdAt", "asc"),
-      );
+        limit(COMMENTS_PER_PAGE),
+      ];
+      if (!reset && lastCommentDocRef.current) {
+        constraints.push(startAfter(lastCommentDocRef.current));
+      }
+
+      const q = query(collection(db, "comments"), ...constraints);
 
       const snapshot = await getDocs(q);
 
@@ -206,7 +221,6 @@ export default function Post() {
         currentPoints: pointsMap[item.userId] ?? item.points ?? 0,
       }));
 
-<<<<<<< HEAD
       setComments((currentComments) => {
         if (reset) return enrichedComments;
         const currentIds = new Set(currentComments.map((item) => item.id));
@@ -215,14 +229,13 @@ export default function Post() {
           ...enrichedComments.filter((item) => !currentIds.has(item.id)),
         ];
       });
-      lastCommentDocRef.current =
-        snapshot.docs[snapshot.docs.length - 1] || null;
+      lastCommentDocRef.current = snapshot.docs[snapshot.docs.length - 1] || null;
       setHasMoreComments(snapshot.docs.length === COMMENTS_PER_PAGE);
-=======
-      setComments(enrichedComments);
->>>>>>> b65e96877605afac801aa0627ba11ee8ea86c8ff
     } catch (error) {
       console.error("Error loading comments:", error);
+    } finally {
+      loadingCommentsRef.current = false;
+      setLoadingMoreComments(false);
     }
   };
 
@@ -261,7 +274,7 @@ export default function Post() {
       }
 
       setComment("");
-      await loadComments();
+      await loadComments(true);
     } catch (error) {
       console.log(error);
     } finally {
@@ -362,10 +375,6 @@ export default function Post() {
     );
   }
 
-  // Slice visible comments for 5-at-a-time pagination
-  const visibleComments = comments.slice(0, visibleCommentsCount);
-  const hasMoreComments = visibleCommentsCount < comments.length;
-
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.wrapper}>
@@ -397,20 +406,13 @@ export default function Post() {
             style={styles.feed}
             contentContainerStyle={styles.feedContent}
             showsVerticalScrollIndicator={false}
-<<<<<<< HEAD
             scrollEventThrottle={200}
             onScroll={({ nativeEvent }) => {
-              const { contentOffset, contentSize, layoutMeasurement } =
-                nativeEvent;
-              if (
-                layoutMeasurement.height + contentOffset.y >=
-                contentSize.height - 160
-              ) {
+              const { contentOffset, contentSize, layoutMeasurement } = nativeEvent;
+              if (layoutMeasurement.height + contentOffset.y >= contentSize.height - 160) {
                 loadComments();
               }
             }}
-=======
->>>>>>> b65e96877605afac801aa0627ba11ee8ea86c8ff
           >
             {/* MAIN POST CARD */}
             <View style={styles.card}>
@@ -490,7 +492,6 @@ export default function Post() {
 
               {/* CAPTION */}
               {Boolean(post.caption) && (
-<<<<<<< HEAD
                 <View>
                   <Text
                     style={styles.caption}
@@ -499,18 +500,13 @@ export default function Post() {
                     {post.caption}
                   </Text>
                   {post.caption.length > 140 && (
-                    <TouchableOpacity
-                      onPress={() => setExpandedCaption((current) => !current)}
-                    >
+                    <TouchableOpacity onPress={() => setExpandedCaption((current) => !current)}>
                       <Text style={styles.captionToggle}>
                         {expandedCaption ? "See less" : "See more"}
                       </Text>
                     </TouchableOpacity>
                   )}
                 </View>
-=======
-                <Text style={styles.caption}>{post.caption}</Text>
->>>>>>> b65e96877605afac801aa0627ba11ee8ea86c8ff
               )}
 
               {/* POST IMAGE */}
@@ -535,26 +531,14 @@ export default function Post() {
                             ? "#FFC940"
                             : post.status === "cleaned"
                               ? "#34C759"
-                              : "#A5A5A5",
+                              : post.status === "ongoing"
+                                ? "#7DD3FC"
+                                : "#A5A5A5",
                     },
                   ]}
-<<<<<<< HEAD
                 >
-                  <Text style={styles.statusText}>
-                    {post.status === "critical"
-                      ? "Critical"
-                      : post.status === "moderate"
-                        ? "Moderate"
-                        : post.status === "ongoing"
-                          ? "On-going"
-                          : post.status === "cleaned"
-                            ? "Cleaned"
-                            : "Pending"}
-                  </Text>
+                  <Text style={styles.statusText}>{post.status === "critical" ? "Critical" : post.status === "moderate" ? "Moderate" : post.status === "ongoing" ? "On-going" : post.status === "cleaned" ? "Cleaned" : "Pending"}</Text>
                 </View>
-=======
-                />
->>>>>>> b65e96877605afac801aa0627ba11ee8ea86c8ff
               </TouchableOpacity>
             </View>
 
@@ -592,7 +576,7 @@ export default function Post() {
             </View>
 
             {/* PAGINATED COMMENTS LIST */}
-            {visibleComments.map((item) => (
+            {comments.map((item) => (
               <View key={item.id} style={styles.commentCard}>
                 <Image
                   source={require("../assets/images/profile2.png")}
@@ -620,11 +604,12 @@ export default function Post() {
               <TouchableOpacity
                 activeOpacity={0.7}
                 style={styles.seeMoreBtn}
-                onPress={() => setVisibleCommentsCount((prev) => prev + 5)}
+                onPress={() => loadComments()}
               >
                 <Text style={styles.seeMoreText}>See more comments</Text>
               </TouchableOpacity>
             )}
+            {loadingMoreComments && <ActivityIndicator color="#5F9C76" />}
           </ScrollView>
 
           {/* BOTTOM NAVBAR */}
@@ -904,6 +889,13 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 10,
   },
+  captionToggle: {
+    color: "#397A51",
+    fontSize: 13,
+    fontWeight: "700",
+    marginTop: -6,
+    marginBottom: 10,
+  },
   imageContainer: {
     width: "100%",
     height: 280,
@@ -921,12 +913,13 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 12,
     right: 12,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    borderWidth: 2,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 14,
+    borderWidth: 1,
     borderColor: "#FFFFFF",
   },
+  statusText: { color: "#FFFFFF", fontSize: 10, fontWeight: "700" },
 
   /* Comments Section */
   commentsHeader: {
@@ -1131,4 +1124,3 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
 });
-//test

@@ -244,6 +244,8 @@ const styles = StyleSheet.create({
 
   /* HEADER STYLES - ALIGNED WITH HOME FEED */
   topSection: {
+    height: 82,
+    justifyContent: "center",
     backgroundColor: "#5F9C76",
     paddingHorizontal: 16,
     paddingVertical: 20,
