@@ -74,6 +74,7 @@ export default function Home() {
   const [userReactions, setUserReactions] = useState({});
   const [animations, setAnimations] = useState({});
   const [currentUserData, setCurrentUserData] = useState(null);
+  const [announcement, setAnnouncement] = useState(null);
 
   // Live lookup for points across feed
   const [authorPoints, setAuthorPoints] = useState({});
@@ -111,6 +112,7 @@ export default function Home() {
 
     loadUserReactions();
     loadCurrentUser();
+    loadAnnouncement();
 
     return () => {
       unsubscribeUsers();
@@ -140,6 +142,15 @@ export default function Home() {
     });
 
     setUserReactions(reacted);
+  };
+
+  const loadAnnouncement = async () => {
+    try {
+      const snapshot = await getDocs(query(collection(db, "announcements"), orderBy("createdAt", "desc"), limit(1)));
+      if (!snapshot.empty) setAnnouncement({ id: snapshot.docs[0].id, ...snapshot.docs[0].data() });
+    } catch (error) {
+      console.log("Error loading announcement:", error);
+    }
   };
 
   const playReactionAnimation = (postId) => {
@@ -364,6 +375,14 @@ export default function Home() {
               }
             }}
           >
+            {announcement && (
+              <View style={styles.announcementCard}>
+                <Text style={styles.announcementLabel}>PICKUP SCHEDULE</Text>
+                <Text style={styles.announcementTitle}>{announcement.title}</Text>
+                <Text style={styles.announcementDetails}>{announcement.schedule}{announcement.area ? ` • ${announcement.area}` : ""}</Text>
+                {Boolean(announcement.message) && <Text style={styles.announcementMessage}>{announcement.message}</Text>}
+              </View>
+            )}
             {filteredPosts.map((post) => (
               <View key={post.id} style={styles.card}>
                 {/* Author Info & Location */}
@@ -401,6 +420,7 @@ export default function Home() {
                 </View>
 
                 {/* Caption */}
+                {Boolean(post.title) && <Text style={styles.reportTitle}>{post.title}</Text>}
                 {Boolean(post.caption) && (
                   <View>
                     <Text
@@ -610,6 +630,19 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 4,
   },
+  announcementCard: {
+    backgroundColor: "#E7F1EA",
+    borderLeftWidth: 5,
+    borderLeftColor: "#5F9C76",
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+  },
+  announcementLabel: { color: "#397A51", fontSize: 11, fontWeight: "800", letterSpacing: 0.6 },
+  announcementTitle: { color: "#234B33", fontSize: 17, fontWeight: "800", marginTop: 3 },
+  announcementDetails: { color: "#397A51", fontSize: 13, fontWeight: "700", marginTop: 5 },
+  announcementMessage: { color: "#4B5563", fontSize: 13, lineHeight: 18, marginTop: 6 },
+  reportTitle: { fontSize: 16, fontWeight: "800", color: "#234B33", marginBottom: 6 },
 
   /* User Info */
   userRow: {

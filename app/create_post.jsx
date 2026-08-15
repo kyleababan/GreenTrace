@@ -32,6 +32,7 @@ export default function CreateReport() {
 
   const [userName, setUserName] = useState("");
   const router = useRouter();
+  const [title, setTitle] = useState("");
   const [caption, setCaption] = useState("");
 
   const [image, setImage] = useState(null);
@@ -126,8 +127,8 @@ export default function CreateReport() {
 
   const createPost = async () => {
     if (uploading) return;
-    if (!caption.trim()) {
-      alert("Caption is required");
+    if (!title.trim()) {
+      alert("A report title is required");
 
       return;
     }
@@ -140,6 +141,12 @@ export default function CreateReport() {
 
     if (!locationName.trim()) {
       alert("Please set a location before posting.");
+
+      return;
+    }
+
+    if (!manualPurok.trim()) {
+      alert("Please enter the Purok for this report.");
 
       return;
     }
@@ -173,13 +180,17 @@ export default function CreateReport() {
 
           points: userData.points || 0,
 
+          title: title.trim(),
+
           caption,
 
           imageUrl,
 
           locationName,
 
-          status: "pending",
+          purok: manualPurok.trim() || null,
+
+          status: "moderate",
 
           reactionCount: 0,
 
@@ -262,7 +273,22 @@ export default function CreateReport() {
               </Text>
             </TouchableOpacity>
 
+            <TextInput
+              placeholder="Purok (example: Purok 3)"
+              style={styles.purokInput}
+              value={manualPurok}
+              onChangeText={setManualPurok}
+            />
+
             {/* CAPTION */}
+            <TextInput
+              placeholder="Report title (example: Overflowing bins near the market)"
+              style={styles.titleInput}
+              value={title}
+              onChangeText={setTitle}
+              maxLength={90}
+            />
+
             <TextInput
               placeholder="Write Something..."
               multiline
@@ -378,13 +404,16 @@ export default function CreateReport() {
                   const locationParts = [manualStreet, manualPurok, manualLocation]
                     .map((value) => value.trim())
                     .filter(Boolean);
+                  if (!manualPurok.trim()) {
+                    alert("Please enter the Purok for this report.");
+                    return;
+                  }
                   if (locationParts.length) {
                     setLocationName(locationParts.join(", "));
                   }
 
                   setManualLocation("");
                   setManualStreet("");
-                  setManualPurok("");
                   setManualLocationModal(false);
                 }}
               >
@@ -527,6 +556,19 @@ const styles = StyleSheet.create({
     height: 80,
     marginTop: 10,
     textAlignVertical: "top",
+  },
+  titleInput: {
+    backgroundColor: "#E5E5E5",
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 10,
+    fontWeight: "600",
+  },
+  purokInput: {
+    backgroundColor: "#E5E5E5",
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 10,
   },
 
   imageBox: {

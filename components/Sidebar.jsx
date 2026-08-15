@@ -131,6 +131,17 @@ export default function Sidebar() {
 
         </TouchableOpacity>
 
+        <TouchableOpacity
+          style={styles.item}
+          onPress={() => router.push("/admin/pickup_schedule")}
+        >
+          <Image
+            source={require("../assets/images/Notification.png")}
+            style={styles.icon}
+          />
+          <Text style={styles.itemText}>Pickup Schedule</Text>
+        </TouchableOpacity>
+
       </View>
 
       {/* BOTTOM */}

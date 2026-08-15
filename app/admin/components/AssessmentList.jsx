@@ -94,6 +94,9 @@ export default function AssessmentList({
         (post.caption || "")
           .toLowerCase()
           .includes(keyword) ||
+        (post.title || "")
+          .toLowerCase()
+          .includes(keyword) ||
         (post.locationName || "")
           .toLowerCase()
           .includes(keyword);
@@ -197,9 +200,8 @@ export default function AssessmentList({
 
 </View>
 
-                <Text style={styles.postDescription}>
-                  {post.caption}
-                </Text>
+                <Text style={styles.postTitle}>{post.title || "Untitled waste report"}</Text>
+                <Text style={styles.postDescription}>{post.caption}</Text>
                 <View style={styles.reactionRow}>
 
     <View style={styles.priorityContainer}>
@@ -321,6 +323,12 @@ pointsText:{
 
   postDescription: {
     marginTop: 10,
+  },
+  postTitle: {
+    marginTop: 10,
+    fontWeight: "bold",
+    fontSize: 16,
+    color: "#234B33",
   },
 
     statusCircle: {

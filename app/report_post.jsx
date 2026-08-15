@@ -90,7 +90,7 @@ export default function ReportPosts() {
                 </Text>
 
                 <Text style={styles.reportDescription} numberOfLines={2}>
-                  {post.caption}
+                  {post.title || "Untitled waste report"}
                 </Text>
 
                 <View style={styles.locationRow}>

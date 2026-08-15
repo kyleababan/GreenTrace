@@ -56,6 +56,7 @@ export default function CreateReport() {
 
   const { id } = useLocalSearchParams();
   const [status, setStatus] = useState("critical");
+  const [title, setTitle] = useState("");
   const [caption, setCaption] = useState("");
   const [createdAt, setCreatedAt] = useState(null);
 
@@ -104,7 +105,8 @@ export default function CreateReport() {
 
       const data = snapshot.data();
 
-      setCaption(data.caption);
+      setTitle(data.title || "");
+      setCaption(data.caption || "");
       setCreatedAt(data.createdAt || null);
 
       setLocationName(data.locationName);
@@ -165,6 +167,7 @@ export default function CreateReport() {
         status === "ongoing" || status === "on-going" || status === "cleaned";
 
       const updates = {
+        title: title.trim(),
         caption,
         locationName,
       };
@@ -245,6 +248,13 @@ export default function CreateReport() {
             <Text style={styles.postedAt}>{formatPostedAt(createdAt)}</Text>
 
             {/* CAPTION */}
+            <TextInput
+              placeholder="Report title"
+              style={styles.titleInput}
+              value={title}
+              onChangeText={setTitle}
+              maxLength={90}
+            />
             <TextInput
               placeholder="Write Something..."
               multiline
@@ -493,6 +503,13 @@ const styles = StyleSheet.create({
     height: 80,
     marginTop: 10,
     textAlignVertical: "top",
+  },
+  titleInput: {
+    backgroundColor: "#E5E5E5",
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 10,
+    fontWeight: "600",
   },
 
   imageBox: {
