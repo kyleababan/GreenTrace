@@ -5,7 +5,6 @@ import {
   doc,
   getDoc,
   getDocs,
-  updateDoc,
 } from "firebase/firestore";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -14,12 +13,14 @@ import {
   Image,
   Modal,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
 import Navbar from "../components/navbar";
+import BadgeWithDetails from "../components/BadgeWithDetails";
 import {
   BADGES,
   getUserContributionStats,
@@ -32,7 +33,6 @@ export default function ProfileScreen() {
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [showEcoLabel, setShowEcoLabel] = useState(false);
   const [badgeStats, setBadgeStats] = useState(null);
-  const [editingBadgeSlot, setEditingBadgeSlot] = useState(null);
   const ecoLabelAnimation = useRef(new Animated.Value(0)).current;
 
   const router = useRouter();
@@ -88,24 +88,6 @@ export default function ProfileScreen() {
     }
   };
 
-  const selectBadge = async (badgeId) => {
-    const slots = Array.from(
-      { length: 3 },
-      (_, slot) => userData.selectedBadges?.[slot] || null,
-    );
-    slots[editingBadgeSlot] = badgeId;
-    const selectedBadges = slots;
-    try {
-      await updateDoc(doc(db, "users", auth.currentUser.uid), {
-        selectedBadges,
-      });
-      setUserData((current) => ({ ...current, selectedBadges }));
-      setEditingBadgeSlot(null);
-    } catch (error) {
-      console.log("Unable to save badge:", error);
-    }
-  };
-
   if (!userData) {
     return (
       <SafeAreaView style={styles.wrapper}>
@@ -120,6 +102,16 @@ export default function ProfileScreen() {
       </SafeAreaView>
     );
   }
+
+  const earnedBadges = badgeStats
+    ? BADGES.filter((badge) => isBadgeEarned(badge, badgeStats))
+    : [];
+  const contributorBadges = Array.isArray(userData.contributorBadges)
+    ? userData.contributorBadges
+    : [];
+  const displayedBadges = [...contributorBadges, ...earnedBadges];
+  const visibleBadges = displayedBadges.slice(0, 3);
+  const remainingBadgeCount = Math.max(0, displayedBadges.length - 3);
 
   return (
     <SafeAreaView style={styles.wrapper}>
@@ -139,22 +131,21 @@ export default function ProfileScreen() {
               </Text>
 
               <View style={styles.badgeSlots}>
-                {[0, 1, 2].map((slot) => {
-                  const badge = BADGES.find(
-                    (item) => item.id === userData.selectedBadges?.[slot],
-                  );
-                  return (
-                    <TouchableOpacity
-                      key={slot}
-                      style={styles.badgeSlot}
-                      onPress={() => setEditingBadgeSlot(slot)}
-                    >
-                      <Text style={styles.badgeSlotIcon}>
-                        {badge?.icon || "+"}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
+                {visibleBadges.map((badge) => (
+                  <BadgeWithDetails
+                    key={badge.id}
+                    badge={badge}
+                    size={28}
+                    tooltipPlacement="below"
+                  />
+                ))}
+                {remainingBadgeCount > 0 && (
+                  <View style={styles.badgeSlot}>
+                    <Text style={styles.badgeOverflowText}>
+                      +{remainingBadgeCount}
+                    </Text>
+                  </View>
+                )}
               </View>
 
               <View style={styles.pointsRow}>
@@ -198,7 +189,11 @@ export default function ProfileScreen() {
         </View>
 
         {/* MENU LIST SECTION */}
-        <View style={styles.content}>
+        <ScrollView
+          style={styles.content}
+          contentContainerStyle={styles.contentContainer}
+          showsVerticalScrollIndicator={false}
+        >
           <View style={styles.menuList}>
             {/* Edit Profile */}
             <TouchableOpacity
@@ -289,7 +284,7 @@ export default function ProfileScreen() {
           >
             <Text style={styles.logoutText}>Log Out</Text>
           </TouchableOpacity>
-        </View>
+        </ScrollView>
 
         {/* BOTTOM NAVBAR & MODAL */}
         <View style={styles.navbarContainer}>
@@ -322,52 +317,6 @@ export default function ProfileScreen() {
             </View>
           </Modal>
 
-          <Modal
-            visible={editingBadgeSlot !== null}
-            transparent
-            animationType="slide"
-          >
-            <View style={styles.modalOverlay}>
-              <View style={styles.badgeModal}>
-                <Text style={styles.logoutTitle}>
-                  Choose badge for slot {(editingBadgeSlot ?? 0) + 1}
-                </Text>
-                <Text style={styles.badgeModalText}>
-                  Only badges you have earned can be equipped.
-                </Text>
-                {BADGES.map((badge) => {
-                  const earned = badgeStats && isBadgeEarned(badge, badgeStats);
-                  return (
-                    <TouchableOpacity
-                      key={badge.id}
-                      disabled={!earned}
-                      onPress={() => selectBadge(badge.id)}
-                      style={[
-                        styles.badgeOption,
-                        !earned && styles.badgeOptionLocked,
-                      ]}
-                    >
-                      <Text style={styles.badgeOptionIcon}>{badge.icon}</Text>
-                      <View style={styles.badgeOptionDetails}>
-                        <Text style={styles.badgeOptionTitle}>
-                          {badge.title}
-                        </Text>
-                        <Text style={styles.badgeOptionStatus}>
-                          {earned ? "Tap to equip" : badge.description}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
-                <TouchableOpacity
-                  style={styles.cancelButton}
-                  onPress={() => setEditingBadgeSlot(null)}
-                >
-                  <Text style={styles.cancelLogoutText}>Cancel</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </Modal>
         </View>
       </View>
     </SafeAreaView>
@@ -482,12 +431,16 @@ const styles = StyleSheet.create({
     borderColor: "#DCFCE7",
   },
   badgeSlotIcon: { fontSize: 15, color: "#5F9C76", fontWeight: "700" },
+  badgeOverflowText: { fontSize: 11, color: "#5F9C76", fontWeight: "800" },
 
   /* CONTENT & LIST STYLES */
   content: {
     flex: 1,
+  },
+  contentContainer: {
     paddingHorizontal: 20,
     paddingTop: 24,
+    paddingBottom: 24,
   },
   menuList: {
     backgroundColor: "#FFFFFF",
@@ -567,27 +520,6 @@ const styles = StyleSheet.create({
     padding: 24,
     alignItems: "center",
   },
-  badgeModal: {
-    width: "100%",
-    maxWidth: 340,
-    maxHeight: "80%",
-    backgroundColor: "#FFFFFF",
-    borderRadius: 20,
-    padding: 20,
-  },
-  badgeModalText: { color: "#64748B", fontSize: 13, marginBottom: 12 },
-  badgeOption: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderColor: "#F1F5F9",
-  },
-  badgeOptionLocked: { opacity: 0.45 },
-  badgeOptionIcon: { fontSize: 25, marginRight: 11 },
-  badgeOptionDetails: { flex: 1 },
-  badgeOptionTitle: { color: "#334155", fontWeight: "700", fontSize: 14 },
-  badgeOptionStatus: { color: "#64748B", fontSize: 12, marginTop: 2 },
   logoutTitle: {
     fontSize: 18,
     fontWeight: "700",

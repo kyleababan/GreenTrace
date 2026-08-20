@@ -34,6 +34,7 @@ import {
   where,
 } from "firebase/firestore";
 import Navbar from "../components/navbar";
+import { formatLocationWithPurok } from "../constants/locationFormat";
 import { auth, db } from "../firebaseConfig";
 import { deleteRelatedDocuments } from "./guards/deletePostHelper";
 
@@ -480,13 +481,47 @@ export default function Post() {
                       style={styles.locationIcon}
                     />
                     <Text style={styles.locationText}>
-                      {post.locationName || "Unknown location"}
+                      {formatLocationWithPurok(
+                        post.locationName,
+                        post.purok,
+                      )}
                     </Text>
                   </View>
 
                   <Text style={styles.postedAt}>
                     {formatPostedAt(post.createdAt)}
                   </Text>
+
+                  {/* Report Status Tag */}
+                  <View
+                    style={[
+                      styles.statusTag,
+                      {
+                        backgroundColor:
+                          post.status === "critical"
+                            ? "#FF5B5B"
+                            : post.status === "moderate"
+                              ? "#FFC940"
+                              : post.status === "cleaned"
+                                ? "#34C759"
+                                : post.status === "ongoing"
+                                  ? "#7DD3FC"
+                                  : "#A5A5A5",
+                      },
+                    ]}
+                  >
+                    <Text style={styles.statusText}>
+                      {post.status === "critical"
+                        ? "Critical"
+                        : post.status === "moderate"
+                          ? "Moderate"
+                          : post.status === "ongoing"
+                            ? "On-going"
+                            : post.status === "cleaned"
+                              ? "Cleaned"
+                              : "Pending"}
+                    </Text>
+                  </View>
                 </View>
               </View>
 
@@ -519,26 +554,6 @@ export default function Post() {
                   source={{ uri: post.imageUrl }}
                   style={styles.postImage}
                 />
-
-                <View
-                  style={[
-                    styles.statusDot,
-                    {
-                      backgroundColor:
-                        post.status === "critical"
-                          ? "#FF5B5B"
-                          : post.status === "moderate"
-                            ? "#FFC940"
-                            : post.status === "cleaned"
-                              ? "#34C759"
-                              : post.status === "ongoing"
-                                ? "#7DD3FC"
-                                : "#A5A5A5",
-                    },
-                  ]}
-                >
-                  <Text style={styles.statusText}>{post.status === "critical" ? "Critical" : post.status === "moderate" ? "Moderate" : post.status === "ongoing" ? "On-going" : post.status === "cleaned" ? "Cleaned" : "Pending"}</Text>
-                </View>
               </TouchableOpacity>
             </View>
 
@@ -909,15 +924,12 @@ const styles = StyleSheet.create({
     height: "100%",
     resizeMode: "cover",
   },
-  statusDot: {
-    position: "absolute",
-    top: 12,
-    right: 12,
+  statusTag: {
+    alignSelf: "flex-start",
+    marginTop: 6,
     paddingHorizontal: 9,
-    paddingVertical: 5,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#FFFFFF",
+    paddingVertical: 4,
+    borderRadius: 6,
   },
   statusText: { color: "#FFFFFF", fontSize: 10, fontWeight: "700" },
 

@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
@@ -25,8 +26,41 @@ import {
     where,
 } from "firebase/firestore";
 
-import { db } from "../../../../firebaseConfig";
+import { auth, db } from "../../../../firebaseConfig";
+import {
+  BADGES,
+  getUserContributionStats,
+  isBadgeEarned,
+} from "../../../../constants/badges";
+import { formatLocationWithPurok } from "../../../../constants/locationFormat";
 import { deleteRelatedDocuments } from "../../../guards/deletePostHelper";
+
+const STATUS_DETAILS = {
+  pending: { label: "Not Assessed", color: "#A5A5A5" },
+  moderate: { label: "Moderate", color: "#FFC940" },
+  critical: { label: "Critical", color: "#FF5B5B" },
+  ongoing: { label: "On-going", color: "#7DD3FC" },
+  cleaned: { label: "Cleaned", color: "#34C759" },
+};
+
+const formatPostedDate = (timestamp) => {
+  if (!timestamp) return "Posted recently";
+  const date = typeof timestamp.toDate === "function" ? timestamp.toDate() : new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return "Posted recently";
+
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+  let elapsed;
+  if (elapsedSeconds < 60) elapsed = `${elapsedSeconds}s`;
+  else if (elapsedSeconds < 3600) elapsed = `${Math.floor(elapsedSeconds / 60)}m`;
+  else if (elapsedSeconds < 86400) elapsed = `${Math.floor(elapsedSeconds / 3600)}h`;
+  else elapsed = `${Math.floor(elapsedSeconds / 86400)}d`;
+
+  return `${date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  })} \u2022 ${elapsed}`;
+};
 
 export default function PostDetail({
   post: suppliedPost,
@@ -45,6 +79,8 @@ export default function PostDetail({
   const isCleaned = effectiveCurrentTab === "cleaned";
 
   const [comments, setComments] = useState([]);
+  const [residentPoints, setResidentPoints] = useState(suppliedPost?.points ?? 0);
+  const [residentBadges, setResidentBadges] = useState([]);
   const [updating, setUpdating] = useState(false);
   const [showReasonModal, setShowReasonModal] = useState(false);
 
@@ -113,6 +149,32 @@ export default function PostDetail({
 
     loadComments();
   }, [post?.id]);
+
+  useEffect(() => {
+    if (!post?.userId) return;
+
+    const loadResidentDetails = async () => {
+      try {
+        const [userSnapshot, postsSnapshot, volunteerPostsSnapshot] = await Promise.all([
+          getDoc(doc(db, "users", post.userId)),
+          getDocs(collection(db, "posts")),
+          getDocs(collection(db, "volunteer_posts")),
+        ]);
+        if (userSnapshot.exists()) {
+          setResidentPoints(userSnapshot.data().points ?? post.points ?? 0);
+        }
+
+        const allPosts = postsSnapshot.docs.map((document) => document.data());
+        const allVolunteerPosts = volunteerPostsSnapshot.docs.map((document) => document.data());
+        const stats = getUserContributionStats(post.userId, allPosts, allVolunteerPosts);
+        setResidentBadges(BADGES.filter((badge) => isBadgeEarned(badge, stats)));
+      } catch (error) {
+        console.error("Unable to load resident details:", error);
+      }
+    };
+
+    loadResidentDetails();
+  }, [post?.points, post?.userId]);
 
   useEffect(() => {
     if (!post?.id) return;
@@ -209,6 +271,13 @@ export default function PostDetail({
         userDocuments.forEach(({ userRef, userSnapshot, reward }) => {
           transaction.update(userRef, {
             points: (Number(userSnapshot.data().points) || 0) + reward,
+          });
+          transaction.set(doc(collection(db, "point_transactions")), {
+            userId: userRef.id,
+            amount: reward,
+            source: "cleanup_reward",
+            postId: post.id,
+            createdAt: serverTimestamp(),
           });
         });
 
@@ -370,6 +439,36 @@ export default function PostDetail({
     }
   };
 
+  const updateAssessment = async (nextStatus) => {
+    const currentStatus = (post.status || effectiveCurrentTab || "moderate").toLowerCase();
+    if (updating || currentStatus === nextStatus) return;
+    if (!["pending", "moderate", "critical"].includes(currentStatus)) {
+      alert("Only reports awaiting action can be reassessed.");
+      return;
+    }
+
+    setUpdating(true);
+
+    try {
+      await updateDoc(doc(db, "posts", post.id), {
+        status: nextStatus,
+        assessedBy: auth.currentUser?.uid || null,
+        assessmentUpdatedAt: serverTimestamp(),
+      });
+
+      alert(
+        nextStatus === "critical"
+          ? "Report assessed as Critical."
+          : "Report assessed as Moderate.",
+      );
+      closePostDetail();
+    } catch (error) {
+      console.error("Unable to update assessment:", error);
+      alert("Failed to update the situation assessment.");
+      setUpdating(false);
+    }
+  };
+
   if (loadingPost) {
     return (
       <View style={styles.stateContainer}>
@@ -431,15 +530,57 @@ export default function PostDetail({
             <Image source={{ uri: post.imageUrl }} style={styles.postImage} />
 
             <View style={styles.postInfo}>
-              {/* PROFILE */}
-              <View style={styles.row}>
+              {/* PROFILE AND POST DETAILS */}
+              <View style={styles.authorRow}>
                 <Image
-                  source={require("../../../../assets/images/ProfileIG.png")}
-                  style={styles.profileImage}
+                  source={require("../../../../assets/images/profile2.png")}
+                  style={styles.authorImage}
                 />
-                <Text style={styles.profileName}>
-                  {post.firstName} {post.lastName}
-                </Text>
+                <View style={styles.authorDetails}>
+                  <View style={styles.authorHeader}>
+                    <View style={styles.authorIdentity}>
+                      <Text style={styles.profileName}>
+                        {post.firstName} {post.lastName}
+                        <Text style={styles.pointsText}> {"\u2022"} {residentPoints} pts</Text>
+                      </Text>
+
+                      <View style={styles.badgeRow}>
+                        {residentBadges.slice(0, 3).map((badge) => (
+                          <View key={badge.id} style={styles.badge}>
+                            <Text style={styles.badgeIcon}>{badge.icon}</Text>
+                          </View>
+                        ))}
+                        {residentBadges.length > 3 && (
+                          <View style={styles.badge}>
+                            <Text style={styles.badgeMore}>+{residentBadges.length - 3}</Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                    <Text style={styles.postedDate}>{formatPostedDate(post.createdAt)}</Text>
+                  </View>
+
+                  <View style={styles.locationRow}>
+                    <Image
+                      source={require("../../../../assets/images/location.png")}
+                      style={styles.locationIcon}
+                    />
+                    <Text style={styles.locationText} numberOfLines={1}>
+                      {formatLocationWithPurok(post.locationName, post.purok)}
+                    </Text>
+                  </View>
+
+                  <View
+                    style={[
+                      styles.statusTag,
+                      { backgroundColor: (STATUS_DETAILS[post.status] || STATUS_DETAILS.pending).color },
+                    ]}
+                  >
+                    <Text style={styles.statusTagText}>
+                      {(STATUS_DETAILS[post.status] || STATUS_DETAILS.pending).label}
+                    </Text>
+                  </View>
+                </View>
               </View>
 
               {/* DESCRIPTION */}
@@ -516,22 +657,71 @@ export default function PostDetail({
             </ScrollView>
           </View>
 
-          {/* LOCATION */}
-          <View style={styles.locationSection}>
-            <Text style={styles.sectionTitle}>Location</Text>
-            <View style={styles.row}>
-              <Image
-                source={require("../../../../assets/images/location.png")}
-                style={styles.icon}
-              />
-              <Text>{post.locationName}</Text>
-            </View>
+          {/* SITUATION ASSESSMENT */}
+          <View
+            style={[
+              styles.assessmentSection,
+              {
+                borderColor: (
+                  STATUS_DETAILS[(post.status || effectiveCurrentTab || "pending").toLowerCase()] ||
+                  STATUS_DETAILS.pending
+                ).color,
+              },
+            ]}
+          >
+            <Text style={styles.sectionTitle}>Situation Assessment</Text>
+            <Text style={styles.assessmentHint}>
+              {isCleaned
+                ? "This report has been resolved and the reported area is now clean."
+                : "Residents submit reports as Moderate. MENRO may reassess the situation when necessary."}
+            </Text>
+            {isCleaned ? (
+              <View style={styles.cleanAssessment}>
+                <Ionicons name="checkmark-circle" size={20} color="#FFFFFF" />
+                <Text style={styles.cleanAssessmentText}>Area is Clean</Text>
+              </View>
+            ) : (
+              <View style={styles.assessmentButtons}>
+                {[
+                  { id: "moderate", label: "Moderate", color: "#FFCF30" },
+                  { id: "critical", label: "Critical", color: "#FF6666" },
+                ].map((option) => {
+                  const postStatus = (post.status || effectiveCurrentTab || "moderate").toLowerCase();
+                  const isSelected = postStatus === option.id;
+                  const isLocked = !["pending", "moderate", "critical"].includes(postStatus);
+
+                  return (
+                    <TouchableOpacity
+                      key={option.id}
+                      disabled={updating || isSelected || isLocked}
+                      onPress={() => updateAssessment(option.id)}
+                      style={[
+                        styles.assessmentButton,
+                        { borderColor: option.color },
+                        isSelected && { backgroundColor: option.color },
+                        isLocked && styles.assessmentButtonDisabled,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.assessmentButtonText,
+                          isSelected && styles.assessmentButtonTextSelected,
+                        ]}
+                      >
+                        {isSelected ? `${option.label} (Current)` : option.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
           </View>
+
         </View>
       </View>
 
       {/* BUTTON */}
-      <View
+      {!isCleaned && <View
         style={{
           flexDirection: "row",
           justifyContent: "space-between",
@@ -540,20 +730,18 @@ export default function PostDetail({
         }}
       >
         <TouchableOpacity
-          disabled={openingVolunteerActivity || isCleaned}
+          disabled={openingVolunteerActivity}
           style={[
             styles.helpBTN,
             {
               flex: 1,
-              backgroundColor: isCleaned ? "#A5A5A5" : "#599A74",
+              backgroundColor: "#599A74",
             },
           ]}
           onPress={openVolunteerActivity}
         >
           <Text style={styles.helpText}>
-            {isCleaned
-              ? "Area is Cleaned"
-              : openingVolunteerActivity
+            {openingVolunteerActivity
                 ? "Loading..."
                 : existingVolunteerId
                   ? "Manage Volunteers"
@@ -582,7 +770,7 @@ export default function PostDetail({
             </Text>
           </TouchableOpacity>
         )}
-      </View>
+      </View>}
 
       <Modal visible={showReasonModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
@@ -790,7 +978,6 @@ const styles = StyleSheet.create({
   },
 
   card: {
-    flex: 1,
     backgroundColor: "#fff",
     borderRadius: 10,
     padding: 10,
@@ -805,7 +992,6 @@ const styles = StyleSheet.create({
   },
 
   postInfo: {
-    flex: 1,
     marginTop: 10,
   },
   row: {
@@ -820,30 +1006,47 @@ const styles = StyleSheet.create({
   },
 
   profileName: {
-    marginLeft: 10,
     fontWeight: "bold",
   },
-  profileIcon: {
-    width: 40,
-    height: 40,
-    marginRight: 5,
+  authorRow: { flexDirection: "row", alignItems: "flex-start" },
+  authorImage: { width: 44, height: 44, borderRadius: 22, marginRight: 10 },
+  authorDetails: { flex: 1 },
+  authorHeader: { flexDirection: "row", justifyContent: "space-between", gap: 10 },
+  authorIdentity: { flex: 1, flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 7 },
+  pointsText: { color: "#2E7D32", fontSize: 12, fontWeight: "700" },
+  badgeRow: { flexDirection: "row", alignItems: "center", gap: 5 },
+  badge: {
+    minWidth: 25,
+    height: 25,
+    paddingHorizontal: 4,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 13,
+    borderWidth: 1,
+    borderColor: "#D8E6DC",
+    backgroundColor: "#F4FAF6",
   },
-  icon: {
-    width: 20,
-    height: 20,
-    marginRight: 5,
+  badgeIcon: { fontSize: 14 },
+  badgeMore: { color: "#5F9C76", fontSize: 10, fontWeight: "800" },
+  postedDate: { color: "#7B8580", fontSize: 11 },
+  locationRow: { flexDirection: "row", alignItems: "center", marginTop: 5 },
+  locationIcon: { width: 14, height: 14, marginRight: 5, tintColor: "#666666" },
+  locationText: { flex: 1, color: "#626C66", fontSize: 12 },
+  statusTag: {
+    alignSelf: "flex-start",
+    marginTop: 7,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 6,
   },
-  locationText: {
-    fontSize: 14,
-  },
+  statusTagText: { color: "#FFFFFF", fontSize: 10, fontWeight: "800" },
   description: {
     marginVertical: 10,
   },
   reactions: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginTop: "auto",
-    paddingTop: 10,
+    marginTop: 12,
   },
   count: {
     fontWeight: "bold",
@@ -892,6 +1095,50 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 10,
   },
+  assessmentSection: {
+    backgroundColor: "#fff",
+    padding: 14,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: "#A5A5A5",
+  },
+  assessmentHint: {
+    color: "#68746C",
+    fontSize: 12,
+    lineHeight: 17,
+    marginBottom: 12,
+  },
+  assessmentButtons: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  assessmentButton: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 40,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 2,
+    backgroundColor: "#FFFFFF",
+  },
+  assessmentButtonDisabled: { opacity: 0.45 },
+  assessmentButtonText: {
+    color: "#34443A",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  assessmentButtonTextSelected: { color: "#FFFFFF" },
+  cleanAssessment: {
+    minHeight: 42,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    borderRadius: 8,
+    backgroundColor: "#34A865",
+  },
+  cleanAssessmentText: { color: "#FFFFFF", fontSize: 14, fontWeight: "800" },
   helpBTN: {
     backgroundColor: "#599A74",
     padding: 16,

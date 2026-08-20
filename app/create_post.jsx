@@ -12,8 +12,7 @@ import {
   View,
 } from "react-native";
 import Navbar from "../components/navbar";
-
-import * as Location from "expo-location";
+import { normalizePurok } from "../constants/locationFormat";
 
 import { auth, db } from "../firebaseConfig";
 
@@ -32,14 +31,12 @@ export default function CreateReport() {
 
   const [userName, setUserName] = useState("");
   const router = useRouter();
-  const [title, setTitle] = useState("");
   const [caption, setCaption] = useState("");
 
   const [image, setImage] = useState(null);
 
-  const [locationModalVisible, setLocationModalVisible] = useState(false);
-  const [manualLocation, setManualLocation] = useState("");
-  const [manualStreet, setManualStreet] = useState("");
+  const [manualProvince, setManualProvince] = useState("");
+  const [manualBarangay, setManualBarangay] = useState("");
   const [manualPurok, setManualPurok] = useState("");
   const [manualLocationModal, setManualLocationModal] = useState(false);
   const [locationName, setLocationName] = useState("");
@@ -89,49 +86,8 @@ export default function CreateReport() {
     setImage(asset);
   };
 
-  const getCurrentLocation = async () => {
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-
-      if (status !== "granted") {
-        alert("Location permission denied");
-
-        return;
-      }
-
-      const location = await Location.getCurrentPositionAsync({});
-
-      const address = await Location.reverseGeocodeAsync({
-        latitude: location.coords.latitude,
-
-        longitude: location.coords.longitude,
-      });
-
-      if (address.length > 0) {
-        const place = [
-          address[0].name,
-          address[0].street,
-          address[0].district,
-          address[0].subregion,
-          address[0].city,
-        ]
-          .filter(Boolean)
-          .join(", ");
-
-        setLocationName(place);
-      }
-    } catch (error) {
-      console.log(error);
-    }
-  };
-
   const createPost = async () => {
     if (uploading) return;
-    if (!title.trim()) {
-      alert("A report title is required");
-
-      return;
-    }
 
     if (!image) {
       alert("Please select an image");
@@ -180,15 +136,13 @@ export default function CreateReport() {
 
           points: userData.points || 0,
 
-          title: title.trim(),
-
           caption,
 
           imageUrl,
 
           locationName,
 
-          purok: manualPurok.trim() || null,
+          purok: normalizePurok(manualPurok) || null,
 
           status: "moderate",
 
@@ -262,7 +216,7 @@ export default function CreateReport() {
             {/* LOCATION */}
             <TouchableOpacity
               style={styles.locationRow}
-              onPress={() => setLocationModalVisible(true)}
+              onPress={() => setManualLocationModal(true)}
             >
               <Image
                 source={require("../assets/images/location.png")}
@@ -273,22 +227,7 @@ export default function CreateReport() {
               </Text>
             </TouchableOpacity>
 
-            <TextInput
-              placeholder="Purok (example: Purok 3)"
-              style={styles.purokInput}
-              value={manualPurok}
-              onChangeText={setManualPurok}
-            />
-
             {/* CAPTION */}
-            <TextInput
-              placeholder="Report title (example: Overflowing bins near the market)"
-              style={styles.titleInput}
-              value={title}
-              onChangeText={setTitle}
-              maxLength={90}
-            />
-
             <TextInput
               placeholder="Write Something..."
               multiline
@@ -325,95 +264,57 @@ export default function CreateReport() {
         </View>
 
         {/* NAVBAR (ALWAYS AT BOTTOM) */}
-        <Modal visible={locationModalVisible} transparent animationType="fade">
-          <View style={styles.modalBackground}>
-            <View style={styles.modalBox}>
-              <Text style={styles.modalTitle}>Choose Location</Text>
-
-              <TouchableOpacity
-                style={styles.modalButton}
-                onPress={() => {
-                  setLocationModalVisible(false);
-                  getCurrentLocation();
-                }}
-              >
-                <View style={styles.modalButtonContent}>
-                  <Image
-                    source={require("../assets/images/location.png")}
-                    style={styles.locationIcon}
-                  />
-                  <Text>Use Current GPS</Text>
-                </View>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.modalButton}
-                onPress={() => {
-                  setLocationModalVisible(false);
-                  setManualLocationModal(true);
-                }}
-              >
-                <View style={styles.modalButtonContent}>
-                  <Image
-                    source={require("../assets/images/editlabel.png")}
-                    style={styles.editIcon}
-                  />
-                  <Text>Type Manually</Text>
-                </View>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.modalCancel}
-                onPress={() => setLocationModalVisible(false)}
-              >
-                <Text>Cancel</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
-
         <Modal visible={manualLocationModal} transparent animationType="fade">
           <View style={styles.modalBackground}>
             <View style={styles.modalBox}>
               <Text style={styles.modalTitle}>Enter Location</Text>
 
               <TextInput
-                placeholder="Street (example: Rizal Street)"
-                value={manualStreet}
-                onChangeText={setManualStreet}
+                placeholder="Province"
+                value={manualProvince}
+                onChangeText={setManualProvince}
                 style={styles.manualInput}
               />
 
               <TextInput
-                placeholder="Purok (example: Purok 3)"
-                value={manualPurok}
-                onChangeText={setManualPurok}
+                placeholder="Barangay"
+                value={manualBarangay}
+                onChangeText={setManualBarangay}
                 style={styles.manualInput}
               />
 
-              <TextInput
-                placeholder="Barangay / City or Municipality"
-                value={manualLocation}
-                onChangeText={setManualLocation}
-                style={styles.manualInput}
-              />
+              <View style={styles.purokInputRow}>
+                <Text style={styles.purokPrefix}>Pk.</Text>
+                <TextInput
+                  placeholder="Example: 3"
+                  value={manualPurok}
+                  onChangeText={setManualPurok}
+                  style={styles.purokTextInput}
+                />
+              </View>
 
               <TouchableOpacity
                 style={styles.modalButton}
                 onPress={() => {
-                  const locationParts = [manualStreet, manualPurok, manualLocation]
-                    .map((value) => value.trim())
-                    .filter(Boolean);
-                  if (!manualPurok.trim()) {
+                  const purok = normalizePurok(manualPurok);
+
+                  if (!manualProvince.trim()) {
+                    alert("Please enter the Province for this report.");
+                    return;
+                  }
+                  if (!manualBarangay.trim()) {
+                    alert("Please enter the Barangay for this report.");
+                    return;
+                  }
+                  if (!purok) {
                     alert("Please enter the Purok for this report.");
                     return;
                   }
-                  if (locationParts.length) {
-                    setLocationName(locationParts.join(", "));
-                  }
 
-                  setManualLocation("");
-                  setManualStreet("");
+                  setManualPurok(purok);
+                  setLocationName(
+                    `${manualProvince.trim()}, ${manualBarangay.trim()}, Pk. ${purok}`,
+                  );
                   setManualLocationModal(false);
                 }}
               >
@@ -539,12 +440,6 @@ const styles = StyleSheet.create({
     height: 16,
     marginRight: 5,
   },
-  editIcon: {
-    width: 18,
-    height: 18,
-    marginRight: 5,
-  },
-
   locationText: {
     color: "#555",
   },
@@ -557,20 +452,6 @@ const styles = StyleSheet.create({
     marginTop: 10,
     textAlignVertical: "top",
   },
-  titleInput: {
-    backgroundColor: "#E5E5E5",
-    borderRadius: 8,
-    padding: 10,
-    marginTop: 10,
-    fontWeight: "600",
-  },
-  purokInput: {
-    backgroundColor: "#E5E5E5",
-    borderRadius: 8,
-    padding: 10,
-    marginTop: 10,
-  },
-
   imageBox: {
     width: "100%",
     aspectRatio: 4 / 3,
@@ -651,12 +532,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 
-  modalButtonContent: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
   modalCancel: {
     padding: 12,
     alignItems: "center",
@@ -669,5 +544,22 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 10,
     marginBottom: 10,
+  },
+  purokInputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderRadius: 8,
+    marginBottom: 10,
+  },
+  purokPrefix: {
+    paddingLeft: 10,
+    fontWeight: "600",
+    color: "#333",
+  },
+  purokTextInput: {
+    flex: 1,
+    padding: 10,
   },
 });

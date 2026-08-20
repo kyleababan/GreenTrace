@@ -15,6 +15,7 @@ import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Image,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -25,6 +26,27 @@ import {
 } from "react-native";
 
 import { db } from "../../../../firebaseConfig";
+
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+const formatDateKey = (date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
+const parseDateKey = (value) => {
+  if (!value) return null;
+  if (typeof value.toDate === "function") return value.toDate();
+  const parts = String(value).split("-").map(Number);
+  if (parts.length !== 3 || parts.some(Number.isNaN)) return null;
+  return new Date(parts[0], parts[1] - 1, parts[2]);
+};
+
+const getCalendarDays = (month) => {
+  const firstDay = new Date(month.getFullYear(), month.getMonth(), 1);
+  const calendarStart = new Date(month.getFullYear(), month.getMonth(), 1 - firstDay.getDay());
+  return Array.from({ length: 42 }, (_, index) =>
+    new Date(calendarStart.getFullYear(), calendarStart.getMonth(), calendarStart.getDate() + index),
+  );
+};
 
 export default function VolunteerPostCreate({
   setSelectedVolunteerPost,
@@ -41,7 +63,11 @@ export default function VolunteerPostCreate({
   const [title, setTitle] = useState(suppliedPost?.title || "Need Volunteers");
   const [desc, setDesc] = useState(suppliedPost?.description || "");
   const [requirements, setRequirements] = useState(suppliedPost?.requirements?.length ? suppliedPost.requirements : [""]);
-  const [location, setLocation] = useState(suppliedPost?.locationName || "");
+  const [meetingLocation, setMeetingLocation] = useState("");
+  const [meetingDate, setMeetingDate] = useState(null);
+  const [meetingTime, setMeetingTime] = useState("");
+  const [showCalendar, setShowCalendar] = useState(false);
+  const [visibleMonth, setVisibleMonth] = useState(() => new Date());
   const [maxVolunteers, setMaxVolunteers] = useState(
     suppliedPost?.maxVolunteers ? String(suppliedPost.maxVolunteers) : ""
   );
@@ -66,7 +92,11 @@ export default function VolunteerPostCreate({
         setTitle(data.title || "Need Volunteers");
         setDesc(data.description || "");
         setRequirements(data.requirements?.length ? data.requirements : [""]);
-        setLocation(data.locationName || "");
+        const savedMeetingDate = parseDateKey(data.meetingDate);
+        setMeetingLocation(data.meetingLocation || data.locationName || "");
+        setMeetingDate(savedMeetingDate);
+        setMeetingTime(data.meetingTime || "");
+        if (savedMeetingDate) setVisibleMonth(savedMeetingDate);
         setMaxVolunteers(data.maxVolunteers ? String(data.maxVolunteers) : "");
       } catch (error) {
         console.error("Unable to load volunteer activity:", error);
@@ -97,7 +127,9 @@ export default function VolunteerPostCreate({
     if (!title.trim()) return alert("Please enter a title.");
     if (!desc.trim()) return alert("Please enter a description.");
     if (!cleanedRequirements.length) return alert("Please add at least one requirement.");
-    if (!location.trim()) return alert("Please enter a location.");
+    if (!meetingLocation.trim()) return alert("Please enter the meeting location.");
+    if (!meetingDate) return alert("Please select the meeting date.");
+    if (!meetingTime.trim()) return alert("Please enter the meeting time.");
     if (!maxVolunteers || Number(maxVolunteers) < 1) return alert("Please enter the maximum volunteers.");
 
     setSaving(true);
@@ -108,7 +140,10 @@ export default function VolunteerPostCreate({
           title: title.trim(),
           description: desc.trim(),
           requirements: cleanedRequirements,
-          locationName: location.trim(),
+          meetingLocation: meetingLocation.trim(),
+          locationName: meetingLocation.trim(),
+          meetingDate: formatDateKey(meetingDate),
+          meetingTime: meetingTime.trim(),
           maxVolunteers: Number(maxVolunteers),
         });
 
@@ -138,7 +173,11 @@ export default function VolunteerPostCreate({
         imageUrl: suppliedPost.imageUrl || "",
         firstName: suppliedPost.firstName || "",
         lastName: suppliedPost.lastName || "",
-        locationName: location.trim(),
+        meetingLocation: meetingLocation.trim(),
+        locationName: meetingLocation.trim(),
+        postLocationName: suppliedPost.locationName || "",
+        meetingDate: formatDateKey(meetingDate),
+        meetingTime: meetingTime.trim(),
         maxVolunteers: Number(maxVolunteers),
         joinedCount: 0,
         volunteers: [],
@@ -191,6 +230,37 @@ export default function VolunteerPostCreate({
                 <Text style={styles.placeholderText}>No image available</Text>
               </View>
             )}
+
+            <View style={styles.imageMeetingDetails}>
+              <Text style={styles.fieldLabel}>Meeting date and time</Text>
+              <View style={styles.meetingDateRow}>
+                <TouchableOpacity
+                  style={[styles.inputBox, { flex: 1 }]}
+                  onPress={() => setShowCalendar(true)}
+                >
+                  <Ionicons name="calendar-outline" size={20} color="#276344" />
+                  <Text style={[styles.dateValue, !meetingDate && styles.placeholderValue]}>
+                    {meetingDate
+                      ? meetingDate.toLocaleDateString(undefined, {
+                          month: "long",
+                          day: "numeric",
+                          year: "numeric",
+                        })
+                      : "Meeting date"}
+                  </Text>
+                </TouchableOpacity>
+
+                <View style={[styles.inputBox, { flex: 1 }]}>
+                  <Ionicons name="time-outline" size={20} color="#276344" />
+                  <TextInput
+                    placeholder="Time (e.g. 8:00 AM)"
+                    value={meetingTime}
+                    onChangeText={setMeetingTime}
+                    style={[styles.input, { marginLeft: 8 }]}
+                  />
+                </View>
+              </View>
+            </View>
           </View>
 
           <View style={[styles.editSection, { flex: isMobile ? 0 : 1 }]}>
@@ -220,11 +290,21 @@ export default function VolunteerPostCreate({
               </TouchableOpacity>
             </View>
 
-            <View style={styles.bottomRow}>
-              <View style={[styles.inputBox, { flex: 2 }]}>
+            <View style={styles.meetingBox}>
+              <Text style={styles.fieldLabel}>Meeting details</Text>
+              <View style={styles.inputBox}>
                 <Ionicons name="location-outline" size={20} color="#276344" />
-                <TextInput placeholder="Location" value={location} onChangeText={setLocation} style={[styles.input, { marginLeft: 8 }]} />
+                <TextInput
+                  placeholder="Meeting location"
+                  value={meetingLocation}
+                  onChangeText={setMeetingLocation}
+                  style={[styles.input, { marginLeft: 8 }]}
+                />
               </View>
+
+            </View>
+
+            <View style={styles.bottomRow}>
               <View style={[styles.inputBox, { flex: 1 }]}>
                 <Ionicons name="people-outline" size={20} color="#276344" />
                 <TextInput placeholder="Max" keyboardType="numeric" value={maxVolunteers} onChangeText={(text) => setMaxVolunteers(text.replace(/[^0-9]/g, ""))} maxLength={3} style={styles.maxVolunteerInput} />
@@ -237,6 +317,80 @@ export default function VolunteerPostCreate({
           <Text style={styles.saveText}>{saving ? "Saving..." : isEditing ? "Save changes" : "Create activity"}</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      <Modal visible={showCalendar} transparent animationType="fade" onRequestClose={() => setShowCalendar(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.calendarModal}>
+            <View style={styles.calendarHeader}>
+              <View>
+                <Text style={styles.calendarTitle}>Select meeting date</Text>
+                <Text style={styles.calendarMonth}>
+                  {visibleMonth.toLocaleDateString(undefined, { month: "long", year: "numeric" })}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowCalendar(false)}>
+                <Ionicons name="close" size={25} color="#526158" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.calendarControls}>
+              <TouchableOpacity
+                style={styles.monthButton}
+                onPress={() => setVisibleMonth((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1))}
+              >
+                <Ionicons name="chevron-back" size={21} color="#397A51" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.todayButton}
+                onPress={() => setVisibleMonth(new Date())}
+              >
+                <Text style={styles.todayText}>Today</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.monthButton}
+                onPress={() => setVisibleMonth((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1))}
+              >
+                <Ionicons name="chevron-forward" size={21} color="#397A51" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.weekRow}>
+              {WEEKDAYS.map((day) => <Text key={day} style={styles.weekday}>{day}</Text>)}
+            </View>
+            <View style={styles.calendarGrid}>
+              {getCalendarDays(visibleMonth).map((date) => {
+                const key = formatDateKey(date);
+                const selected = meetingDate && key === formatDateKey(meetingDate);
+                const outsideMonth = date.getMonth() !== visibleMonth.getMonth();
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const isPast = date < today;
+
+                return (
+                  <TouchableOpacity
+                    key={key}
+                    disabled={isPast}
+                    style={[styles.dayButton, selected && styles.selectedDay]}
+                    onPress={() => {
+                      setMeetingDate(date);
+                      setShowCalendar(false);
+                    }}
+                  >
+                    <Text style={[
+                      styles.dayText,
+                      outsideMonth && styles.outsideDayText,
+                      isPast && styles.pastDayText,
+                      selected && styles.selectedDayText,
+                    ]}>
+                      {date.getDate()}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -263,8 +417,43 @@ const styles = StyleSheet.create({
   addButton: { flexDirection: "row", alignSelf: "flex-start", alignItems: "center", gap: 5, paddingTop: 2 },
   addButtonText: { color: "#276344", fontWeight: "600" },
   bottomRow: { flexDirection: "row", gap: 12 },
+  meetingBox: { backgroundColor: "#fff", borderRadius: 8, padding: 12, gap: 10 },
+  imageMeetingDetails: {
+    marginTop: 12,
+    padding: 12,
+    gap: 10,
+    borderRadius: 8,
+    backgroundColor: "#FFFFFF",
+  },
+  meetingDateRow: { flexDirection: "row", gap: 10 },
+  dateValue: { flex: 1, marginLeft: 8, color: "#1D2B21", fontSize: 14 },
+  placeholderValue: { color: "#777" },
   maxVolunteerInput: { flex: 1, textAlign: "center", fontWeight: "700", paddingVertical: 10 },
   saveBtn: { backgroundColor: "#5F9C76", padding: 15, borderRadius: 8, alignItems: "center" },
   disabledButton: { opacity: 0.6 },
   saveText: { color: "#fff", fontWeight: "700", fontSize: 16 },
+  modalOverlay: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 20,
+    backgroundColor: "rgba(20, 34, 25, 0.45)",
+  },
+  calendarModal: { width: "100%", maxWidth: 430, padding: 20, borderRadius: 16, backgroundColor: "#FFFFFF" },
+  calendarHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
+  calendarTitle: { color: "#234B33", fontSize: 19, fontWeight: "800" },
+  calendarMonth: { color: "#718078", fontSize: 13, marginTop: 3 },
+  calendarControls: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginVertical: 16 },
+  monthButton: { width: 36, height: 36, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: "#EEF5F0" },
+  todayButton: { paddingHorizontal: 15, paddingVertical: 8, borderRadius: 8, backgroundColor: "#EEF5F0" },
+  todayText: { color: "#397A51", fontWeight: "700" },
+  weekRow: { flexDirection: "row", marginBottom: 5 },
+  weekday: { width: "14.2857%", textAlign: "center", color: "#718078", fontSize: 11, fontWeight: "700" },
+  calendarGrid: { flexDirection: "row", flexWrap: "wrap" },
+  dayButton: { width: "14.2857%", aspectRatio: 1, alignItems: "center", justifyContent: "center", borderRadius: 20 },
+  selectedDay: { backgroundColor: "#5F9C76" },
+  dayText: { color: "#26362C", fontSize: 13, fontWeight: "600" },
+  outsideDayText: { color: "#ABB5AF" },
+  pastDayText: { color: "#D2D8D4" },
+  selectedDayText: { color: "#FFFFFF", fontWeight: "800" },
 });

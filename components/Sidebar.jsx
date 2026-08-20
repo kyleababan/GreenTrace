@@ -139,7 +139,7 @@ export default function Sidebar() {
             source={require("../assets/images/Notification.png")}
             style={styles.icon}
           />
-          <Text style={styles.itemText}>Pickup Schedule</Text>
+          <Text style={styles.itemText}>Scheduled Date</Text>
         </TouchableOpacity>
 
       </View>

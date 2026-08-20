@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { collection, doc, getDoc, getDocs, increment, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, increment, query, serverTimestamp, updateDoc, where, writeBatch } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -86,7 +86,15 @@ export default function UserPostDetail() {
 
     setAddingPoints(true);
     try {
-      await updateDoc(doc(db, "users", user.id), { points: increment(amount) });
+      const batch = writeBatch(db);
+      batch.update(doc(db, "users", user.id), { points: increment(amount) });
+      batch.set(doc(collection(db, "point_transactions")), {
+        userId: user.id,
+        amount,
+        source: "admin_award",
+        createdAt: serverTimestamp(),
+      });
+      await batch.commit();
       setUser((currentUser) => ({ ...currentUser, points: (Number(currentUser.points) || 0) + amount }));
       setPointsToAdd("");
       setShowPointsModal(false);
