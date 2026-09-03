@@ -23,7 +23,6 @@ import {
   getDocs,
   increment,
   limit,
-  onSnapshot,
   orderBy,
   query,
   serverTimestamp,
@@ -33,6 +32,12 @@ import {
 } from "firebase/firestore";
 
 import { auth, db } from "../firebaseConfig";
+import { censorText } from "../utils/censorText";
+import {
+  getUserPointsMap,
+  mergeUniqueById,
+  POSTS_PER_PAGE,
+} from "../utils/pagination";
 
 const formatRelativeTime = (timestamp, now) => {
   if (!timestamp) return "Just now";
@@ -63,8 +68,6 @@ const formatRelativeTime = (timestamp, now) => {
   return `${dateLabel} • ${relativeTime}`;
 };
 
-const POSTS_PER_PAGE = 10;
-
 export default function Home() {
   const router = useRouter();
 
@@ -82,6 +85,7 @@ export default function Home() {
   const [now, setNow] = useState(() => Date.now());
   const [expandedPosts, setExpandedPosts] = useState({});
   const [loadingMorePosts, setLoadingMorePosts] = useState(false);
+  const [hasMorePosts, setHasMorePosts] = useState(true);
   const lastPostDocRef = useRef(null);
   const hasMorePostsRef = useRef(true);
   const loadingPostsRef = useRef(false);
@@ -102,21 +106,9 @@ export default function Home() {
 
   useEffect(() => {
     loadPosts(true);
-    const unsubscribeUsers = onSnapshot(collection(db, "users"), (snapshot) => {
-      const pointsByUserId = {};
-      snapshot.forEach((userDocument) => {
-        pointsByUserId[userDocument.id] = userDocument.data().points ?? 0;
-      });
-      setAuthorPoints(pointsByUserId);
-    });
-
     loadUserReactions();
     loadCurrentUser();
     loadAnnouncement();
-
-    return () => {
-      unsubscribeUsers();
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -303,9 +295,14 @@ export default function Home() {
 
       setPosts((currentPosts) => {
         if (reset) return data;
-        const currentIds = new Set(currentPosts.map((post) => post.id));
-        return [...currentPosts, ...data.filter((post) => !currentIds.has(post.id))];
+        return mergeUniqueById(currentPosts, data);
       });
+
+      const pointsMap = await getUserPointsMap(
+        db,
+        data.map((post) => post.userId),
+      );
+      setAuthorPoints((currentPoints) => ({ ...currentPoints, ...pointsMap }));
 
       setAnimations((currentAnimations) => {
         const nextAnimations = { ...currentAnimations };
@@ -317,6 +314,7 @@ export default function Home() {
 
       lastPostDocRef.current = snapshot.docs[snapshot.docs.length - 1] || null;
       hasMorePostsRef.current = snapshot.docs.length === POSTS_PER_PAGE;
+      setHasMorePosts(hasMorePostsRef.current);
     } catch (error) {
       console.error("Error loading posts:", error);
     } finally {
@@ -420,14 +418,16 @@ export default function Home() {
                 </View>
 
                 {/* Caption */}
-                {Boolean(post.title) && <Text style={styles.reportTitle}>{post.title}</Text>}
+                {Boolean(post.title) && (
+                  <Text style={styles.reportTitle}>{censorText(post.title)}</Text>
+                )}
                 {Boolean(post.caption) && (
                   <View>
                     <Text
                       style={styles.caption}
                       numberOfLines={expandedPosts[post.id] ? undefined : 3}
                     >
-                      {post.caption}
+                      {censorText(post.caption)}
                     </Text>
                     {post.caption.length > 140 && (
                       <TouchableOpacity onPress={() => togglePostCaption(post.id)}>
@@ -536,6 +536,14 @@ export default function Home() {
                 </View>
               </View>
             ))}
+            {hasMorePosts && !loadingMorePosts && (
+              <TouchableOpacity
+                style={styles.loadMoreButton}
+                onPress={() => loadPosts()}
+              >
+                <Text style={styles.loadMoreText}>Load more reports</Text>
+              </TouchableOpacity>
+            )}
             {loadingMorePosts && <ActivityIndicator color="#5F9C76" />}
           </ScrollView>
 
@@ -709,6 +717,17 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginTop: -6,
     marginBottom: 10,
+  },
+  loadMoreButton: {
+    alignSelf: "center",
+    marginBottom: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  loadMoreText: {
+    color: "#397A51",
+    fontSize: 14,
+    fontWeight: "700",
   },
   imageContainer: {
     width: "100%",

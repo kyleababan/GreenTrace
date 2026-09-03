@@ -15,7 +15,10 @@ import Navbar from "../components/navbar";
 
 import * as Location from "expo-location";
 
+import FormError from "../components/form-error";
 import { auth, db } from "../firebaseConfig";
+import { getCreatePostErrorMessage } from "../utils/authErrors";
+import { censorText } from "../utils/censorText";
 
 import { uploadToCloudinary } from "../cloudinary";
 
@@ -43,6 +46,7 @@ export default function CreateReport() {
   const [manualPurok, setManualPurok] = useState("");
   const [manualLocationModal, setManualLocationModal] = useState(false);
   const [locationName, setLocationName] = useState("");
+  const [formError, setFormError] = useState("");
 
   useEffect(() => {
     const loadUser = async () => {
@@ -76,16 +80,16 @@ export default function CreateReport() {
 
     // Reject videos
     if (asset.type === "video") {
-      alert("Videos are not supported.");
+      setFormError("Videos are not supported. Please choose a photo.");
       return;
     }
 
-    // 2.5 MB limit
     if (asset.fileSize && asset.fileSize > 2.5 * 1024 * 1024) {
-      alert("Image must be smaller than 2.5 MB.");
+      setFormError("Image must be smaller than 2.5 MB.");
       return;
     }
 
+    setFormError("");
     setImage(asset);
   };
 
@@ -94,8 +98,7 @@ export default function CreateReport() {
       const { status } = await Location.requestForegroundPermissionsAsync();
 
       if (status !== "granted") {
-        alert("Location permission denied");
-
+        setFormError("Location permission was denied. Enable it or type the location.");
         return;
       }
 
@@ -119,50 +122,53 @@ export default function CreateReport() {
           .join(", ");
 
         setLocationName(place);
+        setFormError("");
       }
     } catch (error) {
       console.log(error);
+      setFormError("Could not read your GPS location. Try typing it instead.");
     }
   };
 
   const createPost = async () => {
     if (uploading) return;
     if (!title.trim()) {
-      alert("A report title is required");
-
+      setFormError("A report title is required.");
       return;
     }
 
     if (!image) {
-      alert("Please select an image");
-
+      setFormError("Please add a photo of the waste concern.");
       return;
     }
 
     if (!locationName.trim()) {
-      alert("Please set a location before posting.");
-
+      setFormError("Please set a location before posting.");
       return;
     }
 
     if (!manualPurok.trim()) {
-      alert("Please enter the Purok for this report.");
-
+      setFormError("Please enter the Purok for this report.");
       return;
     }
 
     try {
       setUploading(true);
+      setFormError("");
 
       const currentUser = auth.currentUser;
 
       if (!currentUser) {
-        alert("User not logged in");
-
+        setFormError("You are not signed in. Please log in and try again.");
         return;
       }
 
       const userSnap = await getDoc(doc(db, "users", currentUser.uid));
+
+      if (!userSnap.exists()) {
+        setFormError("Your profile could not be loaded. Sign in again.");
+        return;
+      }
 
       const userData = userSnap.data();
 
@@ -180,9 +186,9 @@ export default function CreateReport() {
 
           points: userData.points || 0,
 
-          title: title.trim(),
+          title: censorText(title.trim()),
 
-          caption,
+          caption: censorText(caption),
 
           imageUrl,
 
@@ -200,13 +206,11 @@ export default function CreateReport() {
         },
       );
 
-      alert("Post created");
-
       router.replace("/home");
     } catch (error) {
       console.log(error);
 
-      alert(error.message);
+      setFormError(getCreatePostErrorMessage(error));
     } finally {
       setUploading(false);
     }
@@ -238,6 +242,8 @@ export default function CreateReport() {
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
+            <FormError message={formError} />
+
             {/* USER + POST BUTTON */}
             <View style={styles.userRow}>
               <View style={styles.userInfo}>
@@ -377,6 +383,8 @@ export default function CreateReport() {
             <View style={styles.modalBox}>
               <Text style={styles.modalTitle}>Enter Location</Text>
 
+              <FormError message={formError} />
+
               <TextInput
                 placeholder="Street (example: Rizal Street)"
                 value={manualStreet}
@@ -405,7 +413,7 @@ export default function CreateReport() {
                     .map((value) => value.trim())
                     .filter(Boolean);
                   if (!manualPurok.trim()) {
-                    alert("Please enter the Purok for this report.");
+                    setFormError("Please enter the Purok for this report.");
                     return;
                   }
                   if (locationParts.length) {

@@ -34,7 +34,14 @@ import {
   where,
 } from "firebase/firestore";
 import Navbar from "../components/navbar";
+import FormError from "../components/form-error";
 import { auth, db } from "../firebaseConfig";
+import { censorText } from "../utils/censorText";
+import {
+  COMMENTS_PER_PAGE,
+  getUserPointsMap,
+  mergeUniqueById,
+} from "../utils/pagination";
 import { deleteRelatedDocuments } from "./guards/deletePostHelper";
 
 const formatPostedAt = (timestamp) => {
@@ -57,8 +64,6 @@ const formatPostedAt = (timestamp) => {
   })}`;
 };
 
-const COMMENTS_PER_PAGE = 10;
-
 export default function Post() {
   const { id } = useLocalSearchParams();
 
@@ -79,6 +84,7 @@ export default function Post() {
   const [expandedCaption, setExpandedCaption] = useState(false);
   const [hasMoreComments, setHasMoreComments] = useState(true);
   const [loadingMoreComments, setLoadingMoreComments] = useState(false);
+  const [commentError, setCommentError] = useState("");
   const lastCommentDocRef = useRef(null);
   const loadingCommentsRef = useRef(false);
 
@@ -201,33 +207,20 @@ export default function Post() {
         ...doc.data(),
       }));
 
-      // Map unique user IDs to fetch their up-to-date points from Firestore
-      const uniqueUserIds = [...new Set(rawComments.map((c) => c.userId))];
-      const pointsMap = {};
-
-      await Promise.all(
-        uniqueUserIds.map(async (userId) => {
-          if (!userId) return;
-          const userDoc = await getDoc(doc(db, "users", userId));
-          if (userDoc.exists()) {
-            pointsMap[userId] = userDoc.data().points ?? 0;
-          }
-        }),
+      const pointsMap = await getUserPointsMap(
+        db,
+        rawComments.map((item) => item.userId),
       );
 
-      // Merge current points into comment data
       const enrichedComments = rawComments.map((item) => ({
         ...item,
+        comment: censorText(item.comment),
         currentPoints: pointsMap[item.userId] ?? item.points ?? 0,
       }));
 
       setComments((currentComments) => {
         if (reset) return enrichedComments;
-        const currentIds = new Set(currentComments.map((item) => item.id));
-        return [
-          ...currentComments,
-          ...enrichedComments.filter((item) => !currentIds.has(item.id)),
-        ];
+        return mergeUniqueById(currentComments, enrichedComments);
       });
       lastCommentDocRef.current = snapshot.docs[snapshot.docs.length - 1] || null;
       setHasMoreComments(snapshot.docs.length === COMMENTS_PER_PAGE);
@@ -240,17 +233,20 @@ export default function Post() {
   };
 
   const submitComment = async () => {
-    if (!comment.trim()) return;
+    if (!comment.trim()) {
+      setCommentError("Write a comment before sending.");
+      return;
+    }
 
     if (!currentUser) {
-      console.log("No authenticated user.");
+      setCommentError("You must be signed in to comment.");
       return;
     }
 
     setSendingComment(true);
+    setCommentError("");
 
     try {
-      // Fetch fresh user data right before submitting to guarantee accurate points
       const userDoc = await getDoc(doc(db, "users", currentUser.uid));
       const freshUserData = userDoc.exists() ? userDoc.data() : currentUserData;
       const currentPoints = freshUserData?.points ?? 0;
@@ -261,13 +257,19 @@ export default function Post() {
         firstName: freshUserData?.firstName || "",
         lastName: freshUserData?.lastName || "",
         points: currentPoints,
-        comment: comment.trim(),
+        comment: censorText(comment.trim()),
         createdAt: serverTimestamp(),
       });
 
       await updateDoc(doc(db, "posts", id), {
         commentCount: increment(1),
       });
+
+      setPost((prev) =>
+        prev
+          ? { ...prev, commentCount: (prev.commentCount ?? 0) + 1 }
+          : prev,
+      );
 
       if (currentUser.uid !== post.userId) {
         await createOrUpdateNotification("comment");
@@ -277,6 +279,7 @@ export default function Post() {
       await loadComments(true);
     } catch (error) {
       console.log(error);
+      setCommentError("Could not send your comment. Please try again.");
     } finally {
       setSendingComment(false);
     }
@@ -491,13 +494,16 @@ export default function Post() {
               </View>
 
               {/* CAPTION */}
+              {Boolean(post.title) && (
+                <Text style={styles.reportTitle}>{censorText(post.title)}</Text>
+              )}
               {Boolean(post.caption) && (
                 <View>
                   <Text
                     style={styles.caption}
                     numberOfLines={expandedCaption ? undefined : 3}
                   >
-                    {post.caption}
+                    {censorText(post.caption)}
                   </Text>
                   {post.caption.length > 140 && (
                     <TouchableOpacity onPress={() => setExpandedCaption((current) => !current)}>
@@ -545,9 +551,11 @@ export default function Post() {
             {/* COMMENTS SECTION */}
             <View style={styles.commentsHeader}>
               <Text style={styles.commentLabel}>
-                Comments ({comments.length})
+                Comments ({post.commentCount ?? comments.length})
               </Text>
             </View>
+
+            <FormError message={commentError} />
 
             {/* INPUT ROW */}
             <View style={styles.commentRow}>
@@ -556,7 +564,10 @@ export default function Post() {
                 placeholderTextColor="#888"
                 style={styles.commentInput}
                 value={comment}
-                onChangeText={setComment}
+                onChangeText={(value) => {
+                  setComment(value);
+                  setCommentError("");
+                }}
               />
 
               <TouchableOpacity
@@ -594,7 +605,7 @@ export default function Post() {
                     </Text>
                   </View>
 
-                  <Text style={styles.commentText}>{item.comment}</Text>
+                  <Text style={styles.commentText}>{censorText(item.comment)}</Text>
                 </View>
               </View>
             ))}
@@ -888,6 +899,12 @@ const styles = StyleSheet.create({
     color: "#333",
     lineHeight: 20,
     marginBottom: 10,
+  },
+  reportTitle: {
+    color: "#234B33",
+    fontSize: 16,
+    fontWeight: "800",
+    marginBottom: 6,
   },
   captionToggle: {
     color: "#397A51",

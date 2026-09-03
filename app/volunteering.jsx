@@ -39,6 +39,7 @@ const getInitials = (name) =>
 
 export default function Volunteering() {
   const { volunteerId } = useLocalSearchParams();
+  const activityId = Array.isArray(volunteerId) ? volunteerId[0] : volunteerId;
   const router = useRouter();
   const [activity, setActivity] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
@@ -54,15 +55,9 @@ export default function Volunteering() {
       setImageAspectRatio(null);
       try {
         const signedInUser = auth.currentUser;
-        if (!signedInUser) {
-          setLoadError("Please sign in to volunteer.");
-          return;
-        }
-
-        const [activitySnapshot, userSnapshot] = await Promise.all([
-          getDoc(doc(db, "volunteer_posts", volunteerId)),
-          getDoc(doc(db, "users", signedInUser.uid)),
-        ]);
+        const activitySnapshot = await getDoc(
+          doc(db, "volunteer_posts", activityId),
+        );
 
         if (!activitySnapshot.exists()) {
           setLoadError("This volunteer activity is no longer available.");
@@ -70,10 +65,16 @@ export default function Volunteering() {
         }
 
         setActivity({ id: activitySnapshot.id, ...activitySnapshot.data() });
-        setCurrentUser({
-          id: signedInUser.uid,
-          ...(userSnapshot.exists() ? userSnapshot.data() : {}),
-        });
+
+        if (signedInUser) {
+          const userSnapshot = await getDoc(doc(db, "users", signedInUser.uid));
+          setCurrentUser({
+            id: signedInUser.uid,
+            ...(userSnapshot.exists() ? userSnapshot.data() : {}),
+          });
+        } else {
+          setCurrentUser(null);
+        }
       } catch (error) {
         console.error("Unable to load volunteer activity:", error);
         setLoadError("Unable to load this volunteer activity.");
@@ -82,12 +83,12 @@ export default function Volunteering() {
       }
     };
 
-    if (volunteerId) loadActivity();
+    if (activityId) loadActivity();
     else {
       setLoadError("Volunteer activity not found.");
       setLoading(false);
     }
-  }, [volunteerId]);
+  }, [activityId]);
 
   const members = useMemo(
     () => (Array.isArray(activity?.volunteers) ? activity.volunteers : []),
