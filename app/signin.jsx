@@ -18,7 +18,9 @@ import {
   View,
 } from "react-native";
 
+import FormError from "../components/form-error";
 import { auth, db } from "../firebaseConfig";
+import { getAuthErrorMessage } from "../utils/authErrors";
 
 export default function Login() {
   const router = useRouter();
@@ -31,9 +33,12 @@ export default function Login() {
   const [loggingIn, setLoggingIn] = useState(false);
   const [banReason, setBanReason] = useState("");
   const [showBannedModal, setShowBannedModal] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [resetError, setResetError] = useState("");
 
   const openResetModal = () => {
     setResetEmail(email.trim());
+    setResetError("");
     setShowResetModal(true);
   };
 
@@ -41,9 +46,11 @@ export default function Login() {
     const normalizedEmail = resetEmail.trim();
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-      alert("Enter a valid email address.");
+      setResetError("Enter a valid email address.");
       return;
     }
+
+    setResetError("");
 
     setSendingResetEmail(true);
 
@@ -54,8 +61,11 @@ export default function Login() {
       setShowResetSentModal(true);
     } catch (error) {
       console.log("Unable to send password reset email:", error);
-      alert(
-        "We couldn't send a reset email. Please check the address and try again.",
+      setResetError(
+        getAuthErrorMessage(
+          error,
+          "We couldn't send a reset email. Check the address and try again.",
+        ),
       );
     } finally {
       setSendingResetEmail(false);
@@ -66,15 +76,16 @@ export default function Login() {
     if (loggingIn) return;
 
     if (!email.trim()) {
-      alert("Please enter your email");
+      setFormError("Please enter your email.");
       return;
     }
 
     if (!password.trim()) {
-      alert("Please enter your password");
+      setFormError("Please enter your password.");
       return;
     }
 
+    setFormError("");
     setLoggingIn(true);
 
     try {
@@ -90,7 +101,7 @@ export default function Login() {
 
       if (!userSnap.exists()) {
         await signOut(auth);
-        alert("User data not found");
+        setFormError("This account is incomplete. Contact support or sign up again.");
         return;
       }
 
@@ -108,8 +119,10 @@ export default function Login() {
       } else {
         router.replace("/home");
       }
-    } catch (_error) {
-      alert("Invalid email or password");
+    } catch (error) {
+      setFormError(
+        getAuthErrorMessage(error, "Email or password is incorrect."),
+      );
     } finally {
       setLoggingIn(false);
     }
@@ -146,12 +159,17 @@ export default function Login() {
         {/* Form Container */}
         <View style={styles.formWrapper}>
           <View style={styles.form}>
+            <FormError message={formError} light />
+
             <TextInput
               placeholder="Email"
               placeholderTextColor="#888"
               style={styles.input}
               value={email}
-              onChangeText={setEmail}
+              onChangeText={(value) => {
+                setEmail(value);
+                setFormError("");
+              }}
               keyboardType="email-address"
               autoCapitalize="none"
             />
@@ -161,7 +179,10 @@ export default function Login() {
               placeholderTextColor="#888"
               secureTextEntry
               value={password}
-              onChangeText={setPassword}
+              onChangeText={(value) => {
+                setPassword(value);
+                setFormError("");
+              }}
               style={styles.input}
             />
 
@@ -214,12 +235,17 @@ export default function Login() {
               Confirm the email address registered to your GreenTrace account.
             </Text>
 
+            <FormError message={resetError} />
+
             <TextInput
               placeholder="Email address"
               placeholderTextColor="#888"
               style={styles.modalInput}
               value={resetEmail}
-              onChangeText={setResetEmail}
+              onChangeText={(value) => {
+                setResetEmail(value);
+                setResetError("");
+              }}
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}

@@ -1,4 +1,17 @@
-import { useEffect, useState } from "react";
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  getDocs,
+  limit,
+  orderBy,
+  query,
+  serverTimestamp,
+  startAfter,
+  updateDoc,
+} from "firebase/firestore";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -10,25 +23,14 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  getDocs,
-  orderBy,
-  query,
-  serverTimestamp,
-  updateDoc,
-} from "firebase/firestore";
 import { normalizePurok } from "../../constants/locationFormat";
 import { db } from "../../firebaseConfig";
 
 const WEEK_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const EVENT_COLORS = ["#599A74", "#E69B45", "#5B8DEF", "#C76DBA", "#D85B5B"];
+const SCHEDULES_PER_PAGE = 10;
 
-const startOfMonth = (date) =>
-  new Date(date.getFullYear(), date.getMonth(), 1);
+const startOfMonth = (date) => new Date(date.getFullYear(), date.getMonth(), 1);
 
 const isSameDate = (first, second) =>
   Boolean(first && second) &&
@@ -89,12 +91,14 @@ const getCalendarDays = (month) => {
     1 - firstDay.getDay(),
   );
 
-  return Array.from({ length: 42 }, (_, index) =>
-    new Date(
-      calendarStart.getFullYear(),
-      calendarStart.getMonth(),
-      calendarStart.getDate() + index,
-    ),
+  return Array.from(
+    { length: 42 },
+    (_, index) =>
+      new Date(
+        calendarStart.getFullYear(),
+        calendarStart.getMonth(),
+        calendarStart.getDate() + index,
+      ),
   );
 };
 
@@ -103,6 +107,11 @@ export default function PickupSchedule() {
   const [visibleMonth, setVisibleMonth] = useState(() => startOfMonth(today));
   const [selectedDate, setSelectedDate] = useState(null);
   const [operations, setOperations] = useState([]);
+  const [loadingMoreOperations, setLoadingMoreOperations] = useState(false);
+  const [hasMoreOperations, setHasMoreOperations] = useState(true);
+  const lastOperationRef = useRef(null);
+  const hasMoreOperationsRef = useRef(true);
+  const loadingOperationsRef = useRef(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [operationName, setOperationName] = useState("Waste Collection");
   const [barangay, setBarangay] = useState("");
@@ -152,25 +161,53 @@ export default function PickupSchedule() {
     setShowScheduleModal(true);
   };
 
-  const loadOperations = async () => {
+  const loadOperations = useCallback(async (reset = true) => {
+    if (
+      loadingOperationsRef.current ||
+      (!reset && !hasMoreOperationsRef.current)
+    ) {
+      return;
+    }
+
+    loadingOperationsRef.current = true;
+    setLoadingMoreOperations(true);
+
     try {
+      const constraints = [
+        orderBy("createdAt", "desc"),
+        limit(SCHEDULES_PER_PAGE),
+      ];
+      if (!reset && lastOperationRef.current) {
+        constraints.splice(1, 0, startAfter(lastOperationRef.current));
+      }
+
       const snapshot = await getDocs(
-        query(collection(db, "announcements"), orderBy("createdAt", "desc")),
+        query(collection(db, "announcements"), ...constraints),
       );
-      setOperations(
-        snapshot.docs.map((operation) => ({
-          id: operation.id,
-          ...operation.data(),
-        })),
+      const nextOperations = snapshot.docs.map((operation) => ({
+        id: operation.id,
+        ...operation.data(),
+      }));
+
+      setOperations((currentOperations) =>
+        reset ? nextOperations : [...currentOperations, ...nextOperations],
       );
+      lastOperationRef.current =
+        snapshot.docs[snapshot.docs.length - 1] || null;
+      hasMoreOperationsRef.current =
+        snapshot.docs.length === SCHEDULES_PER_PAGE;
+      setHasMoreOperations(hasMoreOperationsRef.current);
     } catch (error) {
       console.log("Unable to load scheduled operations:", error);
+    } finally {
+      loadingOperationsRef.current = false;
+      setLoadingMoreOperations(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    loadOperations();
-  }, []);
+    loadOperations(true);
+  }, [loadOperations]);
 
   const changeMonth = (amount) => {
     setVisibleMonth(
@@ -196,9 +233,7 @@ export default function PickupSchedule() {
       !normalizedPurok ||
       !pickupTime.trim()
     ) {
-      setFormError(
-        "Add the operation name, Barangay, Purok, and pickup time.",
-      );
+      setFormError("Add the operation name, Barangay, Purok, and pickup time.");
       return;
     }
 
@@ -378,8 +413,7 @@ export default function PickupSchedule() {
 
         <View style={styles.calendarGrid}>
           {calendarDays.map((date) => {
-            const isCurrentMonth =
-              date.getMonth() === visibleMonth.getMonth();
+            const isCurrentMonth = date.getMonth() === visibleMonth.getMonth();
             const isToday = isSameDate(date, today);
             const isSelected = isSameDate(date, selectedDate);
             const dateOperations = operations.filter((operation) =>
@@ -418,7 +452,10 @@ export default function PickupSchedule() {
                 {dateOperations.length > 0 && dateOperations.length <= 2 && (
                   <View style={styles.operationLabels}>
                     {dateOperations.map((operation, index) => (
-                      <View key={operation.id} style={styles.operationMarkerRow}>
+                      <View
+                        key={operation.id}
+                        style={styles.operationMarkerRow}
+                      >
                         <View
                           style={[
                             styles.operationDot,
@@ -463,7 +500,9 @@ export default function PickupSchedule() {
         <View style={styles.selectedSection}>
           <View style={styles.selectedDateCard}>
             <View style={styles.selectedDateIcon}>
-              <Text style={styles.selectedDateDay}>{selectedDate.getDate()}</Text>
+              <Text style={styles.selectedDateDay}>
+                {selectedDate.getDate()}
+              </Text>
             </View>
             <View style={styles.selectedDateDetails}>
               <Text style={styles.selectedDateLabel}>Selected date</Text>
@@ -494,7 +533,9 @@ export default function PickupSchedule() {
             <View key={operation.id} style={styles.savedScheduleCard}>
               <View style={styles.savedScheduleDetails}>
                 <View style={styles.savedScheduleHeader}>
-                  <Text style={styles.savedScheduleTitle}>{operation.title}</Text>
+                  <Text style={styles.savedScheduleTitle}>
+                    {operation.title}
+                  </Text>
                   <Text style={styles.recurrenceBadge}>
                     {operation.recurrence === "monthly"
                       ? "Monthly repeat"
@@ -530,10 +571,26 @@ export default function PickupSchedule() {
               </View>
             </View>
           ))}
+          {hasMoreOperations && !loadingMoreOperations && (
+            <TouchableOpacity
+              style={styles.loadMoreButton}
+              onPress={() => loadOperations(false)}
+            >
+              <Text style={styles.loadMoreText}>Load more schedules</Text>
+            </TouchableOpacity>
+          )}
+          {loadingMoreOperations && (
+            <ActivityIndicator
+              color="#5F9C76"
+              style={styles.loadMoreIndicator}
+            />
+          )}
         </View>
       ) : (
         <View style={styles.selectionPrompt}>
-          <Text style={styles.selectionPromptTitle}>Select a calendar date</Text>
+          <Text style={styles.selectionPromptTitle}>
+            Select a calendar date
+          </Text>
           <Text style={styles.selectionPromptText}>
             A plus button will appear here so you can add a scheduled operation.
           </Text>
@@ -633,24 +690,25 @@ export default function PickupSchedule() {
                   >
                     Set only this date
                   </Text>
-                  <Text style={styles.recurrenceDescription}>One-time pickup</Text>
+                  <Text style={styles.recurrenceDescription}>
+                    One-time pickup
+                  </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[
                     styles.recurrenceOption,
-                    recurrence === "monthly" &&
-                      styles.recurrenceOptionSelected,
+                    recurrence === "monthly" && styles.recurrenceOptionSelected,
                   ]}
                   onPress={() => setRecurrence("monthly")}
                 >
                   <Text
                     style={[
                       styles.recurrenceTitle,
-                      recurrence === "monthly" &&
-                        styles.recurrenceTextSelected,
+                      recurrence === "monthly" && styles.recurrenceTextSelected,
                     ]}
                   >
-                    Every {selectedDate?.toLocaleDateString(undefined, {
+                    Every{" "}
+                    {selectedDate?.toLocaleDateString(undefined, {
                       weekday: "long",
                     })}
                   </Text>
@@ -1056,6 +1114,17 @@ const styles = StyleSheet.create({
     color: "#C24141",
     fontSize: 12,
     fontWeight: "800",
+  },
+  loadMoreButton: {
+    alignItems: "center",
+    paddingVertical: 12,
+  },
+  loadMoreText: {
+    color: "#599A74",
+    fontWeight: "700",
+  },
+  loadMoreIndicator: {
+    paddingVertical: 12,
   },
   selectionPrompt: {
     backgroundColor: "#FFFFFF",

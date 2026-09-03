@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import {
   ActivityIndicator,
@@ -42,6 +43,30 @@ export default function Notification() {
     if (names.length === 2) return `${names[0]} & ${names[1]}`;
 
     return `${names[0]}, ${names[1]} and ${names.length - 2} more`;
+  };
+
+  const getNotificationIcon = (type) => {
+    if (type === "comment") return "chatbubble-ellipses";
+    if (type === "reaction" || type === "priority") return "heart";
+    if (type === "deleted_post") return "shield-checkmark";
+    return "notifications";
+  };
+
+  const formatNotificationTime = (timestamp) => {
+    if (!timestamp) return "Just now";
+
+    const date =
+      typeof timestamp.toDate === "function"
+        ? timestamp.toDate()
+        : new Date(timestamp);
+    if (Number.isNaN(date.getTime())) return "Just now";
+
+    return date.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year:
+        date.getFullYear() !== new Date().getFullYear() ? "numeric" : undefined,
+    });
   };
 
   // This creates 5 placeholder notifications
@@ -113,7 +138,12 @@ export default function Notification() {
           {/* HEADER */}
           <View style={styles.topSection}>
             <View style={styles.headerRow}>
-              <Text style={styles.headerTitle}>Notification</Text>
+              <View>
+                <Text style={styles.headerTitle}>Notifications</Text>
+                <Text style={styles.headerSubtitle}>
+                  Your latest GreenTrace activity
+                </Text>
+              </View>
             </View>
           </View>
 
@@ -140,6 +170,12 @@ export default function Notification() {
               ]}
               showsVerticalScrollIndicator={false}
             >
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Recent activity</Text>
+                <Text style={styles.notificationCount}>
+                  {notifications.length}
+                </Text>
+              </View>
               {notifications.map((item) => (
                 <TouchableOpacity
                   key={item.id}
@@ -154,11 +190,13 @@ export default function Notification() {
                     })
                   }
                 >
-                  {/* LEFT: Avatar/Profile Icon */}
-                  <Image
-                    source={require("../assets/images/profile2.png")}
-                    style={styles.avatar}
-                  />
+                  <View style={styles.iconWrapper}>
+                    <Ionicons
+                      name={getNotificationIcon(item.type)}
+                      size={19}
+                      color="#FFFFFF"
+                    />
+                  </View>
 
                   {/* CENTER: Text Content */}
                   <View style={styles.textContainer}>
@@ -168,12 +206,15 @@ export default function Notification() {
                         : getActorText(item)}
                     </Text>
 
-                    <Text style={styles.userAction}>
+                    <Text style={styles.userAction} numberOfLines={2}>
                       {item.type === "comment"
                         ? "commented on your post."
                         : item.type === "reaction" || item.type === "priority"
                           ? "Increased your priority."
                           : item.message}
+                    </Text>
+                    <Text style={styles.notificationTime}>
+                      {formatNotificationTime(item.createdAt)}
                     </Text>
                   </View>
 
@@ -252,9 +293,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   headerTitle: {
-    fontSize: 22,
+    fontSize: 23,
     fontWeight: "700",
     color: "#fff",
+  },
+  headerSubtitle: {
+    color: "#E8F3EC",
+    fontSize: 12,
+    marginTop: 2,
   },
   feed: {
     flex: 1,
@@ -263,16 +309,48 @@ const styles = StyleSheet.create({
   notificationCard: {
     flexDirection: "row",
     backgroundColor: "#fff",
-    padding: 10,
+    padding: 12,
     borderRadius: 12,
     alignItems: "center",
-    marginBottom: 12,
+    marginBottom: 10,
     // Adds a subtle shadow
     elevation: 2,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 2,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 18,
+    marginBottom: 12,
+  },
+  sectionTitle: {
+    flex: 1,
+    color: "#234B33",
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  notificationCount: {
+    minWidth: 24,
+    height: 24,
+    borderRadius: 12,
+    paddingHorizontal: 6,
+    textAlign: "center",
+    textAlignVertical: "center",
+    backgroundColor: "#E4F1E8",
+    color: "#397A51",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  iconWrapper: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: "#5F9C76",
+    alignItems: "center",
+    justifyContent: "center",
   },
   avatar: {
     width: 42,
@@ -288,10 +366,18 @@ const styles = StyleSheet.create({
   userName: {
     fontWeight: "bold",
     fontSize: 14,
+    color: "#1F3326",
   },
   userAction: {
     fontSize: 12,
-    color: "#666",
+    color: "#59685F",
+    lineHeight: 17,
+    marginTop: 2,
+  },
+  notificationTime: {
+    color: "#94A3B8",
+    fontSize: 11,
+    marginTop: 5,
   },
   emptyState: {
     marginTop: 60,
@@ -300,6 +386,7 @@ const styles = StyleSheet.create({
   emptyText: {
     color: "#777",
     fontSize: 16,
+    textAlign: "center",
   },
 
   navbarContainer: {

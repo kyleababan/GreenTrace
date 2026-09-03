@@ -1,38 +1,32 @@
-import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Image,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Image,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  useWindowDimensions,
+  View,
 } from "react-native";
 
 import {
-    addDoc,
-    collection,
-    doc,
-    getDoc,
-    getDocs,
-    query,
-    runTransaction,
-    serverTimestamp,
-    updateDoc,
-    where,
+  addDoc,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  runTransaction,
+  serverTimestamp,
+  updateDoc,
+  where,
 } from "firebase/firestore";
 
-import { auth, db } from "../../../../firebaseConfig";
-import {
-  BADGES,
-  getUserContributionStats,
-  isBadgeEarned,
-} from "../../../../constants/badges";
-import { formatLocationWithPurok } from "../../../../constants/locationFormat";
+import { db } from "../../../../firebaseConfig";
 import { deleteRelatedDocuments } from "../../../guards/deletePostHelper";
 
 const STATUS_DETAILS = {
@@ -69,6 +63,8 @@ export default function PostDetail({
   setSelectedVolunteerPost,
 }) {
   const router = useRouter();
+  const { width } = useWindowDimensions();
+  const isMobile = width < 760;
   const { postId } = useLocalSearchParams();
   const [loadedPost, setLoadedPost] = useState(null);
   const [loadingPost, setLoadingPost] = useState(!suppliedPost);
@@ -95,6 +91,33 @@ export default function PostDetail({
   const [deleting, setDeleting] = useState(false);
   const [openingVolunteerActivity, setOpeningVolunteerActivity] =
     useState(false);
+  const [beforePhoto, setBeforePhoto] = useState(
+    suppliedPost?.beforeImageUrl || suppliedPost?.imageUrl
+      ? {
+          uri: suppliedPost.beforeImageUrl || suppliedPost.imageUrl,
+          isRemote: true,
+        }
+      : null,
+  );
+  const [afterPhoto, setAfterPhoto] = useState(
+    suppliedPost?.afterImageUrl
+      ? { uri: suppliedPost.afterImageUrl, isRemote: true }
+      : null,
+  );
+
+  const pickCleanupPhoto = async (photoType) => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsEditing: true,
+      quality: 0.8,
+    });
+
+    if (result.canceled || !result.assets?.[0]) return;
+
+    const selectedPhoto = { ...result.assets[0], isRemote: false };
+    if (photoType === "before") setBeforePhoto(selectedPhoto);
+    else setAfterPhoto(selectedPhoto);
+  };
 
   useEffect(() => {
     if (suppliedPost || !postId) return;
@@ -117,6 +140,25 @@ export default function PostDetail({
 
     loadPost();
   }, [postId, suppliedPost]);
+
+  useEffect(() => {
+    if (!post) return;
+
+    setBeforePhoto(
+      (currentPhoto) =>
+        currentPhoto ||
+        (post.beforeImageUrl || post.imageUrl
+          ? { uri: post.beforeImageUrl || post.imageUrl, isRemote: true }
+          : null),
+    );
+    setAfterPhoto(
+      (currentPhoto) =>
+        currentPhoto ||
+        (post.afterImageUrl
+          ? { uri: post.afterImageUrl, isRemote: true }
+          : null),
+    );
+  }, [post]);
 
   const deleteReasons = [
     "Inappropriate Content",
@@ -203,10 +245,24 @@ export default function PostDetail({
 
   const markAsClean = async () => {
     if (updating) return;
+    if (!afterPhoto) {
+      alert(
+        "Please add an after-cleanup photo before marking this report as cleaned.",
+      );
+      return;
+    }
 
     setUpdating(true);
 
     try {
+      const beforeImageUrl = beforePhoto?.isRemote
+        ? beforePhoto.uri
+        : beforePhoto
+          ? await uploadToCloudinary(beforePhoto)
+          : post.imageUrl || "";
+      const afterImageUrl = afterPhoto.isRemote
+        ? afterPhoto.uri
+        : await uploadToCloudinary(afterPhoto);
       const volunteerSnapshot = await getDocs(
         query(
           collection(db, "volunteer_posts"),
@@ -264,7 +320,11 @@ export default function PostDetail({
             userDocuments.push({ userRef, userSnapshot, reward });
         }
 
-        transaction.update(postRef, { status: "cleaned" });
+        transaction.update(postRef, {
+          status: "cleaned",
+          beforeImageUrl,
+          afterImageUrl,
+        });
         volunteerDocuments.forEach((volunteerDocument) => {
           transaction.update(volunteerDocument.ref, { status: "cleaned" });
         });
@@ -489,8 +549,12 @@ export default function PostDetail({
   }
 
   return (
-    <View style={styles.screen}>
-      <View style={{ alignItems: "center", flexDirection: "row", gap: 10 }}>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={styles.screenContent}
+      showsVerticalScrollIndicator={false}
+    >
+      <View style={styles.headerBar}>
         <TouchableOpacity onPress={closePostDetail}>
           <Image
             source={require("../../../../assets/images/backG.png")}
@@ -498,15 +562,10 @@ export default function PostDetail({
           />
         </TouchableOpacity>
 
-        <View
-          style={{
-            alignItems: "center",
-            width: "96%",
-            justifyContent: "space-between",
-            flexDirection: "row",
-          }}
-        >
-          <Text style={styles.title}>Post Details</Text>
+        <View style={styles.headerContent}>
+          <Text style={styles.title} numberOfLines={1}>
+            Post Details
+          </Text>
           <TouchableOpacity
             style={{
               backgroundColor: "#fff",
@@ -523,7 +582,9 @@ export default function PostDetail({
       </View>
 
       {/* MAIN LAYOUT */}
-      <View style={styles.mainContainer}>
+      <View
+        style={[styles.mainContainer, isMobile && styles.mobileMainContainer]}
+      >
         {/* LEFT - POST */}
         <View style={styles.left}>
           <View style={styles.card}>
@@ -610,9 +671,14 @@ export default function PostDetail({
         </View>
 
         {/* RIGHT - COMMENTS + LOCATION */}
-        <View style={styles.right}>
+        <View style={[styles.right, isMobile && styles.mobileRight]}>
           {/* COMMENTS */}
-          <View style={styles.commentSection}>
+          <View
+            style={[
+              styles.commentSection,
+              isMobile && styles.mobileCommentSection,
+            ]}
+          >
             <Text style={styles.sectionTitle}>Comments</Text>
             <ScrollView
               style={{ flex: 1 }}
@@ -655,6 +721,56 @@ export default function PostDetail({
                 <Text>No comments yet.</Text>
               )}
             </ScrollView>
+          </View>
+
+          <View style={styles.cleanupPhotosSection}>
+            <Text style={styles.cleanupPhotosTitle}>Cleanup proof photos</Text>
+            <View style={styles.cleanupPhotosRow}>
+              <TouchableOpacity
+                style={styles.cleanupPhotoButton}
+                onPress={() => pickCleanupPhoto("before")}
+                accessibilityRole="button"
+                accessibilityLabel="Choose before cleanup photo"
+              >
+                {beforePhoto ? (
+                  <Image
+                    source={{ uri: beforePhoto.uri }}
+                    style={styles.cleanupPhotoPreview}
+                  />
+                ) : (
+                  <View style={styles.cleanupPhotoPlaceholder}>
+                    <Text style={styles.cleanupPhotoPlaceholderText}>
+                      No photo
+                    </Text>
+                  </View>
+                )}
+                <Text style={styles.cleanupPhotoLabel}>Before</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.cleanupPhotoButton}
+                onPress={() => pickCleanupPhoto("after")}
+                accessibilityRole="button"
+                accessibilityLabel="Choose after cleanup photo"
+              >
+                {afterPhoto ? (
+                  <Image
+                    source={{ uri: afterPhoto.uri }}
+                    style={styles.cleanupPhotoPreview}
+                  />
+                ) : (
+                  <View style={styles.cleanupPhotoPlaceholder}>
+                    <Text style={styles.cleanupPhotoPlaceholderText}>
+                      Add photo
+                    </Text>
+                  </View>
+                )}
+                <Text style={styles.cleanupPhotoLabel}>After</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.cleanupPhotosHint}>
+              Add an after photo before marking this report as cleaned.
+            </Text>
           </View>
 
           {/* SITUATION ASSESSMENT */}
@@ -721,7 +837,7 @@ export default function PostDetail({
       </View>
 
       {/* BUTTON */}
-      {!isCleaned && <View
+      <View
         style={{
           flexDirection: "row",
           justifyContent: "space-between",
@@ -735,7 +851,7 @@ export default function PostDetail({
             styles.helpBTN,
             {
               flex: 1,
-              backgroundColor: "#599A74",
+              backgroundColor: isCleaned ? "#A5A5A5" : "#599A74",
             },
           ]}
           onPress={openVolunteerActivity}
@@ -756,7 +872,7 @@ export default function PostDetail({
               {
                 backgroundColor:
                   effectiveCurrentTab === "ongoing" ? "#2DCC6F" : "#A5A5A5",
-                flex: 1,
+                flex: isMobile ? 0 : 1,
               },
             ]}
             onPress={
@@ -865,7 +981,7 @@ export default function PostDetail({
           </View>
         </View>
       </Modal>
-    </View>
+    </ScrollView>
   );
 }
 
@@ -950,7 +1066,33 @@ const styles = StyleSheet.create({
   },
   screen: {
     flex: 1,
+    gap: 14,
+    backgroundColor: "#F5F6F5",
+  },
+  screenContent: {
+    padding: 16,
+    gap: 14,
+    flexGrow: 1,
+  },
+  actionRow: {
+    flexDirection: "row",
     justifyContent: "space-between",
+    gap: 10,
+  },
+  mobileActionRow: {
+    flexDirection: "column",
+  },
+  headerBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  headerContent: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexDirection: "row",
     gap: 10,
   },
   title: {
@@ -965,7 +1107,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flex: 1, // take full remaining vertical space
     gap: 20,
-    marginBottom: 0,
+    minHeight: 0,
+  },
+  mobileMainContainer: {
+    flexDirection: "column",
+    flex: 0,
   },
   left: {
     flex: 1,
@@ -975,12 +1121,18 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 15,
     justifyContent: "space-between",
+    minWidth: 0,
+  },
+  mobileRight: {
+    flex: 0,
+    width: "100%",
   },
 
   card: {
     backgroundColor: "#fff",
     borderRadius: 10,
     padding: 10,
+    minWidth: 0,
   },
 
   postImage: {
@@ -989,6 +1141,57 @@ const styles = StyleSheet.create({
     aspectRatio: 16 / 9,
     borderRadius: 10,
     resizeMode: "cover",
+  },
+
+  cleanupPhotosSection: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: "#F3F8F4",
+    borderWidth: 1,
+    borderColor: "#D9E9DD",
+  },
+  cleanupPhotosTitle: {
+    color: "#234B33",
+    fontSize: 14,
+    fontWeight: "700",
+    marginBottom: 9,
+  },
+  cleanupPhotosRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  cleanupPhotoButton: {
+    flex: 1,
+  },
+  cleanupPhotoPreview: {
+    width: "100%",
+    height: 100,
+    borderRadius: 8,
+    resizeMode: "cover",
+  },
+  cleanupPhotoPlaceholder: {
+    height: 100,
+    borderRadius: 8,
+    backgroundColor: "#E1EAE3",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cleanupPhotoPlaceholderText: {
+    color: "#5E7565",
+    fontSize: 12,
+  },
+  cleanupPhotoLabel: {
+    color: "#276344",
+    fontSize: 12,
+    fontWeight: "700",
+    textAlign: "center",
+    marginTop: 5,
+  },
+  cleanupPhotosHint: {
+    color: "#6A7C70",
+    fontSize: 11,
+    marginTop: 8,
   },
 
   postInfo: {
@@ -1081,6 +1284,11 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     borderRadius: 10,
     padding: 15,
+  },
+  mobileCommentSection: {
+    flex: 0,
+    minHeight: 260,
+    maxHeight: 360,
   },
   commentRow: {
     flexDirection: "row",

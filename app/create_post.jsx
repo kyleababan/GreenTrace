@@ -12,9 +12,13 @@ import {
   View,
 } from "react-native";
 import Navbar from "../components/navbar";
-import { normalizePurok } from "../constants/locationFormat";
 
+import * as Location from "expo-location";
+
+import FormError from "../components/form-error";
 import { auth, db } from "../firebaseConfig";
+import { getCreatePostErrorMessage } from "../utils/authErrors";
+import { censorText } from "../utils/censorText";
 
 import { uploadToCloudinary } from "../cloudinary";
 
@@ -31,15 +35,18 @@ export default function CreateReport() {
 
   const [userName, setUserName] = useState("");
   const router = useRouter();
+  const [title, setTitle] = useState("");
   const [caption, setCaption] = useState("");
 
   const [image, setImage] = useState(null);
 
-  const [manualProvince, setManualProvince] = useState("");
-  const [manualBarangay, setManualBarangay] = useState("");
+  const [locationModalVisible, setLocationModalVisible] = useState(false);
+  const [manualLocation, setManualLocation] = useState("");
+  const [manualStreet, setManualStreet] = useState("");
   const [manualPurok, setManualPurok] = useState("");
   const [manualLocationModal, setManualLocationModal] = useState(false);
   const [locationName, setLocationName] = useState("");
+  const [formError, setFormError] = useState("");
 
   useEffect(() => {
     const loadUser = async () => {
@@ -73,52 +80,95 @@ export default function CreateReport() {
 
     // Reject videos
     if (asset.type === "video") {
-      alert("Videos are not supported.");
+      setFormError("Videos are not supported. Please choose a photo.");
       return;
     }
 
-    // 2.5 MB limit
     if (asset.fileSize && asset.fileSize > 2.5 * 1024 * 1024) {
-      alert("Image must be smaller than 2.5 MB.");
+      setFormError("Image must be smaller than 2.5 MB.");
       return;
     }
 
+    setFormError("");
     setImage(asset);
+  };
+
+  const getCurrentLocation = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+
+      if (status !== "granted") {
+        setFormError("Location permission was denied. Enable it or type the location.");
+        return;
+      }
+
+      const location = await Location.getCurrentPositionAsync({});
+
+      const address = await Location.reverseGeocodeAsync({
+        latitude: location.coords.latitude,
+
+        longitude: location.coords.longitude,
+      });
+
+      if (address.length > 0) {
+        const place = [
+          address[0].name,
+          address[0].street,
+          address[0].district,
+          address[0].subregion,
+          address[0].city,
+        ]
+          .filter(Boolean)
+          .join(", ");
+
+        setLocationName(place);
+        setFormError("");
+      }
+    } catch (error) {
+      console.log(error);
+      setFormError("Could not read your GPS location. Try typing it instead.");
+    }
   };
 
   const createPost = async () => {
     if (uploading) return;
+    if (!title.trim()) {
+      setFormError("A report title is required.");
+      return;
+    }
 
     if (!image) {
-      alert("Please select an image");
-
+      setFormError("Please add a photo of the waste concern.");
       return;
     }
 
     if (!locationName.trim()) {
-      alert("Please set a location before posting.");
-
+      setFormError("Please set a location before posting.");
       return;
     }
 
     if (!manualPurok.trim()) {
-      alert("Please enter the Purok for this report.");
-
+      setFormError("Please enter the Purok for this report.");
       return;
     }
 
     try {
       setUploading(true);
+      setFormError("");
 
       const currentUser = auth.currentUser;
 
       if (!currentUser) {
-        alert("User not logged in");
-
+        setFormError("You are not signed in. Please log in and try again.");
         return;
       }
 
       const userSnap = await getDoc(doc(db, "users", currentUser.uid));
+
+      if (!userSnap.exists()) {
+        setFormError("Your profile could not be loaded. Sign in again.");
+        return;
+      }
 
       const userData = userSnap.data();
 
@@ -136,13 +186,15 @@ export default function CreateReport() {
 
           points: userData.points || 0,
 
-          caption,
+          title: censorText(title.trim()),
+
+          caption: censorText(caption),
 
           imageUrl,
 
           locationName,
 
-          purok: normalizePurok(manualPurok) || null,
+          purok: manualPurok.trim() || null,
 
           status: "moderate",
 
@@ -154,13 +206,11 @@ export default function CreateReport() {
         },
       );
 
-      alert("Post created");
-
       router.replace("/home");
     } catch (error) {
       console.log(error);
 
-      alert(error.message);
+      setFormError(getCreatePostErrorMessage(error));
     } finally {
       setUploading(false);
     }
@@ -192,6 +242,8 @@ export default function CreateReport() {
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
+            <FormError message={formError} />
+
             {/* USER + POST BUTTON */}
             <View style={styles.userRow}>
               <View style={styles.userInfo}>
@@ -216,7 +268,7 @@ export default function CreateReport() {
             {/* LOCATION */}
             <TouchableOpacity
               style={styles.locationRow}
-              onPress={() => setManualLocationModal(true)}
+              onPress={() => setLocationModalVisible(true)}
             >
               <Image
                 source={require("../assets/images/location.png")}
@@ -227,7 +279,22 @@ export default function CreateReport() {
               </Text>
             </TouchableOpacity>
 
+            <TextInput
+              placeholder="Purok (example: Purok 3)"
+              style={styles.purokInput}
+              value={manualPurok}
+              onChangeText={setManualPurok}
+            />
+
             {/* CAPTION */}
+            <TextInput
+              placeholder="Report title (example: Overflowing bins near the market)"
+              style={styles.titleInput}
+              value={title}
+              onChangeText={setTitle}
+              maxLength={90}
+            />
+
             <TextInput
               placeholder="Write Something..."
               multiline
@@ -264,57 +331,97 @@ export default function CreateReport() {
         </View>
 
         {/* NAVBAR (ALWAYS AT BOTTOM) */}
+        <Modal visible={locationModalVisible} transparent animationType="fade">
+          <View style={styles.modalBackground}>
+            <View style={styles.modalBox}>
+              <Text style={styles.modalTitle}>Choose Location</Text>
+
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={() => {
+                  setLocationModalVisible(false);
+                  getCurrentLocation();
+                }}
+              >
+                <View style={styles.modalButtonContent}>
+                  <Image
+                    source={require("../assets/images/location.png")}
+                    style={styles.locationIcon}
+                  />
+                  <Text>Use Current GPS</Text>
+                </View>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={() => {
+                  setLocationModalVisible(false);
+                  setManualLocationModal(true);
+                }}
+              >
+                <View style={styles.modalButtonContent}>
+                  <Image
+                    source={require("../assets/images/editlabel.png")}
+                    style={styles.editIcon}
+                  />
+                  <Text>Type Manually</Text>
+                </View>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.modalCancel}
+                onPress={() => setLocationModalVisible(false)}
+              >
+                <Text>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
         <Modal visible={manualLocationModal} transparent animationType="fade">
           <View style={styles.modalBackground}>
             <View style={styles.modalBox}>
               <Text style={styles.modalTitle}>Enter Location</Text>
 
+              <FormError message={formError} />
+
               <TextInput
-                placeholder="Province"
-                value={manualProvince}
-                onChangeText={setManualProvince}
+                placeholder="Street (example: Rizal Street)"
+                value={manualStreet}
+                onChangeText={setManualStreet}
                 style={styles.manualInput}
               />
 
               <TextInput
-                placeholder="Barangay"
-                value={manualBarangay}
-                onChangeText={setManualBarangay}
+                placeholder="Purok (example: Purok 3)"
+                value={manualPurok}
+                onChangeText={setManualPurok}
                 style={styles.manualInput}
               />
 
-              <View style={styles.purokInputRow}>
-                <Text style={styles.purokPrefix}>Pk.</Text>
-                <TextInput
-                  placeholder="Example: 3"
-                  value={manualPurok}
-                  onChangeText={setManualPurok}
-                  style={styles.purokTextInput}
-                />
-              </View>
+              <TextInput
+                placeholder="Barangay / City or Municipality"
+                value={manualLocation}
+                onChangeText={setManualLocation}
+                style={styles.manualInput}
+              />
 
               <TouchableOpacity
                 style={styles.modalButton}
                 onPress={() => {
-                  const purok = normalizePurok(manualPurok);
-
-                  if (!manualProvince.trim()) {
-                    alert("Please enter the Province for this report.");
+                  const locationParts = [manualStreet, manualPurok, manualLocation]
+                    .map((value) => value.trim())
+                    .filter(Boolean);
+                  if (!manualPurok.trim()) {
+                    setFormError("Please enter the Purok for this report.");
                     return;
                   }
-                  if (!manualBarangay.trim()) {
-                    alert("Please enter the Barangay for this report.");
-                    return;
-                  }
-                  if (!purok) {
-                    alert("Please enter the Purok for this report.");
-                    return;
+                  if (locationParts.length) {
+                    setLocationName(locationParts.join(", "));
                   }
 
-                  setManualPurok(purok);
-                  setLocationName(
-                    `${manualProvince.trim()}, ${manualBarangay.trim()}, Pk. ${purok}`,
-                  );
+                  setManualLocation("");
+                  setManualStreet("");
                   setManualLocationModal(false);
                 }}
               >
@@ -440,6 +547,12 @@ const styles = StyleSheet.create({
     height: 16,
     marginRight: 5,
   },
+  editIcon: {
+    width: 18,
+    height: 18,
+    marginRight: 5,
+  },
+
   locationText: {
     color: "#555",
   },
@@ -452,6 +565,20 @@ const styles = StyleSheet.create({
     marginTop: 10,
     textAlignVertical: "top",
   },
+  titleInput: {
+    backgroundColor: "#E5E5E5",
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 10,
+    fontWeight: "600",
+  },
+  purokInput: {
+    backgroundColor: "#E5E5E5",
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 10,
+  },
+
   imageBox: {
     width: "100%",
     aspectRatio: 4 / 3,
@@ -532,6 +659,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 
+  modalButtonContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
   modalCancel: {
     padding: 12,
     alignItems: "center",
@@ -544,22 +677,5 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 10,
     marginBottom: 10,
-  },
-  purokInputRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 8,
-    marginBottom: 10,
-  },
-  purokPrefix: {
-    paddingLeft: 10,
-    fontWeight: "600",
-    color: "#333",
-  },
-  purokTextInput: {
-    flex: 1,
-    padding: 10,
   },
 });

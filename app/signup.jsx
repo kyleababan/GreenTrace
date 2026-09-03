@@ -13,7 +13,9 @@ import {
   View,
 } from "react-native";
 
+import FormError from "../components/form-error";
 import { auth, db } from "../firebaseConfig";
+import { getAuthErrorMessage } from "../utils/authErrors";
 
 export default function Signup() {
   const [acceptedTerms, setAcceptedTerms] = useState(false);
@@ -26,6 +28,7 @@ export default function Signup() {
   const [password, setPassword] = useState("");
   const [cellNumber, setCellNumber] = useState("");
   const [birthDate, setBirthDate] = useState("");
+  const [formError, setFormError] = useState("");
 
   const [loading, setLoading] = useState(false);
 
@@ -82,12 +85,12 @@ export default function Signup() {
   };
 
   const registerUser = async () => {
+    if (loading) return;
+
     if (!acceptedTerms) {
-      alert("You must agree to the Terms and Agreement.");
+      setFormError("You must agree to the Terms and Agreement.");
       return;
     }
-
-    if (loading) return;
 
     if (
       !firstName.trim() ||
@@ -97,30 +100,31 @@ export default function Signup() {
       !cellNumber.trim() ||
       !birthDate.trim()
     ) {
-      alert("Please fill in all fields.");
+      setFormError("Please fill in all fields.");
       return;
     }
 
     if (!isValidEmail(email)) {
-      alert("Invalid email address.");
+      setFormError("Please enter a valid email address.");
       return;
     }
 
     if (password.length < 8) {
-      alert("Password must be at least 8 characters.");
+      setFormError("Password must be at least 8 characters.");
       return;
     }
 
     if (!isValidPhone(cellNumber)) {
-      alert("Phone number must be 11 digits and start with 09.");
+      setFormError("Phone number must be 11 digits and start with 09.");
       return;
     }
 
     if (!isValidBirthDate(birthDate)) {
-      alert("Birth date must be MM/DD/YYYY");
+      setFormError("Birth date must be a valid date in MM/DD/YYYY format.");
       return;
     }
 
+    setFormError("");
     setLoading(true);
 
     try {
@@ -143,10 +147,14 @@ export default function Signup() {
         createdAt: serverTimestamp(),
       });
 
-      alert("Registration successful");
       router.replace("/home");
     } catch (error) {
-      alert(error.message);
+      setFormError(
+        getAuthErrorMessage(
+          error,
+          "Could not create your account. Please try again.",
+        ),
+      );
     } finally {
       setLoading(false);
     }
@@ -187,24 +195,35 @@ export default function Signup() {
           {/* Form */}
           <View style={styles.formWrapper}>
             <View style={styles.form}>
+              <FormError message={formError} light />
+
               <TextInput
                 style={styles.input}
                 value={firstName}
-                onChangeText={setFirstName}
+                onChangeText={(value) => {
+                  setFirstName(value);
+                  setFormError("");
+                }}
                 placeholder="First Name"
                 placeholderTextColor="#888"
               />
               <TextInput
                 style={styles.input}
                 value={lastName}
-                onChangeText={setLastName}
+                onChangeText={(value) => {
+                  setLastName(value);
+                  setFormError("");
+                }}
                 placeholder="Last Name"
                 placeholderTextColor="#888"
               />
               <TextInput
                 style={styles.input}
                 value={email}
-                onChangeText={setEmail}
+                onChangeText={(value) => {
+                  setEmail(value);
+                  setFormError("");
+                }}
                 placeholder="Email"
                 placeholderTextColor="#888"
                 keyboardType="email-address"
@@ -216,12 +235,18 @@ export default function Signup() {
                 placeholderTextColor="#888"
                 secureTextEntry
                 value={password}
-                onChangeText={setPassword}
+                onChangeText={(value) => {
+                  setPassword(value);
+                  setFormError("");
+                }}
               />
               <TextInput
                 style={styles.input}
                 value={cellNumber}
-                onChangeText={setCellNumber}
+                onChangeText={(value) => {
+                  setCellNumber(value);
+                  setFormError("");
+                }}
                 placeholder="Phone Number (e.g. 09123456789)"
                 placeholderTextColor="#888"
                 keyboardType="phone-pad"
@@ -230,7 +255,10 @@ export default function Signup() {
               <TextInput
                 style={styles.input}
                 value={birthDate}
-                onChangeText={handleBirthDateChange}
+                onChangeText={(value) => {
+                  handleBirthDateChange(value);
+                  setFormError("");
+                }}
                 placeholder="Birth Date (MM/DD/YYYY)"
                 placeholderTextColor="#888"
                 keyboardType="number-pad"
@@ -241,7 +269,10 @@ export default function Signup() {
               <TouchableOpacity
                 style={styles.termsRow}
                 activeOpacity={0.8}
-                onPress={() => setAcceptedTerms(!acceptedTerms)}
+                onPress={() => {
+                  setAcceptedTerms(!acceptedTerms);
+                  setFormError("");
+                }}
               >
                 <View
                   style={[
