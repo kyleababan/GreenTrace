@@ -1,8 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Image,
   Modal,
   ScrollView,
@@ -26,6 +28,7 @@ import {
   where,
 } from "firebase/firestore";
 
+import { uploadToCloudinary } from "../../../../cloudinary";
 import {
   BADGES,
   getUserContributionStats,
@@ -33,7 +36,8 @@ import {
 } from "../../../../constants/badges";
 import { formatLocationWithPurok } from "../../../../constants/locationFormat";
 import { auth, db } from "../../../../firebaseConfig";
-import { deleteRelatedDocuments } from "../../../guards/deletePostHelper";
+import { deleteRelatedDocuments } from "../../../../utils/deletePostHelper";
+import { hideBadWords } from "../../../../utils/hideBadWords";
 
 const STATUS_DETAILS = {
   pending: { label: "Not Assessed", color: "#A5A5A5" },
@@ -226,6 +230,27 @@ export default function PostDetail({
     setUpdating(true);
 
     try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        quality: 0.8,
+        allowsEditing: true,
+      });
+
+      if (result.canceled) {
+        setUpdating(false);
+        return;
+      }
+
+      const afterImageUrl = await uploadToCloudinary(result.assets[0]);
+      const adminSnapshot = auth.currentUser
+        ? await getDoc(doc(db, "users", auth.currentUser.uid))
+        : null;
+      const adminData = adminSnapshot?.exists() ? adminSnapshot.data() : {};
+      const adminName =
+        [adminData.firstName, adminData.lastName].filter(Boolean).join(" ") ||
+        auth.currentUser?.email ||
+        "Admin";
+
       const volunteerSnapshot = await getDocs(
         query(
           collection(db, "volunteer_posts"),
@@ -283,7 +308,13 @@ export default function PostDetail({
             userDocuments.push({ userRef, userSnapshot, reward });
         }
 
-        transaction.update(postRef, { status: "cleaned" });
+        transaction.update(postRef, {
+          status: "cleaned",
+          afterImageUrl,
+          cleanedBy: auth.currentUser?.uid || null,
+          cleanedByName: adminName,
+          cleanedAt: serverTimestamp(),
+        });
         volunteerDocuments.forEach((volunteerDocument) => {
           transaction.update(volunteerDocument.ref, { status: "cleaned" });
         });
@@ -304,18 +335,18 @@ export default function PostDetail({
       });
 
       if (!rewardsApplied) {
-        alert("This post has already been marked as cleaned.");
+        Alert.alert("This post has already been marked as cleaned.");
         closePostDetail();
         return;
       }
 
-      alert("Post marked as cleaned.");
+      Alert.alert("Post marked as cleaned.");
 
       closePostDetail();
     } catch (error) {
       console.log(error);
 
-      alert("Failed to update.");
+      Alert.alert("Failed to update.");
 
       setUpdating(false);
     }
@@ -354,7 +385,7 @@ export default function PostDetail({
       if (setSelectedVolunteerPost) setSelectedVolunteerPost(post);
     } catch (error) {
       console.error("Unable to open volunteer activity:", error);
-      alert("Unable to check volunteer activities. Please try again.");
+      Alert.alert("Unable to check volunteer activities. Please try again.");
     } finally {
       setOpeningVolunteerActivity(false);
     }
@@ -378,7 +409,7 @@ export default function PostDetail({
 
   const continueCustomReason = () => {
     if (customReason.trim() === "") {
-      alert("Please enter a reason.");
+      Alert.alert("Please enter a reason.");
 
       return;
     }
@@ -422,7 +453,7 @@ export default function PostDetail({
       // Delete the post and all related documents
       await deleteRelatedDocuments(post.id);
 
-      alert("Report deleted successfully.");
+      Alert.alert("Report deleted successfully.");
 
       setShowConfirmModal(false);
 
@@ -430,7 +461,7 @@ export default function PostDetail({
     } catch (error) {
       console.log(error);
 
-      alert("Something went wrong.");
+      Alert.alert("Something went wrong.");
 
       setDeleting(false);
     }
@@ -446,13 +477,13 @@ export default function PostDetail({
         status: "ongoing",
       });
 
-      alert("Post has been set to On-going.");
+      Alert.alert("Post has been set to On-going.");
 
       closePostDetail();
     } catch (error) {
       console.log(error);
 
-      alert("Failed to update the post.");
+      Alert.alert("Failed to update the post.");
 
       setUpdating(false);
     }
@@ -466,7 +497,7 @@ export default function PostDetail({
     ).toLowerCase();
     if (updating || currentStatus === nextStatus) return;
     if (!["pending", "moderate", "critical"].includes(currentStatus)) {
-      alert("Only reports awaiting action can be reassessed.");
+      Alert.alert("Only reports awaiting action can be reassessed.");
       return;
     }
 
@@ -479,7 +510,7 @@ export default function PostDetail({
         assessmentUpdatedAt: serverTimestamp(),
       });
 
-      alert(
+      Alert.alert(
         nextStatus === "critical"
           ? "Report assessed as Critical."
           : "Report assessed as Moderate.",
@@ -487,7 +518,7 @@ export default function PostDetail({
       closePostDetail();
     } catch (error) {
       console.error("Unable to update assessment:", error);
-      alert("Failed to update the situation assessment.");
+      Alert.alert("Failed to update the situation assessment.");
       setUpdating(false);
     }
   };
@@ -551,6 +582,31 @@ export default function PostDetail({
         <View style={styles.left}>
           <View style={styles.card}>
             <Image source={{ uri: post.imageUrl }} style={styles.postImage} />
+
+            {isCleaned && post.afterImageUrl && (
+              <View style={styles.beforeAfterSection}>
+                <Text style={styles.beforeAfterTitle}>Cleanup Result</Text>
+                <View style={styles.beforeAfterRow}>
+                  <View style={styles.beforeAfterColumn}>
+                    <Text style={styles.beforeAfterLabel}>Before</Text>
+                    <Image
+                      source={{ uri: post.imageUrl }}
+                      style={styles.beforeAfterImage}
+                    />
+                  </View>
+                  <View style={styles.beforeAfterColumn}>
+                    <Text style={styles.beforeAfterLabel}>After</Text>
+                    <Image
+                      source={{ uri: post.afterImageUrl }}
+                      style={styles.beforeAfterImage}
+                    />
+                  </View>
+                </View>
+                <Text style={styles.cleanedByText} numberOfLines={1}>
+                  Cleaned by {post.cleanedByName || "Admin"}
+                </Text>
+              </View>
+            )}
 
             <View style={styles.postInfo}>
               {/* PROFILE AND POST DETAILS */}
@@ -621,7 +677,9 @@ export default function PostDetail({
               </View>
 
               {/* DESCRIPTION */}
-              <Text style={styles.description}>{post.caption}</Text>
+              <Text style={styles.description}>
+                {hideBadWords(post.caption)}
+              </Text>
 
               {/* REACTIONS */}
               <View style={styles.reactions}>
@@ -684,7 +742,9 @@ export default function PostDetail({
                         </Text>
                       </View>
 
-                      <Text style={styles.commentText}>{comment.comment}</Text>
+                      <Text style={styles.commentText}>
+                        {hideBadWords(comment.comment)}
+                      </Text>
                     </View>
                   </View>
                 ))
@@ -1042,6 +1102,45 @@ const styles = StyleSheet.create({
     aspectRatio: 16 / 9,
     borderRadius: 10,
     resizeMode: "cover",
+  },
+
+  beforeAfterSection: {
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: "#E3EAE5",
+  },
+  beforeAfterTitle: {
+    color: "#397A51",
+    fontSize: 13,
+    fontWeight: "800",
+    marginBottom: 8,
+  },
+  beforeAfterRow: {
+    flexDirection: "row",
+    gap: 8,
+    width: "100%",
+  },
+  beforeAfterColumn: {
+    flex: 1,
+    minWidth: 0,
+  },
+  beforeAfterLabel: {
+    color: "#68746C",
+    fontSize: 11,
+    fontWeight: "700",
+    marginBottom: 4,
+  },
+  beforeAfterImage: {
+    width: "100%",
+    aspectRatio: 4 / 3,
+    borderRadius: 8,
+    resizeMode: "cover",
+  },
+  cleanedByText: {
+    color: "#68746C",
+    fontSize: 11,
+    marginTop: 6,
   },
 
   postInfo: {

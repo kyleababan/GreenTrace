@@ -1,6 +1,5 @@
 import { usePathname, useRouter } from "expo-router";
 import { Image, StyleSheet, TouchableOpacity, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function Navbar() {
   const router = useRouter();
@@ -8,56 +7,48 @@ export default function Navbar() {
 
   const tabs = [
     {
-      name: "home",
       route: "/home",
-      icon: require("../assets/images/home.png"), // TODO: replace with your icon
+      icon: require("../assets/images/home.png"),
     },
     {
-      name: "volunteer",
       route: "/volunteer",
-      icon: require("../assets/images/vlist.png"), // TODO
+      icon: require("../assets/images/vlist.png"),
     },
     {
-      name: "notification",
       route: "/notification",
-      icon: require("../assets/images/notif.png"), // TODO
+      icon: require("../assets/images/notif.png"),
     },
     {
-      name: "rank",
       route: "/rank",
       icon: require("../assets/images/rank.png"),
     },
     {
-      name: "profile",
       route: "/profile",
-      icon: require("../assets/images/acc.png"), // TODO
+      icon: require("../assets/images/acc.png"),
     },
   ];
 
   return (
-    <SafeAreaView edges={["bottom"]} style={styles.safeArea}>
-      <View style={styles.navbar}>
-        {tabs.map((tab) => {
-          const isActive = pathname === tab.route;
+    <View style={styles.navbar}>
+      {tabs.map((tab) => {
+        const isActive = pathname === tab.route;
 
-          return (
-            <TouchableOpacity
-              key={tab.route}
-              style={styles.navItem}
-              disabled={isActive}
-              onPress={() => router.replace(tab.route)}
-            >
-              <Image source={tab.icon} style={styles.icon} />
+        return (
+          <TouchableOpacity
+            key={tab.route}
+            style={styles.navItem}
+            disabled={isActive}
+            onPress={() => router.replace(tab.route)}
+          >
+            <Image source={tab.icon} style={styles.icon} />
 
-              {/* Keep the indicator mounted so tab changes do not shift or flash. */}
-              <View
-                style={[styles.activeLine, !isActive && styles.inactiveLine]}
-              />
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-    </SafeAreaView>
+            <View
+              style={[styles.activeLine, !isActive && styles.inactiveLine]}
+            />
+          </TouchableOpacity>
+        );
+      })}
+    </View>
   );
 }
 

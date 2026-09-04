@@ -1,6 +1,17 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { collection, doc, getDoc, getDocs, increment, query, serverTimestamp, updateDoc, where, writeBatch } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  increment,
+  query,
+  serverTimestamp,
+  updateDoc,
+  where,
+  writeBatch,
+} from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -17,13 +28,20 @@ import {
 } from "react-native";
 
 import { db } from "../../../../firebaseConfig";
-import { deleteUserRelatedDocuments } from "../../../guards/deletePostHelper";
+import { deleteUserRelatedDocuments } from "../../../../utils/deletePostHelper";
+import { hideBadWords } from "../../../../utils/hideBadWords";
 
 const getFullName = (user) =>
   [user?.firstName, user?.lastName].filter(Boolean).join(" ") || "Unnamed user";
 
 const getInitials = (name) =>
-  name.split(" ").filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "U";
+  name
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase() || "U";
 
 export default function UserPostDetail() {
   const { userId } = useLocalSearchParams();
@@ -56,12 +74,17 @@ export default function UserPostDetail() {
         }
 
         const postsSnapshot = await getDocs(
-          query(collection(db, "posts"), where("userId", "==", userId))
+          query(collection(db, "posts"), where("userId", "==", userId)),
         );
 
-        const userPosts = postsSnapshot.docs.map((post) => ({ id: post.id, ...post.data() }));
-        userPosts.sort((firstPost, secondPost) =>
-          (secondPost.createdAt?.seconds || 0) - (firstPost.createdAt?.seconds || 0)
+        const userPosts = postsSnapshot.docs.map((post) => ({
+          id: post.id,
+          ...post.data(),
+        }));
+        userPosts.sort(
+          (firstPost, secondPost) =>
+            (secondPost.createdAt?.seconds || 0) -
+            (firstPost.createdAt?.seconds || 0),
         );
 
         setUser({ id: userSnapshot.id, ...userSnapshot.data() });
@@ -95,7 +118,10 @@ export default function UserPostDetail() {
         createdAt: serverTimestamp(),
       });
       await batch.commit();
-      setUser((currentUser) => ({ ...currentUser, points: (Number(currentUser.points) || 0) + amount }));
+      setUser((currentUser) => ({
+        ...currentUser,
+        points: (Number(currentUser.points) || 0) + amount,
+      }));
       setPointsToAdd("");
       setShowPointsModal(false);
     } catch (error) {
@@ -122,7 +148,11 @@ export default function UserPostDetail() {
         banReason: reason,
         bannedAt: serverTimestamp(),
       });
-      setUser((currentUser) => ({ ...currentUser, isBanned: true, banReason: reason }));
+      setUser((currentUser) => ({
+        ...currentUser,
+        isBanned: true,
+        banReason: reason,
+      }));
       setShowBanModal(false);
     } catch (error) {
       console.error("Unable to ban user:", error);
@@ -145,13 +175,23 @@ export default function UserPostDetail() {
     }
   };
 
-  if (loading) return <View style={styles.stateContainer}><ActivityIndicator size="large" color="#5F9C76" /></View>;
+  if (loading)
+    return (
+      <View style={styles.stateContainer}>
+        <ActivityIndicator size="large" color="#5F9C76" />
+      </View>
+    );
 
   if (!user) {
     return (
       <View style={styles.stateContainer}>
         <Text style={styles.stateText}>{loadError || "User not found."}</Text>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}><Text style={styles.backButtonText}>Go back</Text></TouchableOpacity>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.back()}
+        >
+          <Text style={styles.backButtonText}>Go back</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -161,33 +201,60 @@ export default function UserPostDetail() {
   return (
     <View style={styles.page}>
       <View style={styles.topBar}>
-        <TouchableOpacity style={styles.backIconButton} onPress={() => router.back()} accessibilityLabel="Go back">
+        <TouchableOpacity
+          style={styles.backIconButton}
+          onPress={() => router.back()}
+          accessibilityLabel="Go back"
+        >
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.topTitle}>User information</Text>
       </View>
 
-      <View style={[styles.content, { flexDirection: isMobile ? "column" : "row" }]}>
+      <View
+        style={[styles.content, { flexDirection: isMobile ? "column" : "row" }]}
+      >
         <View style={[styles.userPanel, isMobile && styles.mobileUserPanel]}>
-          <View style={styles.profileAvatar}><Text style={styles.profileInitials}>{getInitials(name)}</Text></View>
+          <View style={styles.profileAvatar}>
+            <Text style={styles.profileInitials}>{getInitials(name)}</Text>
+          </View>
           <View style={styles.pointsRow}>
-            <Text style={styles.pointsValue}>{Number(user.points) || 0} pts</Text>
-            <TouchableOpacity style={styles.addPointsButton} onPress={() => setShowPointsModal(true)} accessibilityLabel="Add eco points">
+            <Text style={styles.pointsValue}>
+              {Number(user.points) || 0} pts
+            </Text>
+            <TouchableOpacity
+              style={styles.addPointsButton}
+              onPress={() => setShowPointsModal(true)}
+              accessibilityLabel="Add eco points"
+            >
               <Ionicons name="add" size={20} color="#fff" />
             </TouchableOpacity>
           </View>
           <Text style={styles.userName}>{name}</Text>
-          <Text style={styles.userDetail}>{user.email || "No email address"}</Text>
-          <Text style={styles.userDetail}>{user.cellNumber || "No phone number"}</Text>
-          {user.birthDate ? <Text style={styles.userDetail}>Birth date: {user.birthDate}</Text> : null}
-          {user.isBanned ? <Text style={styles.bannedBadge}>Banned</Text> : null}
+          <Text style={styles.userDetail}>
+            {user.email || "No email address"}
+          </Text>
+          <Text style={styles.userDetail}>
+            {user.cellNumber || "No phone number"}
+          </Text>
+          {user.birthDate ? (
+            <Text style={styles.userDetail}>Birth date: {user.birthDate}</Text>
+          ) : null}
+          {user.isBanned ? (
+            <Text style={styles.bannedBadge}>Banned</Text>
+          ) : null}
 
           <View style={styles.accountActions}>
             <TouchableOpacity style={styles.banButton} onPress={openBanModal}>
               <Ionicons name="ban-outline" size={17} color="#9a5b00" />
-              <Text style={styles.banButtonText}>{user.isBanned ? "Update Ban" : "Ban"}</Text>
+              <Text style={styles.banButtonText}>
+                {user.isBanned ? "Update Ban" : "Ban"}
+              </Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.deleteButton} onPress={() => setShowDeleteModal(true)}>
+            <TouchableOpacity
+              style={styles.deleteButton}
+              onPress={() => setShowDeleteModal(true)}
+            >
               <Ionicons name="trash-outline" size={17} color="#bf3030" />
               <Text style={styles.deleteButtonText}>Delete</Text>
             </TouchableOpacity>
@@ -195,64 +262,166 @@ export default function UserPostDetail() {
         </View>
 
         <View style={styles.postsPanel}>
-          <Text style={styles.sectionTitle}>{name}{"'s reports"}</Text>
-          <ScrollView style={styles.reportsScroll} contentContainerStyle={styles.postList} showsVerticalScrollIndicator>
-            {posts.length ? posts.map((post) => (
-              <TouchableOpacity
-                key={post.id}
-                style={[styles.postCard, isMobile && styles.mobilePostCard]}
-                onPress={() => router.push({
-                  pathname: "/admin/assessments/post_view/PostDetail",
-                  params: { postId: post.id },
-                })}
-                accessibilityRole="button"
-                accessibilityLabel={`View report: ${post.caption || "Waste report"}`}
-              >
-                <View style={styles.postCopy}>
-                  <Text style={styles.postTitle} numberOfLines={2}>{post.caption || "Waste report"}</Text>
-                  <Text style={styles.postLocation} numberOfLines={2}>{post.locationName || "Location not specified"}</Text>
-                  <Text style={styles.postStatus}>{post.status || "pending"}</Text>
-                </View>
-                {post.imageUrl ? <Image source={{ uri: post.imageUrl }} style={styles.postImage} /> : <View style={styles.imagePlaceholder}><Ionicons name="image-outline" size={25} color="#71907d" /></View>}
-              </TouchableOpacity>
-            )) : <Text style={styles.emptyText}>This user has not submitted any reports.</Text>}
+          <Text style={styles.sectionTitle}>
+            {name}
+            {"'s reports"}
+          </Text>
+          <ScrollView
+            style={styles.reportsScroll}
+            contentContainerStyle={styles.postList}
+            showsVerticalScrollIndicator
+          >
+            {posts.length ? (
+              posts.map((post) => (
+                <TouchableOpacity
+                  key={post.id}
+                  style={[styles.postCard, isMobile && styles.mobilePostCard]}
+                  onPress={() =>
+                    router.push({
+                      pathname: "/admin/assessments/post_view/PostDetail",
+                      params: { postId: post.id },
+                    })
+                  }
+                  accessibilityRole="button"
+                  accessibilityLabel={`View report: ${hideBadWords(post.caption) || "Waste report"}`}
+                >
+                  <View style={styles.postCopy}>
+                    <Text style={styles.postTitle} numberOfLines={2}>
+                      {hideBadWords(post.caption) || "Waste report"}
+                    </Text>
+                    <Text style={styles.postLocation} numberOfLines={2}>
+                      {post.locationName || "Location not specified"}
+                    </Text>
+                    <Text style={styles.postStatus}>
+                      {post.status || "pending"}
+                    </Text>
+                  </View>
+                  {post.imageUrl ? (
+                    <Image
+                      source={{ uri: post.imageUrl }}
+                      style={styles.postImage}
+                    />
+                  ) : (
+                    <View style={styles.imagePlaceholder}>
+                      <Ionicons
+                        name="image-outline"
+                        size={25}
+                        color="#71907d"
+                      />
+                    </View>
+                  )}
+                </TouchableOpacity>
+              ))
+            ) : (
+              <Text style={styles.emptyText}>
+                This user has not submitted any reports.
+              </Text>
+            )}
           </ScrollView>
         </View>
       </View>
 
-      <Modal visible={showPointsModal} transparent animationType="fade" onRequestClose={() => setShowPointsModal(false)}>
+      <Modal
+        visible={showPointsModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowPointsModal(false)}
+      >
         <View style={styles.modalOverlay}>
           <View style={styles.modal}>
             <Text style={styles.modalTitle}>Add eco points</Text>
-            <Text style={styles.modalText}>Enter the number of points to add for {name}.</Text>
-            <TextInput placeholder="Points" keyboardType="numeric" value={pointsToAdd} onChangeText={(value) => setPointsToAdd(value.replace(/[^0-9]/g, ""))} style={styles.pointsInput} autoFocus />
+            <Text style={styles.modalText}>
+              Enter the number of points to add for {name}.
+            </Text>
+            <TextInput
+              placeholder="Points"
+              keyboardType="numeric"
+              value={pointsToAdd}
+              onChangeText={(value) =>
+                setPointsToAdd(value.replace(/[^0-9]/g, ""))
+              }
+              style={styles.pointsInput}
+              autoFocus
+            />
             <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.cancelButton} onPress={() => setShowPointsModal(false)}><Text>Cancel</Text></TouchableOpacity>
-              <TouchableOpacity style={[styles.confirmButton, addingPoints && styles.disabledButton]} disabled={addingPoints} onPress={addPoints}><Text style={styles.confirmButtonText}>{addingPoints ? "Adding..." : "Add points"}</Text></TouchableOpacity>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => setShowPointsModal(false)}
+              >
+                <Text>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.confirmButton,
+                  addingPoints && styles.disabledButton,
+                ]}
+                disabled={addingPoints}
+                onPress={addPoints}
+              >
+                <Text style={styles.confirmButtonText}>
+                  {addingPoints ? "Adding..." : "Add points"}
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
 
-      <Modal visible={showDeleteModal} transparent animationType="fade" onRequestClose={() => setShowDeleteModal(false)}>
+      <Modal
+        visible={showDeleteModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowDeleteModal(false)}
+      >
         <View style={styles.modalOverlay}>
           <View style={styles.modal} accessibilityRole="alert">
-            <View style={styles.dangerIcon}><Ionicons name="warning-outline" size={28} color="#bf3030" /></View>
-            <Text style={[styles.modalTitle, styles.centerText]}>Delete user account?</Text>
-            <Text style={[styles.modalText, styles.centerText]}>Caution: Deleting this account will permanently remove its data. Are you sure?</Text>
+            <View style={styles.dangerIcon}>
+              <Ionicons name="warning-outline" size={28} color="#bf3030" />
+            </View>
+            <Text style={[styles.modalTitle, styles.centerText]}>
+              Delete user account?
+            </Text>
+            <Text style={[styles.modalText, styles.centerText]}>
+              Caution: Deleting this account will permanently remove its data.
+              Are you sure?
+            </Text>
             <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.cancelButton} onPress={() => setShowDeleteModal(false)} disabled={deletingUser}><Text>Cancel</Text></TouchableOpacity>
-              <TouchableOpacity style={[styles.dangerConfirmButton, deletingUser && styles.disabledButton]} onPress={deleteUserAccount} disabled={deletingUser}><Text style={styles.confirmButtonText}>{deletingUser ? "Deleting..." : "Delete"}</Text></TouchableOpacity>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => setShowDeleteModal(false)}
+                disabled={deletingUser}
+              >
+                <Text>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.dangerConfirmButton,
+                  deletingUser && styles.disabledButton,
+                ]}
+                onPress={deleteUserAccount}
+                disabled={deletingUser}
+              >
+                <Text style={styles.confirmButtonText}>
+                  {deletingUser ? "Deleting..." : "Delete"}
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
 
-      <Modal visible={showBanModal} transparent animationType="fade" onRequestClose={() => setShowBanModal(false)}>
+      <Modal
+        visible={showBanModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowBanModal(false)}
+      >
         <View style={styles.modalOverlay}>
           <View style={styles.modal}>
             <Text style={styles.modalTitle}>Ban {name}</Text>
-            <Text style={styles.modalText}>Enter the reason this user is being banned.</Text>
+            <Text style={styles.modalText}>
+              Enter the reason this user is being banned.
+            </Text>
             <TextInput
               value={banReason}
               onChangeText={setBanReason}
@@ -263,8 +432,25 @@ export default function UserPostDetail() {
               style={styles.reasonInput}
             />
             <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.cancelButton} onPress={() => setShowBanModal(false)} disabled={banningUser}><Text>Cancel</Text></TouchableOpacity>
-              <TouchableOpacity style={[styles.banConfirmButton, (!banReason.trim() || banningUser) && styles.disabledButton]} onPress={banUser} disabled={!banReason.trim() || banningUser}><Text style={styles.confirmButtonText}>{banningUser ? "Banning..." : "Ban user"}</Text></TouchableOpacity>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => setShowBanModal(false)}
+                disabled={banningUser}
+              >
+                <Text>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.banConfirmButton,
+                  (!banReason.trim() || banningUser) && styles.disabledButton,
+                ]}
+                onPress={banUser}
+                disabled={!banReason.trim() || banningUser}
+              >
+                <Text style={styles.confirmButtonText}>
+                  {banningUser ? "Banning..." : "Ban user"}
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -275,55 +461,254 @@ export default function UserPostDetail() {
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: "#f5f6f5", padding: 20 },
-  stateContainer: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 16 },
+  stateContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+    gap: 16,
+  },
   stateText: { color: "#5d6b61", textAlign: "center" },
-  backButton: { backgroundColor: "#5F9C76", paddingHorizontal: 18, paddingVertical: 10, borderRadius: 8 },
+  backButton: {
+    backgroundColor: "#5F9C76",
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
   backButtonText: { color: "#fff", fontWeight: "700" },
-  topBar: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 18 },
-  backIconButton: { width: 42, height: 42, borderRadius: 21, backgroundColor: "#5F9C76", alignItems: "center", justifyContent: "center" },
+  topBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 18,
+  },
+  backIconButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: "#5F9C76",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   topTitle: { fontSize: 22, fontWeight: "700", color: "#1d2b21" },
   content: { flex: 1, minHeight: 0, gap: 20 },
-  userPanel: { width: 250, backgroundColor: "#fff", borderRadius: 12, padding: 20, alignItems: "center", alignSelf: "flex-start" },
+  userPanel: {
+    width: 250,
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 20,
+    alignItems: "center",
+    alignSelf: "flex-start",
+  },
   mobileUserPanel: { width: "100%" },
-  profileAvatar: { width: 92, height: 92, borderRadius: 46, backgroundColor: "#5F9C76", alignItems: "center", justifyContent: "center" },
+  profileAvatar: {
+    width: 92,
+    height: 92,
+    borderRadius: 46,
+    backgroundColor: "#5F9C76",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   profileInitials: { color: "#fff", fontSize: 30, fontWeight: "700" },
-  pointsRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 14 },
+  pointsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 14,
+  },
   pointsValue: { color: "#287650", fontSize: 17, fontWeight: "700" },
-  addPointsButton: { width: 28, height: 28, borderRadius: 14, backgroundColor: "#5F9C76", alignItems: "center", justifyContent: "center" },
-  userName: { fontSize: 21, fontWeight: "700", color: "#1d2b21", marginTop: 8, textAlign: "center" },
-  userDetail: { color: "#4d5d52", fontSize: 13, marginTop: 5, textAlign: "center" },
-  bannedBadge: { marginTop: 12, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, overflow: "hidden", color: "#9c2525", backgroundColor: "#fff0f0", fontWeight: "700", fontSize: 12 },
-  accountActions: { width: "100%", flexDirection: "row", gap: 8, marginTop: 18 },
-  banButton: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingVertical: 9, borderRadius: 7, backgroundColor: "#fff5df" },
+  addPointsButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#5F9C76",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  userName: {
+    fontSize: 21,
+    fontWeight: "700",
+    color: "#1d2b21",
+    marginTop: 8,
+    textAlign: "center",
+  },
+  userDetail: {
+    color: "#4d5d52",
+    fontSize: 13,
+    marginTop: 5,
+    textAlign: "center",
+  },
+  bannedBadge: {
+    marginTop: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    overflow: "hidden",
+    color: "#9c2525",
+    backgroundColor: "#fff0f0",
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  accountActions: {
+    width: "100%",
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 18,
+  },
+  banButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    paddingVertical: 9,
+    borderRadius: 7,
+    backgroundColor: "#fff5df",
+  },
   banButtonText: { color: "#9a5b00", fontWeight: "700" },
-  deleteButton: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingVertical: 9, borderRadius: 7, backgroundColor: "#fff0f0" },
+  deleteButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    paddingVertical: 9,
+    borderRadius: 7,
+    backgroundColor: "#fff0f0",
+  },
   deleteButtonText: { color: "#bf3030", fontWeight: "700" },
-  postsPanel: { flex: 1, minHeight: 0, backgroundColor: "#fff", borderRadius: 12, padding: 14, overflow: "hidden" },
+  postsPanel: {
+    flex: 1,
+    minHeight: 0,
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 14,
+    overflow: "hidden",
+  },
   reportsScroll: { flex: 1, minHeight: 0 },
-  sectionTitle: { fontSize: 17, fontWeight: "700", color: "#1d2b21", marginBottom: 12 },
-  postList: { flexDirection: "row", flexWrap: "wrap", gap: 12, paddingBottom: 4 },
-  postCard: { width: "48%", flexDirection: "row", minHeight: 116, backgroundColor: "#f7f9f7", borderWidth: 1, borderColor: "#e2e8e3", borderRadius: 10, padding: 10, gap: 10 },
+  sectionTitle: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: "#1d2b21",
+    marginBottom: 12,
+  },
+  postList: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+    paddingBottom: 4,
+  },
+  postCard: {
+    width: "48%",
+    flexDirection: "row",
+    minHeight: 116,
+    backgroundColor: "#f7f9f7",
+    borderWidth: 1,
+    borderColor: "#e2e8e3",
+    borderRadius: 10,
+    padding: 10,
+    gap: 10,
+  },
   mobilePostCard: { width: "100%" },
   postCopy: { flex: 1, minWidth: 0, justifyContent: "center" },
   postTitle: { color: "#1d2b21", fontWeight: "700", fontSize: 15 },
   postLocation: { color: "#63756a", fontSize: 12, marginTop: 5 },
-  postStatus: { alignSelf: "flex-start", marginTop: 8, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, backgroundColor: "#e6f0e9", color: "#276344", fontSize: 11, fontWeight: "700", textTransform: "capitalize" },
+  postStatus: {
+    alignSelf: "flex-start",
+    marginTop: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    backgroundColor: "#e6f0e9",
+    color: "#276344",
+    fontSize: 11,
+    fontWeight: "700",
+    textTransform: "capitalize",
+  },
   postImage: { width: 112, height: 84, borderRadius: 7, alignSelf: "center" },
-  imagePlaceholder: { width: 112, height: 84, borderRadius: 7, backgroundColor: "#dfe8e2", alignItems: "center", justifyContent: "center", alignSelf: "center" },
+  imagePlaceholder: {
+    width: 112,
+    height: 84,
+    borderRadius: 7,
+    backgroundColor: "#dfe8e2",
+    alignItems: "center",
+    justifyContent: "center",
+    alignSelf: "center",
+  },
   emptyText: { color: "#63756a", textAlign: "center", marginTop: 30 },
-  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center", padding: 20 },
-  modal: { width: "100%", maxWidth: 380, backgroundColor: "#fff", borderRadius: 12, padding: 20 },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 20,
+  },
+  modal: {
+    width: "100%",
+    maxWidth: 380,
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 20,
+  },
   modalTitle: { fontSize: 20, fontWeight: "700", color: "#1d2b21" },
   modalText: { color: "#5d6b61", marginTop: 8, lineHeight: 20 },
-  pointsInput: { borderWidth: 1, borderColor: "#d7dfd9", borderRadius: 8, paddingHorizontal: 12, height: 46, marginTop: 16 },
-  modalActions: { flexDirection: "row", justifyContent: "flex-end", gap: 10, marginTop: 18 },
-  cancelButton: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 7, backgroundColor: "#edf0ee" },
-  confirmButton: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 7, backgroundColor: "#5F9C76" },
+  pointsInput: {
+    borderWidth: 1,
+    borderColor: "#d7dfd9",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    height: 46,
+    marginTop: 16,
+  },
+  modalActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 10,
+    marginTop: 18,
+  },
+  cancelButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 7,
+    backgroundColor: "#edf0ee",
+  },
+  confirmButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 7,
+    backgroundColor: "#5F9C76",
+  },
   disabledButton: { opacity: 0.6 },
   confirmButtonText: { color: "#fff", fontWeight: "700" },
-  reasonInput: { minHeight: 110, borderWidth: 1, borderColor: "#d7dfd9", borderRadius: 8, padding: 12, marginTop: 16 },
-  dangerIcon: { width: 52, height: 52, borderRadius: 26, alignSelf: "center", alignItems: "center", justifyContent: "center", backgroundColor: "#fff0f0", marginBottom: 12 },
+  reasonInput: {
+    minHeight: 110,
+    borderWidth: 1,
+    borderColor: "#d7dfd9",
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 16,
+  },
+  dangerIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignSelf: "center",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#fff0f0",
+    marginBottom: 12,
+  },
   centerText: { textAlign: "center" },
-  dangerConfirmButton: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 7, backgroundColor: "#bf3030" },
-  banConfirmButton: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 7, backgroundColor: "#b97912" },
+  dangerConfirmButton: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 7,
+    backgroundColor: "#bf3030",
+  },
+  banConfirmButton: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 7,
+    backgroundColor: "#b97912",
+  },
 });

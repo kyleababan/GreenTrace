@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   Image,
   Modal,
+  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,12 +12,11 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { uploadToCloudinary } from "../cloudinary";
 import Navbar from "../components/navbar";
 import { normalizePurok } from "../constants/locationFormat";
-
 import { auth, db } from "../firebaseConfig";
-
-import { uploadToCloudinary } from "../cloudinary";
+import { hideBadWords } from "../utils/hideBadWords";
 
 import {
   addDoc,
@@ -59,6 +59,7 @@ export default function CreateReport() {
 
   const [userName, setUserName] = useState("");
   const router = useRouter();
+  const [title, setTitle] = useState("");
   const [caption, setCaption] = useState("");
 
   const [image, setImage] = useState(null);
@@ -107,7 +108,10 @@ export default function CreateReport() {
 
     // Reject videos
     if (asset.type === "video") {
-      setErrors((previous) => ({ ...previous, image: "Videos are not supported." }));
+      setErrors((previous) => ({
+        ...previous,
+        image: "Videos are not supported.",
+      }));
       return;
     }
 
@@ -170,7 +174,9 @@ export default function CreateReport() {
 
           points: userData.points || 0,
 
-          caption,
+          title: hideBadWords(title.trim()),
+
+          caption: hideBadWords(caption.trim()),
 
           imageUrl,
 
@@ -198,7 +204,7 @@ export default function CreateReport() {
   };
 
   return (
-    <View style={styles.wrapper}>
+    <SafeAreaView style={styles.wrapper}>
       <View style={styles.container}>
         {/* CONTENT WRAPPER */}
         <View style={styles.contentWrapper}>
@@ -246,7 +252,10 @@ export default function CreateReport() {
 
             {/* LOCATION */}
             <TouchableOpacity
-              style={[styles.locationRow, errors.location && styles.errorBorder]}
+              style={[
+                styles.locationRow,
+                errors.location && styles.errorBorder,
+              ]}
               onPress={() => setManualLocationModal(true)}
             >
               <Image
@@ -260,8 +269,19 @@ export default function CreateReport() {
             {errors.location && (
               <Text style={styles.fieldError}>{errors.location}</Text>
             )}
-            {errors.image && <Text style={styles.fieldError}>{errors.image}</Text>}
+            {errors.image && (
+              <Text style={styles.fieldError}>{errors.image}</Text>
+            )}
             {errors.form && <Text style={styles.formError}>{errors.form}</Text>}
+
+            {/* TITLE */}
+            <TextInput
+              placeholder="Report title"
+              style={styles.titleInput}
+              value={title}
+              onChangeText={setTitle}
+              maxLength={90}
+            />
 
             {/* CAPTION */}
             <TextInput
@@ -368,10 +388,15 @@ export default function CreateReport() {
                       location: "",
                     }));
                   }}
-                  style={[styles.purokTextInput, errors.purok && styles.inputError]}
+                  style={[
+                    styles.purokTextInput,
+                    errors.purok && styles.inputError,
+                  ]}
                 />
               </View>
-              {errors.purok && <Text style={styles.fieldError}>{errors.purok}</Text>}
+              {errors.purok && (
+                <Text style={styles.fieldError}>{errors.purok}</Text>
+              )}
 
               <TouchableOpacity
                 style={styles.modalButton}
@@ -383,9 +408,7 @@ export default function CreateReport() {
                   const purok = normalizePurok(manualPurok);
 
                   setManualPurok(purok);
-                  setLocationName(
-                    `${manualBarangay}, Pk. ${purok}`,
-                  );
+                  setLocationName(`${manualBarangay}, Pk. ${purok}`);
                   setErrors((previous) => ({ ...previous, location: "" }));
                   setManualLocationModal(false);
                 }}
@@ -406,7 +429,7 @@ export default function CreateReport() {
           <Navbar />
         </View>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -543,6 +566,13 @@ const styles = StyleSheet.create({
     height: 80,
     marginTop: 10,
     textAlignVertical: "top",
+  },
+  titleInput: {
+    backgroundColor: "#E5E5E5",
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 10,
+    fontWeight: "600",
   },
   imageBox: {
     width: "100%",

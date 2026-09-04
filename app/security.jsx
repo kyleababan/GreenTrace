@@ -23,7 +23,6 @@ import {
   updatePassword,
 } from "firebase/auth";
 
-
 export default function Security() {
   const router = useRouter();
 
@@ -79,7 +78,6 @@ export default function Security() {
               style={styles.backIcon}
             />
           </TouchableOpacity>
-
         </View>
         {/* FORM SECTION */}
 
@@ -89,7 +87,6 @@ export default function Security() {
           <View style={styles.inputWrapper}>
             <TextInput
               style={styles.input}
-              secureTextEntry
               value={currentPassword}
               onChangeText={setCurrentPassword}
               secureTextEntry={!showCurrent}
@@ -111,7 +108,6 @@ export default function Security() {
           <View style={styles.inputWrapper}>
             <TextInput
               style={styles.input}
-              secureTextEntry
               value={newPassword}
               onChangeText={setNewPassword}
               secureTextEntry={!showNew}
@@ -134,7 +130,6 @@ export default function Security() {
           <View style={styles.inputWrapper}>
             <TextInput
               style={styles.input}
-              secureTextEntry
               value={repeatPassword}
               onChangeText={setRepeatPassword}
               secureTextEntry={!showRepeat}
