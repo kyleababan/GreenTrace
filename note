@@ -1,6 +1,18 @@
 a note for myself
 
+
+// pushing in to the main
 git init
 git add .
 git commit -m ""
 git push -u origin main
+
+// fetching tommy's work
+
+git branch // check if its on assistant-work, not on main
+git pull
+
+// if its on main then do
+git switch assistant-work
+git pull
+

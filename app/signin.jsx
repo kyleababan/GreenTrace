@@ -35,6 +35,28 @@ export default function Login() {
   const [showBannedModal, setShowBannedModal] = useState(false);
   const [formError, setFormError] = useState("");
   const [resetError, setResetError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState({});
+
+  const validateEmail = (value) => {
+    if (!value.trim()) return "Please enter your email.";
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())) {
+      return "Enter a valid email address.";
+    }
+    return "";
+  };
+
+  const validatePassword = (value) =>
+    value.trim() ? "" : "Please enter your password.";
+
+  const updateField = (field, value, setter) => {
+    setter(value);
+    setFieldErrors((current) => ({
+      ...current,
+      [field]:
+        field === "email" ? validateEmail(value) : validatePassword(value),
+    }));
+    setFormError("");
+  };
 
   const openResetModal = () => {
     setResetEmail(email.trim());
@@ -75,6 +97,12 @@ export default function Login() {
   const loginUser = async () => {
     if (loggingIn) return;
 
+    const nextFieldErrors = {
+      email: validateEmail(email),
+      password: validatePassword(password),
+    };
+    setFieldErrors(nextFieldErrors);
+
     if (!email.trim()) {
       setFormError("Please enter your email.");
       return;
@@ -82,6 +110,11 @@ export default function Login() {
 
     if (!password.trim()) {
       setFormError("Please enter your password.");
+      return;
+    }
+
+    if (nextFieldErrors.email || nextFieldErrors.password) {
+      setFormError("Please enter a valid email and password.");
       return;
     }
 
@@ -101,7 +134,9 @@ export default function Login() {
 
       if (!userSnap.exists()) {
         await signOut(auth);
-        setFormError("This account is incomplete. Contact support or sign up again.");
+        setFormError(
+          "This account is incomplete. Contact support or sign up again.",
+        );
         return;
       }
 
@@ -164,15 +199,18 @@ export default function Login() {
             <TextInput
               placeholder="Email"
               placeholderTextColor="#888"
-              style={styles.input}
+              style={[styles.input, fieldErrors.email && styles.inputError]}
               value={email}
               onChangeText={(value) => {
-                setEmail(value);
-                setFormError("");
+                updateField("email", value, setEmail);
               }}
               keyboardType="email-address"
               autoCapitalize="none"
+              accessibilityState={{ invalid: Boolean(fieldErrors.email) }}
             />
+            {fieldErrors.email && (
+              <Text style={styles.fieldError}>{fieldErrors.email}</Text>
+            )}
 
             <TextInput
               placeholder="Password"
@@ -180,11 +218,14 @@ export default function Login() {
               secureTextEntry
               value={password}
               onChangeText={(value) => {
-                setPassword(value);
-                setFormError("");
+                updateField("password", value, setPassword);
               }}
-              style={styles.input}
+              style={[styles.input, fieldErrors.password && styles.inputError]}
+              accessibilityState={{ invalid: Boolean(fieldErrors.password) }}
             />
+            {fieldErrors.password && (
+              <Text style={styles.fieldError}>{fieldErrors.password}</Text>
+            )}
 
             <TouchableOpacity
               style={[styles.button, loggingIn && styles.disabledButton]}
@@ -405,6 +446,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     marginBottom: 12,
     fontSize: 14,
+  },
+  inputError: {
+    borderColor: "#D93025",
+    borderWidth: 1.5,
+  },
+  fieldError: {
+    color: "#FFE0DE",
+    fontSize: 12,
+    marginTop: -8,
+    marginBottom: 10,
+    marginLeft: 2,
   },
   button: {
     backgroundColor: "#FFFFFF",

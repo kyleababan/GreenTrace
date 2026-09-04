@@ -12,13 +12,9 @@ import {
   View,
 } from "react-native";
 import Navbar from "../components/navbar";
+import { normalizePurok } from "../constants/locationFormat";
 
-import * as Location from "expo-location";
-
-import FormError from "../components/form-error";
 import { auth, db } from "../firebaseConfig";
-import { getCreatePostErrorMessage } from "../utils/authErrors";
-import { censorText } from "../utils/censorText";
 
 import { uploadToCloudinary } from "../cloudinary";
 
@@ -30,23 +26,54 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 
+const BARANGAYS = [
+  "Anislag",
+  "Anopog",
+  "Binabag",
+  "Buhingtubig",
+  "Busay",
+  "Butong",
+  "Cabiangon",
+  "Camugao",
+  "Duangan",
+  "Guimbawian",
+  "Lamac",
+  "Lut-od",
+  "Mangoto",
+  "Opao",
+  "Poblacion",
+  "Punod",
+  "Rizal",
+  "Sacsac",
+  "Sambagon",
+  "Sibago",
+  "Tajao",
+  "Tangub",
+  "Tanibag",
+  "Tupas",
+  "Tutay",
+].sort((first, second) => first.localeCompare(second));
+
 export default function CreateReport() {
   const [uploading, setUploading] = useState(false);
 
   const [userName, setUserName] = useState("");
   const router = useRouter();
-  const [title, setTitle] = useState("");
   const [caption, setCaption] = useState("");
 
   const [image, setImage] = useState(null);
 
-  const [locationModalVisible, setLocationModalVisible] = useState(false);
-  const [manualLocation, setManualLocation] = useState("");
-  const [manualStreet, setManualStreet] = useState("");
+  const [manualBarangay, setManualBarangay] = useState("");
   const [manualPurok, setManualPurok] = useState("");
   const [manualLocationModal, setManualLocationModal] = useState(false);
+  const [barangayDropdownOpen, setBarangayDropdownOpen] = useState(false);
+  const [errors, setErrors] = useState({});
   const [locationName, setLocationName] = useState("");
-  const [formError, setFormError] = useState("");
+
+  const validateLocation = () => ({
+    ...(!manualBarangay ? { barangay: "Select a barangay." } : {}),
+    ...(!normalizePurok(manualPurok) ? { purok: "Purok is required." } : {}),
+  });
 
   useEffect(() => {
     const loadUser = async () => {
@@ -80,95 +107,52 @@ export default function CreateReport() {
 
     // Reject videos
     if (asset.type === "video") {
-      setFormError("Videos are not supported. Please choose a photo.");
+      setErrors((previous) => ({ ...previous, image: "Videos are not supported." }));
       return;
     }
 
+    // 2.5 MB limit
     if (asset.fileSize && asset.fileSize > 2.5 * 1024 * 1024) {
-      setFormError("Image must be smaller than 2.5 MB.");
+      setErrors((previous) => ({
+        ...previous,
+        image: "Image must be smaller than 2.5 MB.",
+      }));
       return;
     }
 
-    setFormError("");
     setImage(asset);
-  };
-
-  const getCurrentLocation = async () => {
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-
-      if (status !== "granted") {
-        setFormError("Location permission was denied. Enable it or type the location.");
-        return;
-      }
-
-      const location = await Location.getCurrentPositionAsync({});
-
-      const address = await Location.reverseGeocodeAsync({
-        latitude: location.coords.latitude,
-
-        longitude: location.coords.longitude,
-      });
-
-      if (address.length > 0) {
-        const place = [
-          address[0].name,
-          address[0].street,
-          address[0].district,
-          address[0].subregion,
-          address[0].city,
-        ]
-          .filter(Boolean)
-          .join(", ");
-
-        setLocationName(place);
-        setFormError("");
-      }
-    } catch (error) {
-      console.log(error);
-      setFormError("Could not read your GPS location. Try typing it instead.");
-    }
+    setErrors((previous) => ({ ...previous, image: "" }));
   };
 
   const createPost = async () => {
     if (uploading) return;
-    if (!title.trim()) {
-      setFormError("A report title is required.");
-      return;
-    }
 
-    if (!image) {
-      setFormError("Please add a photo of the waste concern.");
-      return;
-    }
+    const locationErrors = validateLocation();
+    const nextErrors = {
+      ...locationErrors,
+      ...(Object.keys(locationErrors).length
+        ? { location: "Set a barangay and Pk. before posting." }
+        : {}),
+      ...(!image ? { image: "Please select an image." } : {}),
+    };
+    setErrors(nextErrors);
 
-    if (!locationName.trim()) {
-      setFormError("Please set a location before posting.");
-      return;
-    }
-
-    if (!manualPurok.trim()) {
-      setFormError("Please enter the Purok for this report.");
+    if (Object.values(nextErrors).some(Boolean)) {
+      if (Object.keys(locationErrors).length) setManualLocationModal(true);
       return;
     }
 
     try {
       setUploading(true);
-      setFormError("");
 
       const currentUser = auth.currentUser;
 
       if (!currentUser) {
-        setFormError("You are not signed in. Please log in and try again.");
+        setErrors({ form: "You must be signed in to create a post." });
         return;
       }
 
       const userSnap = await getDoc(doc(db, "users", currentUser.uid));
-
-      if (!userSnap.exists()) {
-        setFormError("Your profile could not be loaded. Sign in again.");
-        return;
-      }
 
       const userData = userSnap.data();
 
@@ -186,15 +170,13 @@ export default function CreateReport() {
 
           points: userData.points || 0,
 
-          title: censorText(title.trim()),
-
-          caption: censorText(caption),
+          caption,
 
           imageUrl,
 
           locationName,
 
-          purok: manualPurok.trim() || null,
+          purok: normalizePurok(manualPurok) || null,
 
           status: "moderate",
 
@@ -209,8 +191,7 @@ export default function CreateReport() {
       router.replace("/home");
     } catch (error) {
       console.log(error);
-
-      setFormError(getCreatePostErrorMessage(error));
+      setErrors({ form: error.message || "Could not create the post." });
     } finally {
       setUploading(false);
     }
@@ -242,8 +223,6 @@ export default function CreateReport() {
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            <FormError message={formError} />
-
             {/* USER + POST BUTTON */}
             <View style={styles.userRow}>
               <View style={styles.userInfo}>
@@ -267,8 +246,8 @@ export default function CreateReport() {
 
             {/* LOCATION */}
             <TouchableOpacity
-              style={styles.locationRow}
-              onPress={() => setLocationModalVisible(true)}
+              style={[styles.locationRow, errors.location && styles.errorBorder]}
+              onPress={() => setManualLocationModal(true)}
             >
               <Image
                 source={require("../assets/images/location.png")}
@@ -278,23 +257,13 @@ export default function CreateReport() {
                 {locationName || "Set Location..."}
               </Text>
             </TouchableOpacity>
-
-            <TextInput
-              placeholder="Purok (example: Purok 3)"
-              style={styles.purokInput}
-              value={manualPurok}
-              onChangeText={setManualPurok}
-            />
+            {errors.location && (
+              <Text style={styles.fieldError}>{errors.location}</Text>
+            )}
+            {errors.image && <Text style={styles.fieldError}>{errors.image}</Text>}
+            {errors.form && <Text style={styles.formError}>{errors.form}</Text>}
 
             {/* CAPTION */}
-            <TextInput
-              placeholder="Report title (example: Overflowing bins near the market)"
-              style={styles.titleInput}
-              value={title}
-              onChangeText={setTitle}
-              maxLength={90}
-            />
-
             <TextInput
               placeholder="Write Something..."
               multiline
@@ -304,7 +273,7 @@ export default function CreateReport() {
             />
 
             {/* IMAGE PICKER */}
-            <View style={styles.imageBox}>
+            <View style={[styles.imageBox, errors.image && styles.inputError]}>
               {image ? (
                 <>
                   <Image
@@ -312,18 +281,26 @@ export default function CreateReport() {
                     style={styles.previewImage}
                     resizeMode="cover"
                   />
-                  <TouchableOpacity style={styles.changePhotoButton} onPress={pickImage}>
+                  <TouchableOpacity
+                    style={styles.changePhotoButton}
+                    onPress={pickImage}
+                  >
                     <Text style={styles.changePhotoText}>Change photo</Text>
                   </TouchableOpacity>
                 </>
               ) : (
-                <TouchableOpacity style={styles.imagePlaceholderContent} onPress={pickImage}>
+                <TouchableOpacity
+                  style={styles.imagePlaceholderContent}
+                  onPress={pickImage}
+                >
                   <Image
                     source={require("../assets/images/image.png")}
                     style={styles.imageIcon}
                   />
                   <Text style={styles.imageText}>Choose Image</Text>
-                  <Text style={styles.imageHint}>Add a clear photo of the concern</Text>
+                  <Text style={styles.imageHint}>
+                    Add a clear photo of the concern
+                  </Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -331,97 +308,85 @@ export default function CreateReport() {
         </View>
 
         {/* NAVBAR (ALWAYS AT BOTTOM) */}
-        <Modal visible={locationModalVisible} transparent animationType="fade">
-          <View style={styles.modalBackground}>
-            <View style={styles.modalBox}>
-              <Text style={styles.modalTitle}>Choose Location</Text>
-
-              <TouchableOpacity
-                style={styles.modalButton}
-                onPress={() => {
-                  setLocationModalVisible(false);
-                  getCurrentLocation();
-                }}
-              >
-                <View style={styles.modalButtonContent}>
-                  <Image
-                    source={require("../assets/images/location.png")}
-                    style={styles.locationIcon}
-                  />
-                  <Text>Use Current GPS</Text>
-                </View>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.modalButton}
-                onPress={() => {
-                  setLocationModalVisible(false);
-                  setManualLocationModal(true);
-                }}
-              >
-                <View style={styles.modalButtonContent}>
-                  <Image
-                    source={require("../assets/images/editlabel.png")}
-                    style={styles.editIcon}
-                  />
-                  <Text>Type Manually</Text>
-                </View>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.modalCancel}
-                onPress={() => setLocationModalVisible(false)}
-              >
-                <Text>Cancel</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
-
         <Modal visible={manualLocationModal} transparent animationType="fade">
           <View style={styles.modalBackground}>
             <View style={styles.modalBox}>
               <Text style={styles.modalTitle}>Enter Location</Text>
 
-              <FormError message={formError} />
+              <TouchableOpacity
+                style={[styles.dropdown, errors.barangay && styles.inputError]}
+                onPress={() => setBarangayDropdownOpen((open) => !open)}
+              >
+                <Text
+                  style={
+                    manualBarangay
+                      ? styles.dropdownText
+                      : styles.placeholderText
+                  }
+                >
+                  {manualBarangay || "Select Barangay"}
+                </Text>
+                <Text style={styles.dropdownArrow}>
+                  {barangayDropdownOpen ? "^" : "v"}
+                </Text>
+              </TouchableOpacity>
+              {barangayDropdownOpen && (
+                <ScrollView style={styles.dropdownList} nestedScrollEnabled>
+                  {BARANGAYS.map((barangay) => (
+                    <TouchableOpacity
+                      key={barangay}
+                      style={styles.dropdownOption}
+                      onPress={() => {
+                        setManualBarangay(barangay);
+                        setBarangayDropdownOpen(false);
+                        setErrors((previous) => ({
+                          ...previous,
+                          barangay: "",
+                          location: "",
+                        }));
+                      }}
+                    >
+                      <Text>{barangay}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
+              {errors.barangay && (
+                <Text style={styles.fieldError}>{errors.barangay}</Text>
+              )}
 
-              <TextInput
-                placeholder="Street (example: Rizal Street)"
-                value={manualStreet}
-                onChangeText={setManualStreet}
-                style={styles.manualInput}
-              />
-
-              <TextInput
-                placeholder="Purok (example: Purok 3)"
-                value={manualPurok}
-                onChangeText={setManualPurok}
-                style={styles.manualInput}
-              />
-
-              <TextInput
-                placeholder="Barangay / City or Municipality"
-                value={manualLocation}
-                onChangeText={setManualLocation}
-                style={styles.manualInput}
-              />
+              <View style={styles.purokInputRow}>
+                <Text style={styles.purokPrefix}>Pk.</Text>
+                <TextInput
+                  placeholder="Example: 3"
+                  value={manualPurok}
+                  onChangeText={(value) => {
+                    setManualPurok(value);
+                    setErrors((previous) => ({
+                      ...previous,
+                      purok: normalizePurok(value) ? "" : "Purok is required.",
+                      location: "",
+                    }));
+                  }}
+                  style={[styles.purokTextInput, errors.purok && styles.inputError]}
+                />
+              </View>
+              {errors.purok && <Text style={styles.fieldError}>{errors.purok}</Text>}
 
               <TouchableOpacity
                 style={styles.modalButton}
                 onPress={() => {
-                  const locationParts = [manualStreet, manualPurok, manualLocation]
-                    .map((value) => value.trim())
-                    .filter(Boolean);
-                  if (!manualPurok.trim()) {
-                    setFormError("Please enter the Purok for this report.");
-                    return;
-                  }
-                  if (locationParts.length) {
-                    setLocationName(locationParts.join(", "));
-                  }
+                  const nextErrors = validateLocation();
+                  setErrors(nextErrors);
+                  if (Object.values(nextErrors).some(Boolean)) return;
 
-                  setManualLocation("");
-                  setManualStreet("");
+                  const purok = normalizePurok(manualPurok);
+
+                  setManualPurok(purok);
+                  setLocationName(
+                    `${manualBarangay}, Pk. ${purok}`,
+                  );
+                  setErrors((previous) => ({ ...previous, location: "" }));
                   setManualLocationModal(false);
                 }}
               >
@@ -542,17 +507,31 @@ const styles = StyleSheet.create({
     marginTop: 15,
   },
 
+  errorBorder: {
+    borderColor: "#D93025",
+    borderWidth: 1.5,
+    borderRadius: 6,
+    padding: 4,
+  },
+
+  fieldError: {
+    color: "#D93025",
+    fontSize: 12,
+    marginTop: 4,
+    marginBottom: 4,
+  },
+
+  formError: {
+    color: "#D93025",
+    fontSize: 13,
+    marginTop: 10,
+  },
+
   locationIcon: {
     width: 16,
     height: 16,
     marginRight: 5,
   },
-  editIcon: {
-    width: 18,
-    height: 18,
-    marginRight: 5,
-  },
-
   locationText: {
     color: "#555",
   },
@@ -565,20 +544,6 @@ const styles = StyleSheet.create({
     marginTop: 10,
     textAlignVertical: "top",
   },
-  titleInput: {
-    backgroundColor: "#E5E5E5",
-    borderRadius: 8,
-    padding: 10,
-    marginTop: 10,
-    fontWeight: "600",
-  },
-  purokInput: {
-    backgroundColor: "#E5E5E5",
-    borderRadius: 8,
-    padding: 10,
-    marginTop: 10,
-  },
-
   imageBox: {
     width: "100%",
     aspectRatio: 4 / 3,
@@ -629,7 +594,6 @@ const styles = StyleSheet.create({
   },
   changePhotoText: { color: "#FFFFFF", fontSize: 12, fontWeight: "700" },
 
-
   modalBackground: {
     flex: 1,
     justifyContent: "center",
@@ -659,12 +623,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 
-  modalButtonContent: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
   modalCancel: {
     padding: 12,
     alignItems: "center",
@@ -677,5 +635,67 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 10,
     marginBottom: 10,
+  },
+
+  dropdown: {
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+
+  dropdownText: {
+    color: "#222",
+  },
+
+  placeholderText: {
+    color: "#888",
+  },
+
+  dropdownArrow: {
+    color: "#555",
+    fontWeight: "700",
+  },
+
+  dropdownList: {
+    maxHeight: 180,
+    borderWidth: 1,
+    borderColor: "#ddd",
+    borderRadius: 8,
+    marginTop: -6,
+    marginBottom: 10,
+  },
+
+  dropdownOption: {
+    padding: 11,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
+  },
+
+  inputError: {
+    borderColor: "#D93025",
+    borderWidth: 1.5,
+  },
+
+  purokInputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderRadius: 8,
+    marginBottom: 10,
+  },
+  purokPrefix: {
+    paddingLeft: 10,
+    fontWeight: "600",
+    color: "#333",
+  },
+  purokTextInput: {
+    flex: 1,
+    padding: 10,
   },
 });

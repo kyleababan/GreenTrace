@@ -1,17 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-  startAfter,
-  where,
-} from "firebase/firestore";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { collection, doc, getDoc, getDocs } from "firebase/firestore";
+import { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -27,9 +17,6 @@ import {
 
 import Navbar from "../components/navbar";
 import { db } from "../firebaseConfig";
-import { mergeUniqueById } from "../utils/pagination";
-
-const ACTIVITIES_PER_PAGE = 5;
 
 export default function Volunteer() {
   const router = useRouter();
@@ -38,107 +25,59 @@ export default function Volunteer() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState("");
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
-  const lastDocRef = useRef(null);
-  const hasMoreRef = useRef(true);
-  const loadingRef = useRef(false);
 
-  const loadActivities = useCallback(
-    async (isRefresh = false, loadNext = false, reset = false) => {
-      if (loadingRef.current) return;
-      if (loadNext && !hasMoreRef.current) return;
+  const loadActivities = useCallback(async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true);
+    else setLoading(true);
 
-      loadingRef.current = true;
-      if (isRefresh || reset) {
-        lastDocRef.current = null;
-        hasMoreRef.current = true;
-        setHasMore(true);
-      }
-      if (isRefresh) {
-        setRefreshing(true);
-      } else if (loadNext) {
-        setLoadingMore(true);
-      } else {
-        setLoading(true);
-      }
+    setLoadError("");
+    try {
+      const snapshot = await getDocs(collection(db, "volunteer_posts"));
+      const volunteerActivities = snapshot.docs
+        .map((activity) => ({ id: activity.id, ...activity.data() }))
+        .filter((activity) => activity.status === "open");
 
-      setLoadError("");
-      try {
-        const constraints = [
-          where("status", "==", "open"),
-          orderBy("createdAt", "desc"),
-          limit(ACTIVITIES_PER_PAGE),
-        ];
-        if (loadNext && lastDocRef.current) {
-          constraints.splice(2, 0, startAfter(lastDocRef.current));
-        }
+      const checkedActivities = await Promise.all(
+        volunteerActivities.map(async (activity) => {
+          if (!activity.postId) return activity;
 
-        const snapshot = await getDocs(
-          query(collection(db, "volunteer_posts"), ...constraints),
-        );
-        const volunteerActivities = snapshot.docs.map((activity) => ({
-          id: activity.id,
-          ...activity.data(),
-        }));
+          try {
+            const sourcePost = await getDoc(doc(db, "posts", activity.postId));
+            return sourcePost.exists() && sourcePost.data().status !== "cleaned"
+              ? activity
+              : null;
+          } catch (error) {
+            console.error("Unable to check linked report status:", error);
+            return activity;
+          }
+        }),
+      );
 
-        const checkedActivities = await Promise.all(
-          volunteerActivities.map(async (activity) => {
-            if (!activity.postId) return activity;
-
-            try {
-              const sourcePost = await getDoc(
-                doc(db, "posts", activity.postId),
-              );
-              return sourcePost.exists() &&
-                sourcePost.data().status !== "cleaned"
-                ? activity
-                : null;
-            } catch (error) {
-              console.error("Unable to check linked report status:", error);
-              return activity;
-            }
-          }),
+      const openActivities = checkedActivities
+        .filter(Boolean)
+        .sort(
+          (firstActivity, secondActivity) =>
+            (secondActivity.createdAt?.seconds || 0) -
+            (firstActivity.createdAt?.seconds || 0),
         );
 
-        const openActivities = checkedActivities.filter(Boolean);
-
-        setActivities((current) =>
-          isRefresh || reset || !loadNext
-            ? openActivities
-            : mergeUniqueById(current, openActivities),
-        );
-        lastDocRef.current = snapshot.docs[snapshot.docs.length - 1] || null;
-        hasMoreRef.current = snapshot.docs.length === ACTIVITIES_PER_PAGE;
-        setHasMore(hasMoreRef.current);
-      } catch (error) {
-        console.error("Unable to load volunteer activities:", error);
-        setLoadError(
-          "Unable to load volunteer activities. Please pull to refresh.",
-        );
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
-        setLoadingMore(false);
-        loadingRef.current = false;
-      }
-    },
-    [],
-  );
+      setActivities(openActivities);
+    } catch (error) {
+      console.error("Unable to load volunteer activities:", error);
+      setLoadError(
+        "Unable to load volunteer activities. Please pull to refresh.",
+      );
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
-      loadActivities(false, false, true);
+      loadActivities();
     }, [loadActivities]),
   );
-
-  const handleFeedScroll = ({ nativeEvent }) => {
-    const reachedBottom =
-      nativeEvent.layoutMeasurement.height + nativeEvent.contentOffset.y >=
-      nativeEvent.contentSize.height - 160;
-
-    if (reachedBottom) loadActivities(false, true);
-  };
 
   const filteredActivities = useMemo(() => {
     const keyword = search.trim().toLowerCase();
@@ -190,8 +129,6 @@ export default function Volunteer() {
               style={styles.feed}
               contentContainerStyle={styles.feedContent}
               showsVerticalScrollIndicator={false}
-              onScroll={handleFeedScroll}
-              scrollEventThrottle={200}
               refreshControl={
                 <RefreshControl
                   refreshing={refreshing}
@@ -276,12 +213,6 @@ export default function Volunteer() {
                   No open volunteer activities found.
                 </Text>
               ) : null}
-              {hasMore && !loadingMore && (
-                <TouchableOpacity onPress={() => loadActivities(false, true)}>
-                  <Text style={styles.emptyText}>Load more activities</Text>
-                </TouchableOpacity>
-              )}
-              {loadingMore && <ActivityIndicator color="#5F9C76" />}
             </ScrollView>
           )}
 

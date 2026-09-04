@@ -1,8 +1,8 @@
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
-  Animated,
   ActivityIndicator,
+  Animated,
   Image,
   SafeAreaView,
   ScrollView,
@@ -12,7 +12,15 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import BadgeWithDetails from "../components/BadgeWithDetails";
 import Navbar from "../components/navbar";
+import {
+  BADGES,
+  getUserContributionStats,
+  getVolunteerId,
+  isBadgeEarned,
+} from "../constants/badges";
+import { formatLocationWithPurok } from "../constants/locationFormat";
 
 import {
   addDoc,
@@ -23,6 +31,7 @@ import {
   getDocs,
   increment,
   limit,
+  onSnapshot,
   orderBy,
   query,
   serverTimestamp,
@@ -32,12 +41,6 @@ import {
 } from "firebase/firestore";
 
 import { auth, db } from "../firebaseConfig";
-import { censorText } from "../utils/censorText";
-import {
-  getUserPointsMap,
-  mergeUniqueById,
-  POSTS_PER_PAGE,
-} from "../utils/pagination";
 
 const formatRelativeTime = (timestamp, now) => {
   if (!timestamp) return "Just now";
@@ -68,6 +71,8 @@ const formatRelativeTime = (timestamp, now) => {
   return `${dateLabel} • ${relativeTime}`;
 };
 
+const POSTS_PER_PAGE = 10;
+
 export default function Home() {
   const router = useRouter();
 
@@ -81,11 +86,11 @@ export default function Home() {
 
   // Live lookup for points across feed
   const [authorPoints, setAuthorPoints] = useState({});
+  const [authorBadges, setAuthorBadges] = useState({});
   const [reactionLoadingByPost, setReactionLoadingByPost] = useState({});
   const [now, setNow] = useState(() => Date.now());
   const [expandedPosts, setExpandedPosts] = useState({});
   const [loadingMorePosts, setLoadingMorePosts] = useState(false);
-  const [hasMorePosts, setHasMorePosts] = useState(true);
   const lastPostDocRef = useRef(null);
   const hasMorePostsRef = useRef(true);
   const loadingPostsRef = useRef(false);
@@ -104,11 +109,74 @@ export default function Home() {
     }
   };
 
+  const loadAuthorBadges = async () => {
+    try {
+      const [postsSnapshot, volunteerPostsSnapshot, usersSnapshot] =
+        await Promise.all([
+          getDocs(collection(db, "posts")),
+          getDocs(collection(db, "volunteer_posts")),
+          getDocs(collection(db, "users")),
+        ]);
+      const allPosts = postsSnapshot.docs.map((post) => post.data());
+      const volunteerPosts = volunteerPostsSnapshot.docs.map((post) =>
+        post.data(),
+      );
+      const userIds = new Set(
+        allPosts.map((post) => post.userId).filter(Boolean),
+      );
+
+      volunteerPosts.forEach((activity) => {
+        (Array.isArray(activity.volunteers) ? activity.volunteers : []).forEach(
+          (volunteer) => {
+            const userId = getVolunteerId(volunteer);
+            if (userId) userIds.add(userId);
+          },
+        );
+      });
+
+      const badgesByUserId = {};
+      const contributorBadgesByUserId = {};
+      usersSnapshot.forEach((userDocument) => {
+        const savedBadges = userDocument.data().contributorBadges;
+        contributorBadgesByUserId[userDocument.id] = Array.isArray(savedBadges)
+          ? savedBadges
+          : [];
+      });
+      userIds.forEach((userId) => {
+        const stats = getUserContributionStats(
+          userId,
+          allPosts,
+          volunteerPosts,
+        );
+        badgesByUserId[userId] = [
+          ...(contributorBadgesByUserId[userId] || []),
+          ...BADGES.filter((badge) => isBadgeEarned(badge, stats)),
+        ];
+      });
+      setAuthorBadges(badgesByUserId);
+    } catch (error) {
+      console.log("Unable to load author badges:", error);
+    }
+  };
+
   useEffect(() => {
     loadPosts(true);
+    const unsubscribeUsers = onSnapshot(collection(db, "users"), (snapshot) => {
+      const pointsByUserId = {};
+      snapshot.forEach((userDocument) => {
+        pointsByUserId[userDocument.id] = userDocument.data().points ?? 0;
+      });
+      setAuthorPoints(pointsByUserId);
+    });
+
     loadUserReactions();
     loadCurrentUser();
     loadAnnouncement();
+    loadAuthorBadges();
+
+    return () => {
+      unsubscribeUsers();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -116,6 +184,32 @@ export default function Home() {
     const timer = setInterval(() => setNow(Date.now()), 30 * 1000);
     return () => clearInterval(timer);
   }, []);
+
+  const visiblePostIds = posts.map((post) => post.id).join("|");
+
+  useEffect(() => {
+    if (!visiblePostIds) return undefined;
+
+    const unsubscribePosts = visiblePostIds.split("|").map((postId) =>
+      onSnapshot(doc(db, "posts", postId), (snapshot) => {
+        if (!snapshot.exists()) return;
+
+        const reactionCount = snapshot.data().reactionCount ?? 0;
+
+        setPosts((currentPosts) =>
+          currentPosts.map((post) =>
+            post.id === postId && post.reactionCount !== reactionCount
+              ? { ...post, reactionCount }
+              : post,
+          ),
+        );
+      }),
+    );
+
+    return () => {
+      unsubscribePosts.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [visiblePostIds]);
 
   const loadUserReactions = async () => {
     const currentUser = auth.currentUser;
@@ -138,8 +232,18 @@ export default function Home() {
 
   const loadAnnouncement = async () => {
     try {
-      const snapshot = await getDocs(query(collection(db, "announcements"), orderBy("createdAt", "desc"), limit(1)));
-      if (!snapshot.empty) setAnnouncement({ id: snapshot.docs[0].id, ...snapshot.docs[0].data() });
+      const snapshot = await getDocs(
+        query(
+          collection(db, "announcements"),
+          orderBy("createdAt", "desc"),
+          limit(1),
+        ),
+      );
+      if (!snapshot.empty)
+        setAnnouncement({
+          id: snapshot.docs[0].id,
+          ...snapshot.docs[0].data(),
+        });
     } catch (error) {
       console.log("Error loading announcement:", error);
     }
@@ -168,11 +272,27 @@ export default function Home() {
     ]).start();
   };
 
+  const adjustLocalReactionCount = (postId, amount) => {
+    setPosts((currentPosts) =>
+      currentPosts.map((post) =>
+        post.id === postId
+          ? {
+              ...post,
+              reactionCount: Math.max(0, (post.reactionCount ?? 0) + amount),
+            }
+          : post,
+      ),
+    );
+  };
+
   const toggleReaction = async (postId) => {
     if (reactionLoadingByPost[postId]) return;
 
     setReactionLoadingByPost((current) => ({ ...current, [postId]: true }));
     playReactionAnimation(postId);
+
+    let optimisticDelta = 0;
+    let countCommitted = false;
 
     try {
       const currentUser = auth.currentUser;
@@ -181,21 +301,38 @@ export default function Home() {
       const postRef = doc(db, "posts", postId);
 
       if (userReactions[postId]) {
+        optimisticDelta = -1;
+        adjustLocalReactionCount(postId, -1);
+
         await deleteDoc(doc(db, "post_reactions", userReactions[postId]));
 
         await updateDoc(postRef, {
           reactionCount: increment(-1),
         });
+        countCommitted = true;
 
         const updated = { ...userReactions };
         delete updated[postId];
         setUserReactions(updated);
       } else {
+        optimisticDelta = 1;
+        adjustLocalReactionCount(postId, 1);
+
         const reaction = await addDoc(collection(db, "post_reactions"), {
           postId,
           userId: currentUser.uid,
           createdAt: serverTimestamp(),
         });
+
+        await updateDoc(postRef, {
+          reactionCount: increment(1),
+        });
+        countCommitted = true;
+
+        setUserReactions((prev) => ({
+          ...prev,
+          [postId]: reaction.id,
+        }));
 
         const postSnapshot = await getDoc(postRef);
         const postData = postSnapshot.data();
@@ -210,9 +347,9 @@ export default function Home() {
 
           const notificationSnapshot = await getDocs(notificationQuery);
 
-          if (!currentUserData) return;
-
-          const actorName = `${currentUserData.firstName} ${currentUserData.lastName}`;
+          const actorName = currentUserData
+            ? `${currentUserData.firstName} ${currentUserData.lastName}`
+            : "Someone";
 
           if (notificationSnapshot.empty) {
             await addDoc(collection(db, "notifications"), {
@@ -239,17 +376,11 @@ export default function Home() {
             });
           }
         }
-
-        await updateDoc(postRef, {
-          reactionCount: increment(1),
-        });
-
-        setUserReactions((prev) => ({
-          ...prev,
-          [postId]: reaction.id,
-        }));
       }
     } catch (error) {
+      if (optimisticDelta && !countCommitted) {
+        adjustLocalReactionCount(postId, -optimisticDelta);
+      }
       console.log(error);
     } finally {
       setReactionLoadingByPost((current) => ({ ...current, [postId]: false }));
@@ -287,7 +418,9 @@ export default function Home() {
         constraints.splice(1, 0, startAfter(lastPostDocRef.current));
       }
 
-      const snapshot = await getDocs(query(collection(db, "posts"), ...constraints));
+      const snapshot = await getDocs(
+        query(collection(db, "posts"), ...constraints),
+      );
       const data = snapshot.docs.map((postDocument) => ({
         id: postDocument.id,
         ...postDocument.data(),
@@ -295,26 +428,24 @@ export default function Home() {
 
       setPosts((currentPosts) => {
         if (reset) return data;
-        return mergeUniqueById(currentPosts, data);
+        const currentIds = new Set(currentPosts.map((post) => post.id));
+        return [
+          ...currentPosts,
+          ...data.filter((post) => !currentIds.has(post.id)),
+        ];
       });
-
-      const pointsMap = await getUserPointsMap(
-        db,
-        data.map((post) => post.userId),
-      );
-      setAuthorPoints((currentPoints) => ({ ...currentPoints, ...pointsMap }));
 
       setAnimations((currentAnimations) => {
         const nextAnimations = { ...currentAnimations };
         data.forEach((post) => {
-          if (!nextAnimations[post.id]) nextAnimations[post.id] = new Animated.Value(1);
+          if (!nextAnimations[post.id])
+            nextAnimations[post.id] = new Animated.Value(1);
         });
         return nextAnimations;
       });
 
       lastPostDocRef.current = snapshot.docs[snapshot.docs.length - 1] || null;
       hasMorePostsRef.current = snapshot.docs.length === POSTS_PER_PAGE;
-      setHasMorePosts(hasMorePostsRef.current);
     } catch (error) {
       console.error("Error loading posts:", error);
     } finally {
@@ -367,18 +498,31 @@ export default function Home() {
             showsVerticalScrollIndicator={false}
             scrollEventThrottle={200}
             onScroll={({ nativeEvent }) => {
-              const { contentOffset, contentSize, layoutMeasurement } = nativeEvent;
-              if (layoutMeasurement.height + contentOffset.y >= contentSize.height - 160) {
+              const { contentOffset, contentSize, layoutMeasurement } =
+                nativeEvent;
+              if (
+                layoutMeasurement.height + contentOffset.y >=
+                contentSize.height - 160
+              ) {
                 loadPosts();
               }
             }}
           >
             {announcement && (
               <View style={styles.announcementCard}>
-                <Text style={styles.announcementLabel}>PICKUP SCHEDULE</Text>
-                <Text style={styles.announcementTitle}>{announcement.title}</Text>
-                <Text style={styles.announcementDetails}>{announcement.schedule}{announcement.area ? ` • ${announcement.area}` : ""}</Text>
-                {Boolean(announcement.message) && <Text style={styles.announcementMessage}>{announcement.message}</Text>}
+                <Text style={styles.announcementLabel}>SCHEDULED DATE</Text>
+                <Text style={styles.announcementTitle}>
+                  {announcement.title}
+                </Text>
+                <Text style={styles.announcementDetails}>
+                  {announcement.schedule}
+                  {announcement.area ? ` • ${announcement.area}` : ""}
+                </Text>
+                {Boolean(announcement.message) && (
+                  <Text style={styles.announcementMessage}>
+                    {announcement.message}
+                  </Text>
+                )}
               </View>
             )}
             {filteredPosts.map((post) => (
@@ -400,6 +544,26 @@ export default function Home() {
                         </Text>
                       </Text>
 
+                      <View style={styles.authorBadgeRow}>
+                        {(authorBadges[post.userId] || [])
+                          .slice(0, 3)
+                          .map((badge) => (
+                            <BadgeWithDetails
+                              key={badge.id}
+                              badge={badge}
+                              size={20}
+                              tooltipPlacement="above"
+                            />
+                          ))}
+                        {(authorBadges[post.userId]?.length || 0) > 3 && (
+                          <View style={styles.authorBadge}>
+                            <Text style={styles.authorBadgeMore}>
+                              +{authorBadges[post.userId].length - 3}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+
                       <Text style={styles.relativeTime}>
                         {formatRelativeTime(post.createdAt, now)}
                       </Text>
@@ -411,7 +575,38 @@ export default function Home() {
                         style={styles.locationIcon}
                       />
                       <Text style={styles.locationText}>
-                        {post.locationName || "Unknown location"}
+                        {formatLocationWithPurok(post.locationName, post.purok)}
+                      </Text>
+                    </View>
+
+                    {/* Report Status Tag */}
+                    <View
+                      style={[
+                        styles.statusTag,
+                        {
+                          backgroundColor:
+                            post.status === "critical"
+                              ? "#FF5B5B"
+                              : post.status === "moderate"
+                                ? "#FFC940"
+                                : post.status === "cleaned"
+                                  ? "#34C759"
+                                  : post.status === "ongoing"
+                                    ? "#7DD3FC"
+                                    : "#A5A5A5",
+                        },
+                      ]}
+                    >
+                      <Text style={styles.statusText}>
+                        {post.status === "critical"
+                          ? "Critical"
+                          : post.status === "moderate"
+                            ? "Moderate"
+                            : post.status === "ongoing"
+                              ? "On-going"
+                              : post.status === "cleaned"
+                                ? "Cleaned"
+                                : "Pending"}
                       </Text>
                     </View>
                   </View>
@@ -419,7 +614,7 @@ export default function Home() {
 
                 {/* Caption */}
                 {Boolean(post.title) && (
-                  <Text style={styles.reportTitle}>{censorText(post.title)}</Text>
+                  <Text style={styles.reportTitle}>{post.title}</Text>
                 )}
                 {Boolean(post.caption) && (
                   <View>
@@ -427,10 +622,12 @@ export default function Home() {
                       style={styles.caption}
                       numberOfLines={expandedPosts[post.id] ? undefined : 3}
                     >
-                      {censorText(post.caption)}
+                      {post.caption}
                     </Text>
                     {post.caption.length > 140 && (
-                      <TouchableOpacity onPress={() => togglePostCaption(post.id)}>
+                      <TouchableOpacity
+                        onPress={() => togglePostCaption(post.id)}
+                      >
                         <Text style={styles.captionToggle}>
                           {expandedPosts[post.id] ? "See less" : "See more"}
                         </Text>
@@ -455,27 +652,6 @@ export default function Home() {
                     style={styles.postImage}
                     resizeMode="cover"
                   />
-
-                  {/* Priority Status Badge */}
-                  <View
-                    style={[
-                      styles.statusDot,
-                      {
-                        backgroundColor:
-                          post.status === "critical"
-                            ? "#FF5B5B"
-                            : post.status === "moderate"
-                              ? "#FFC940"
-                              : post.status === "cleaned"
-                                ? "#34C759"
-                                : post.status === "ongoing"
-                                  ? "#7DD3FC"
-                                  : "#A5A5A5",
-                      },
-                    ]}
-                  >
-                    <Text style={styles.statusText}>{post.status === "critical" ? "Critical" : post.status === "moderate" ? "Moderate" : post.status === "ongoing" ? "On-going" : post.status === "cleaned" ? "Cleaned" : "Pending"}</Text>
-                  </View>
                 </TouchableOpacity>
 
                 {/* Action Row */}
@@ -536,14 +712,6 @@ export default function Home() {
                 </View>
               </View>
             ))}
-            {hasMorePosts && !loadingMorePosts && (
-              <TouchableOpacity
-                style={styles.loadMoreButton}
-                onPress={() => loadPosts()}
-              >
-                <Text style={styles.loadMoreText}>Load more reports</Text>
-              </TouchableOpacity>
-            )}
             {loadingMorePosts && <ActivityIndicator color="#5F9C76" />}
           </ScrollView>
 
@@ -646,11 +814,36 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 16,
   },
-  announcementLabel: { color: "#397A51", fontSize: 11, fontWeight: "800", letterSpacing: 0.6 },
-  announcementTitle: { color: "#234B33", fontSize: 17, fontWeight: "800", marginTop: 3 },
-  announcementDetails: { color: "#397A51", fontSize: 13, fontWeight: "700", marginTop: 5 },
-  announcementMessage: { color: "#4B5563", fontSize: 13, lineHeight: 18, marginTop: 6 },
-  reportTitle: { fontSize: 16, fontWeight: "800", color: "#234B33", marginBottom: 6 },
+  announcementLabel: {
+    color: "#397A51",
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.6,
+  },
+  announcementTitle: {
+    color: "#234B33",
+    fontSize: 17,
+    fontWeight: "800",
+    marginTop: 3,
+  },
+  announcementDetails: {
+    color: "#397A51",
+    fontSize: 13,
+    fontWeight: "700",
+    marginTop: 5,
+  },
+  announcementMessage: {
+    color: "#4B5563",
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 6,
+  },
+  reportTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#234B33",
+    marginBottom: 6,
+  },
 
   /* User Info */
   userRow: {
@@ -677,15 +870,42 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
     color: "#222",
+    flexShrink: 1,
   },
   points: {
     fontSize: 12,
     fontWeight: "600",
     color: "#2E7D32",
   },
+  authorBadgeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    marginLeft: 5,
+    marginRight: "auto",
+  },
+  authorBadge: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F0FDF4",
+    borderWidth: 1,
+    borderColor: "#B7DEC4",
+  },
+  authorBadgeIcon: {
+    fontSize: 11,
+  },
+  authorBadgeMore: {
+    color: "#397A51",
+    fontSize: 8,
+    fontWeight: "800",
+  },
   relativeTime: {
     fontSize: 11,
     color: "#888",
+    marginLeft: 6,
   },
   locationRow: {
     flexDirection: "row",
@@ -718,21 +938,12 @@ const styles = StyleSheet.create({
     marginTop: -6,
     marginBottom: 10,
   },
-  loadMoreButton: {
-    alignSelf: "center",
-    marginBottom: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  loadMoreText: {
-    color: "#397A51",
-    fontSize: 14,
-    fontWeight: "700",
-  },
   imageContainer: {
     width: "100%",
     height: 240,
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#C9DCCF",
     overflow: "hidden",
     backgroundColor: "#EBEBEB",
     position: "relative",
@@ -741,15 +952,12 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "100%",
   },
-  statusDot: {
-    position: "absolute",
-    top: 12,
-    right: 12,
+  statusTag: {
+    alignSelf: "flex-start",
+    marginTop: 6,
     paddingHorizontal: 9,
-    paddingVertical: 5,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#FFFFFF",
+    paddingVertical: 4,
+    borderRadius: 6,
   },
   statusText: { color: "#FFFFFF", fontSize: 10, fontWeight: "700" },
 

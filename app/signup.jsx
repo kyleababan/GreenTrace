@@ -29,6 +29,7 @@ export default function Signup() {
   const [cellNumber, setCellNumber] = useState("");
   const [birthDate, setBirthDate] = useState("");
   const [formError, setFormError] = useState("");
+  const [errors, setErrors] = useState({});
 
   const [loading, setLoading] = useState(false);
 
@@ -54,20 +55,6 @@ export default function Signup() {
     return digits;
   };
 
-  const handleBirthDateChange = (value) => {
-    const removedAutoSlash =
-      value.length < birthDate.length &&
-      birthDate.endsWith("/") &&
-      value === birthDate.slice(0, -1);
-
-    if (removedAutoSlash) {
-      setBirthDate(formatBirthDate(value.slice(0, -1)));
-      return;
-    }
-
-    setBirthDate(formatBirthDate(value));
-  };
-
   const isValidBirthDate = (date) => {
     if (
       !/^(0[1-9]|1[0-2])\/(0[1-9]|[12][0-9]|3[01])\/\d{4}$/.test(date.trim())
@@ -84,43 +71,74 @@ export default function Signup() {
     );
   };
 
+  const validateField = (fieldName, value) => {
+    const trimmedValue = value.trim();
+
+    if (!trimmedValue) {
+      return "This field is required.";
+    }
+
+    if (fieldName === "email" && !isValidEmail(value)) {
+      return "Enter a valid email address.";
+    }
+
+    if (fieldName === "password" && value.length < 8) {
+      return "Password must be at least 8 characters.";
+    }
+
+    if (fieldName === "cellNumber" && !isValidPhone(value)) {
+      return "Use 11 digits starting with 09.";
+    }
+
+    if (fieldName === "birthDate" && !isValidBirthDate(value)) {
+      return "Use a valid date in MM/DD/YYYY format.";
+    }
+
+    return "";
+  };
+
+  const updateField = (fieldName, value, setter) => {
+    setter(value);
+    setErrors((prev) => ({
+      ...prev,
+      [fieldName]: validateField(fieldName, value),
+    }));
+    setFormError("");
+  };
+
+  const renderFieldError = (fieldName) =>
+    errors[fieldName] ? (
+      <Text style={styles.fieldError} accessibilityRole="alert">
+        {errors[fieldName]}
+      </Text>
+    ) : null;
+
   const registerUser = async () => {
     if (loading) return;
 
+    const fieldValues = {
+      firstName,
+      lastName,
+      email,
+      password,
+      cellNumber,
+      birthDate,
+    };
+    const nextErrors = Object.fromEntries(
+      Object.entries(fieldValues).map(([fieldName, value]) => [
+        fieldName,
+        validateField(fieldName, value),
+      ]),
+    );
+
     if (!acceptedTerms) {
-      setFormError("You must agree to the Terms and Agreement.");
-      return;
+      nextErrors.terms = "You must agree to the Terms and Agreement.";
     }
 
-    if (
-      !firstName.trim() ||
-      !lastName.trim() ||
-      !email.trim() ||
-      !password.trim() ||
-      !cellNumber.trim() ||
-      !birthDate.trim()
-    ) {
-      setFormError("Please fill in all fields.");
-      return;
-    }
+    setErrors(nextErrors);
 
-    if (!isValidEmail(email)) {
-      setFormError("Please enter a valid email address.");
-      return;
-    }
-
-    if (password.length < 8) {
-      setFormError("Password must be at least 8 characters.");
-      return;
-    }
-
-    if (!isValidPhone(cellNumber)) {
-      setFormError("Phone number must be 11 digits and start with 09.");
-      return;
-    }
-
-    if (!isValidBirthDate(birthDate)) {
-      setFormError("Birth date must be a valid date in MM/DD/YYYY format.");
+    if (Object.values(nextErrors).some(Boolean)) {
+      setFormError("");
       return;
     }
 
@@ -198,72 +216,82 @@ export default function Signup() {
               <FormError message={formError} light />
 
               <TextInput
-                style={styles.input}
+                style={[styles.input, errors.firstName && styles.inputError]}
                 value={firstName}
                 onChangeText={(value) => {
-                  setFirstName(value);
-                  setFormError("");
+                  updateField("firstName", value, setFirstName);
                 }}
                 placeholder="First Name"
                 placeholderTextColor="#888"
+                accessibilityState={{ invalid: Boolean(errors.firstName) }}
               />
+              {renderFieldError("firstName")}
               <TextInput
-                style={styles.input}
+                style={[styles.input, errors.lastName && styles.inputError]}
                 value={lastName}
                 onChangeText={(value) => {
-                  setLastName(value);
-                  setFormError("");
+                  updateField("lastName", value, setLastName);
                 }}
                 placeholder="Last Name"
                 placeholderTextColor="#888"
+                accessibilityState={{ invalid: Boolean(errors.lastName) }}
               />
+              {renderFieldError("lastName")}
               <TextInput
-                style={styles.input}
+                style={[styles.input, errors.email && styles.inputError]}
                 value={email}
                 onChangeText={(value) => {
-                  setEmail(value);
-                  setFormError("");
+                  updateField("email", value, setEmail);
                 }}
                 placeholder="Email"
                 placeholderTextColor="#888"
                 keyboardType="email-address"
                 autoCapitalize="none"
+                accessibilityState={{ invalid: Boolean(errors.email) }}
               />
+              {renderFieldError("email")}
               <TextInput
-                style={styles.input}
+                style={[styles.input, errors.password && styles.inputError]}
                 placeholder="Password"
                 placeholderTextColor="#888"
                 secureTextEntry
                 value={password}
                 onChangeText={(value) => {
-                  setPassword(value);
-                  setFormError("");
+                  updateField("password", value, setPassword);
                 }}
+                accessibilityState={{ invalid: Boolean(errors.password) }}
               />
+              {renderFieldError("password")}
               <TextInput
-                style={styles.input}
+                style={[styles.input, errors.cellNumber && styles.inputError]}
                 value={cellNumber}
                 onChangeText={(value) => {
-                  setCellNumber(value);
-                  setFormError("");
+                  updateField("cellNumber", value, setCellNumber);
                 }}
                 placeholder="Phone Number (e.g. 09123456789)"
                 placeholderTextColor="#888"
                 keyboardType="phone-pad"
                 maxLength={11}
+                accessibilityState={{ invalid: Boolean(errors.cellNumber) }}
               />
+              {renderFieldError("cellNumber")}
               <TextInput
-                style={styles.input}
+                style={[styles.input, errors.birthDate && styles.inputError]}
                 value={birthDate}
                 onChangeText={(value) => {
-                  handleBirthDateChange(value);
-                  setFormError("");
+                  updateField(
+                    "birthDate",
+                    formatBirthDate(value),
+                    setBirthDate,
+                  );
                 }}
                 placeholder="Birth Date (MM/DD/YYYY)"
                 placeholderTextColor="#888"
                 keyboardType="number-pad"
                 maxLength={10}
+                accessibilityState={{ invalid: Boolean(errors.birthDate) }}
               />
+              {renderFieldError("birthDate")}
 
               {/* Terms Checkbox */}
               <TouchableOpacity
@@ -271,6 +299,7 @@ export default function Signup() {
                 activeOpacity={0.8}
                 onPress={() => {
                   setAcceptedTerms(!acceptedTerms);
+                  setErrors((prev) => ({ ...prev, terms: "" }));
                   setFormError("");
                 }}
               >
@@ -284,6 +313,7 @@ export default function Signup() {
                 </View>
                 <Text style={styles.termsText}>Terms and Agreement</Text>
               </TouchableOpacity>
+              {renderFieldError("terms")}
 
               {/* Action Button */}
               <TouchableOpacity
@@ -394,8 +424,18 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingVertical: 12,
     paddingHorizontal: 14,
-    marginBottom: 10,
+    marginBottom: 3,
     fontSize: 14,
+  },
+  inputError: {
+    borderColor: "#F04438",
+    borderWidth: 1.5,
+  },
+  fieldError: {
+    color: "#FFE0DE",
+    fontSize: 12,
+    marginBottom: 7,
+    marginLeft: 2,
   },
 
   /* Terms Checkbox */

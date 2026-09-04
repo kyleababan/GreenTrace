@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { doc, getDoc, runTransaction } from "firebase/firestore";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -37,15 +37,30 @@ const getInitials = (name) =>
     .join("")
     .toUpperCase() || "V";
 
+const formatMeetingDate = (value) => {
+  if (!value) return "Date not specified";
+
+  const date = typeof value?.toDate === "function" ? value.toDate() : new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return String(value);
+
+  return date.toLocaleDateString(undefined, {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+};
+
 export default function Volunteering() {
   const { volunteerId } = useLocalSearchParams();
   const activityId = Array.isArray(volunteerId) ? volunteerId[0] : volunteerId;
   const router = useRouter();
   const [activity, setActivity] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(Boolean(activityId));
   const [joining, setJoining] = useState(false);
-  const [loadError, setLoadError] = useState("");
+  const [loadError, setLoadError] = useState(
+    activityId ? "" : "Volunteer activity not found.",
+  );
   const [imageAspectRatio, setImageAspectRatio] = useState(null);
   const [showLockedModal, setShowLockedModal] = useState(false);
 
@@ -84,20 +99,14 @@ export default function Volunteering() {
     };
 
     if (activityId) loadActivity();
-    else {
-      setLoadError("Volunteer activity not found.");
-      setLoading(false);
-    }
   }, [activityId]);
 
-  const members = useMemo(
-    () => (Array.isArray(activity?.volunteers) ? activity.volunteers : []),
-    [activity?.volunteers],
-  );
+  const members = Array.isArray(activity?.volunteers) ? activity.volunteers : [];
   const isJoined = members.some(
     (member) => getMemberId(member) === currentUser?.id,
   );
-  const maxVolunteers = Number(activity?.maxVolunteers) || 0;
+  const maxVolunteers =
+    Number(activity?.maxVolunteers ?? activity?.maxParticipants) || 0;
   const joinedCount = Number.isFinite(Number(activity?.joinedCount))
     ? Number(activity.joinedCount)
     : members.length;
@@ -279,8 +288,25 @@ export default function Volunteering() {
           <View style={styles.locationRow}>
             <Ionicons name="location-outline" size={16} color="#5F9C76" />
             <Text style={styles.locationText}>
-              {activity.locationName || "Location not specified"}
+              {activity.meetingLocation ||
+                activity.locationName ||
+                "Location not specified"}
             </Text>
+          </View>
+
+          <View style={styles.meetingRow}>
+            <View style={styles.meetingItem}>
+              <Ionicons name="calendar-outline" size={16} color="#5F9C76" />
+              <Text style={styles.meetingText}>
+                {formatMeetingDate(activity.meetingDate)}
+              </Text>
+            </View>
+            <View style={styles.meetingItem}>
+              <Ionicons name="time-outline" size={16} color="#5F9C76" />
+              <Text style={styles.meetingText}>
+                {activity.meetingTime || "Time not specified"}
+              </Text>
+            </View>
           </View>
 
           {/* VOLUNTEERS CARD */}

@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
@@ -9,7 +10,6 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  useWindowDimensions,
   View,
 } from "react-native";
 
@@ -26,7 +26,13 @@ import {
   where,
 } from "firebase/firestore";
 
-import { db } from "../../../../firebaseConfig";
+import {
+  BADGES,
+  getUserContributionStats,
+  isBadgeEarned,
+} from "../../../../constants/badges";
+import { formatLocationWithPurok } from "../../../../constants/locationFormat";
+import { auth, db } from "../../../../firebaseConfig";
 import { deleteRelatedDocuments } from "../../../guards/deletePostHelper";
 
 const STATUS_DETAILS = {
@@ -39,14 +45,22 @@ const STATUS_DETAILS = {
 
 const formatPostedDate = (timestamp) => {
   if (!timestamp) return "Posted recently";
-  const date = typeof timestamp.toDate === "function" ? timestamp.toDate() : new Date(timestamp);
+  const date =
+    typeof timestamp.toDate === "function"
+      ? timestamp.toDate()
+      : new Date(timestamp);
   if (Number.isNaN(date.getTime())) return "Posted recently";
 
-  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+  const elapsedSeconds = Math.max(
+    0,
+    Math.floor((Date.now() - date.getTime()) / 1000),
+  );
   let elapsed;
   if (elapsedSeconds < 60) elapsed = `${elapsedSeconds}s`;
-  else if (elapsedSeconds < 3600) elapsed = `${Math.floor(elapsedSeconds / 60)}m`;
-  else if (elapsedSeconds < 86400) elapsed = `${Math.floor(elapsedSeconds / 3600)}h`;
+  else if (elapsedSeconds < 3600)
+    elapsed = `${Math.floor(elapsedSeconds / 60)}m`;
+  else if (elapsedSeconds < 86400)
+    elapsed = `${Math.floor(elapsedSeconds / 3600)}h`;
   else elapsed = `${Math.floor(elapsedSeconds / 86400)}d`;
 
   return `${date.toLocaleDateString(undefined, {
@@ -63,8 +77,6 @@ export default function PostDetail({
   setSelectedVolunteerPost,
 }) {
   const router = useRouter();
-  const { width } = useWindowDimensions();
-  const isMobile = width < 760;
   const { postId } = useLocalSearchParams();
   const [loadedPost, setLoadedPost] = useState(null);
   const [loadingPost, setLoadingPost] = useState(!suppliedPost);
@@ -75,7 +87,9 @@ export default function PostDetail({
   const isCleaned = effectiveCurrentTab === "cleaned";
 
   const [comments, setComments] = useState([]);
-  const [residentPoints, setResidentPoints] = useState(suppliedPost?.points ?? 0);
+  const [residentPoints, setResidentPoints] = useState(
+    suppliedPost?.points ?? 0,
+  );
   const [residentBadges, setResidentBadges] = useState([]);
   const [updating, setUpdating] = useState(false);
   const [showReasonModal, setShowReasonModal] = useState(false);
@@ -91,33 +105,6 @@ export default function PostDetail({
   const [deleting, setDeleting] = useState(false);
   const [openingVolunteerActivity, setOpeningVolunteerActivity] =
     useState(false);
-  const [beforePhoto, setBeforePhoto] = useState(
-    suppliedPost?.beforeImageUrl || suppliedPost?.imageUrl
-      ? {
-          uri: suppliedPost.beforeImageUrl || suppliedPost.imageUrl,
-          isRemote: true,
-        }
-      : null,
-  );
-  const [afterPhoto, setAfterPhoto] = useState(
-    suppliedPost?.afterImageUrl
-      ? { uri: suppliedPost.afterImageUrl, isRemote: true }
-      : null,
-  );
-
-  const pickCleanupPhoto = async (photoType) => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsEditing: true,
-      quality: 0.8,
-    });
-
-    if (result.canceled || !result.assets?.[0]) return;
-
-    const selectedPhoto = { ...result.assets[0], isRemote: false };
-    if (photoType === "before") setBeforePhoto(selectedPhoto);
-    else setAfterPhoto(selectedPhoto);
-  };
 
   useEffect(() => {
     if (suppliedPost || !postId) return;
@@ -140,25 +127,6 @@ export default function PostDetail({
 
     loadPost();
   }, [postId, suppliedPost]);
-
-  useEffect(() => {
-    if (!post) return;
-
-    setBeforePhoto(
-      (currentPhoto) =>
-        currentPhoto ||
-        (post.beforeImageUrl || post.imageUrl
-          ? { uri: post.beforeImageUrl || post.imageUrl, isRemote: true }
-          : null),
-    );
-    setAfterPhoto(
-      (currentPhoto) =>
-        currentPhoto ||
-        (post.afterImageUrl
-          ? { uri: post.afterImageUrl, isRemote: true }
-          : null),
-    );
-  }, [post]);
 
   const deleteReasons = [
     "Inappropriate Content",
@@ -197,19 +165,28 @@ export default function PostDetail({
 
     const loadResidentDetails = async () => {
       try {
-        const [userSnapshot, postsSnapshot, volunteerPostsSnapshot] = await Promise.all([
-          getDoc(doc(db, "users", post.userId)),
-          getDocs(collection(db, "posts")),
-          getDocs(collection(db, "volunteer_posts")),
-        ]);
+        const [userSnapshot, postsSnapshot, volunteerPostsSnapshot] =
+          await Promise.all([
+            getDoc(doc(db, "users", post.userId)),
+            getDocs(collection(db, "posts")),
+            getDocs(collection(db, "volunteer_posts")),
+          ]);
         if (userSnapshot.exists()) {
           setResidentPoints(userSnapshot.data().points ?? post.points ?? 0);
         }
 
         const allPosts = postsSnapshot.docs.map((document) => document.data());
-        const allVolunteerPosts = volunteerPostsSnapshot.docs.map((document) => document.data());
-        const stats = getUserContributionStats(post.userId, allPosts, allVolunteerPosts);
-        setResidentBadges(BADGES.filter((badge) => isBadgeEarned(badge, stats)));
+        const allVolunteerPosts = volunteerPostsSnapshot.docs.map((document) =>
+          document.data(),
+        );
+        const stats = getUserContributionStats(
+          post.userId,
+          allPosts,
+          allVolunteerPosts,
+        );
+        setResidentBadges(
+          BADGES.filter((badge) => isBadgeEarned(badge, stats)),
+        );
       } catch (error) {
         console.error("Unable to load resident details:", error);
       }
@@ -245,24 +222,10 @@ export default function PostDetail({
 
   const markAsClean = async () => {
     if (updating) return;
-    if (!afterPhoto) {
-      alert(
-        "Please add an after-cleanup photo before marking this report as cleaned.",
-      );
-      return;
-    }
 
     setUpdating(true);
 
     try {
-      const beforeImageUrl = beforePhoto?.isRemote
-        ? beforePhoto.uri
-        : beforePhoto
-          ? await uploadToCloudinary(beforePhoto)
-          : post.imageUrl || "";
-      const afterImageUrl = afterPhoto.isRemote
-        ? afterPhoto.uri
-        : await uploadToCloudinary(afterPhoto);
       const volunteerSnapshot = await getDocs(
         query(
           collection(db, "volunteer_posts"),
@@ -320,11 +283,7 @@ export default function PostDetail({
             userDocuments.push({ userRef, userSnapshot, reward });
         }
 
-        transaction.update(postRef, {
-          status: "cleaned",
-          beforeImageUrl,
-          afterImageUrl,
-        });
+        transaction.update(postRef, { status: "cleaned" });
         volunteerDocuments.forEach((volunteerDocument) => {
           transaction.update(volunteerDocument.ref, { status: "cleaned" });
         });
@@ -500,7 +459,11 @@ export default function PostDetail({
   };
 
   const updateAssessment = async (nextStatus) => {
-    const currentStatus = (post.status || effectiveCurrentTab || "moderate").toLowerCase();
+    const currentStatus = (
+      post.status ||
+      effectiveCurrentTab ||
+      "moderate"
+    ).toLowerCase();
     if (updating || currentStatus === nextStatus) return;
     if (!["pending", "moderate", "critical"].includes(currentStatus)) {
       alert("Only reports awaiting action can be reassessed.");
@@ -549,12 +512,8 @@ export default function PostDetail({
   }
 
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={styles.screenContent}
-      showsVerticalScrollIndicator={false}
-    >
-      <View style={styles.headerBar}>
+    <View style={styles.screen}>
+      <View style={{ alignItems: "center", flexDirection: "row", gap: 10 }}>
         <TouchableOpacity onPress={closePostDetail}>
           <Image
             source={require("../../../../assets/images/backG.png")}
@@ -562,10 +521,15 @@ export default function PostDetail({
           />
         </TouchableOpacity>
 
-        <View style={styles.headerContent}>
-          <Text style={styles.title} numberOfLines={1}>
-            Post Details
-          </Text>
+        <View
+          style={{
+            alignItems: "center",
+            width: "96%",
+            justifyContent: "space-between",
+            flexDirection: "row",
+          }}
+        >
+          <Text style={styles.title}>Post Details</Text>
           <TouchableOpacity
             style={{
               backgroundColor: "#fff",
@@ -582,9 +546,7 @@ export default function PostDetail({
       </View>
 
       {/* MAIN LAYOUT */}
-      <View
-        style={[styles.mainContainer, isMobile && styles.mobileMainContainer]}
-      >
+      <View style={styles.mainContainer}>
         {/* LEFT - POST */}
         <View style={styles.left}>
           <View style={styles.card}>
@@ -602,7 +564,10 @@ export default function PostDetail({
                     <View style={styles.authorIdentity}>
                       <Text style={styles.profileName}>
                         {post.firstName} {post.lastName}
-                        <Text style={styles.pointsText}> {"\u2022"} {residentPoints} pts</Text>
+                        <Text style={styles.pointsText}>
+                          {" "}
+                          {"\u2022"} {residentPoints} pts
+                        </Text>
                       </Text>
 
                       <View style={styles.badgeRow}>
@@ -613,12 +578,16 @@ export default function PostDetail({
                         ))}
                         {residentBadges.length > 3 && (
                           <View style={styles.badge}>
-                            <Text style={styles.badgeMore}>+{residentBadges.length - 3}</Text>
+                            <Text style={styles.badgeMore}>
+                              +{residentBadges.length - 3}
+                            </Text>
                           </View>
                         )}
                       </View>
                     </View>
-                    <Text style={styles.postedDate}>{formatPostedDate(post.createdAt)}</Text>
+                    <Text style={styles.postedDate}>
+                      {formatPostedDate(post.createdAt)}
+                    </Text>
                   </View>
 
                   <View style={styles.locationRow}>
@@ -634,11 +603,18 @@ export default function PostDetail({
                   <View
                     style={[
                       styles.statusTag,
-                      { backgroundColor: (STATUS_DETAILS[post.status] || STATUS_DETAILS.pending).color },
+                      {
+                        backgroundColor: (
+                          STATUS_DETAILS[post.status] || STATUS_DETAILS.pending
+                        ).color,
+                      },
                     ]}
                   >
                     <Text style={styles.statusTagText}>
-                      {(STATUS_DETAILS[post.status] || STATUS_DETAILS.pending).label}
+                      {
+                        (STATUS_DETAILS[post.status] || STATUS_DETAILS.pending)
+                          .label
+                      }
                     </Text>
                   </View>
                 </View>
@@ -671,14 +647,9 @@ export default function PostDetail({
         </View>
 
         {/* RIGHT - COMMENTS + LOCATION */}
-        <View style={[styles.right, isMobile && styles.mobileRight]}>
+        <View style={styles.right}>
           {/* COMMENTS */}
-          <View
-            style={[
-              styles.commentSection,
-              isMobile && styles.mobileCommentSection,
-            ]}
-          >
+          <View style={styles.commentSection}>
             <Text style={styles.sectionTitle}>Comments</Text>
             <ScrollView
               style={{ flex: 1 }}
@@ -723,64 +694,19 @@ export default function PostDetail({
             </ScrollView>
           </View>
 
-          <View style={styles.cleanupPhotosSection}>
-            <Text style={styles.cleanupPhotosTitle}>Cleanup proof photos</Text>
-            <View style={styles.cleanupPhotosRow}>
-              <TouchableOpacity
-                style={styles.cleanupPhotoButton}
-                onPress={() => pickCleanupPhoto("before")}
-                accessibilityRole="button"
-                accessibilityLabel="Choose before cleanup photo"
-              >
-                {beforePhoto ? (
-                  <Image
-                    source={{ uri: beforePhoto.uri }}
-                    style={styles.cleanupPhotoPreview}
-                  />
-                ) : (
-                  <View style={styles.cleanupPhotoPlaceholder}>
-                    <Text style={styles.cleanupPhotoPlaceholderText}>
-                      No photo
-                    </Text>
-                  </View>
-                )}
-                <Text style={styles.cleanupPhotoLabel}>Before</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.cleanupPhotoButton}
-                onPress={() => pickCleanupPhoto("after")}
-                accessibilityRole="button"
-                accessibilityLabel="Choose after cleanup photo"
-              >
-                {afterPhoto ? (
-                  <Image
-                    source={{ uri: afterPhoto.uri }}
-                    style={styles.cleanupPhotoPreview}
-                  />
-                ) : (
-                  <View style={styles.cleanupPhotoPlaceholder}>
-                    <Text style={styles.cleanupPhotoPlaceholderText}>
-                      Add photo
-                    </Text>
-                  </View>
-                )}
-                <Text style={styles.cleanupPhotoLabel}>After</Text>
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.cleanupPhotosHint}>
-              Add an after photo before marking this report as cleaned.
-            </Text>
-          </View>
-
           {/* SITUATION ASSESSMENT */}
           <View
             style={[
               styles.assessmentSection,
               {
                 borderColor: (
-                  STATUS_DETAILS[(post.status || effectiveCurrentTab || "pending").toLowerCase()] ||
-                  STATUS_DETAILS.pending
+                  STATUS_DETAILS[
+                    (
+                      post.status ||
+                      effectiveCurrentTab ||
+                      "pending"
+                    ).toLowerCase()
+                  ] || STATUS_DETAILS.pending
                 ).color,
               },
             ]}
@@ -802,9 +728,17 @@ export default function PostDetail({
                   { id: "moderate", label: "Moderate", color: "#FFCF30" },
                   { id: "critical", label: "Critical", color: "#FF6666" },
                 ].map((option) => {
-                  const postStatus = (post.status || effectiveCurrentTab || "moderate").toLowerCase();
+                  const postStatus = (
+                    post.status ||
+                    effectiveCurrentTab ||
+                    "moderate"
+                  ).toLowerCase();
                   const isSelected = postStatus === option.id;
-                  const isLocked = !["pending", "moderate", "critical"].includes(postStatus);
+                  const isLocked = ![
+                    "pending",
+                    "moderate",
+                    "critical",
+                  ].includes(postStatus);
 
                   return (
                     <TouchableOpacity
@@ -824,7 +758,9 @@ export default function PostDetail({
                           isSelected && styles.assessmentButtonTextSelected,
                         ]}
                       >
-                        {isSelected ? `${option.label} (Current)` : option.label}
+                        {isSelected
+                          ? `${option.label} (Current)`
+                          : option.label}
                       </Text>
                     </TouchableOpacity>
                   );
@@ -832,61 +768,62 @@ export default function PostDetail({
               </View>
             )}
           </View>
-
         </View>
       </View>
 
       {/* BUTTON */}
-      <View
-        style={{
-          flexDirection: "row",
-          justifyContent: "space-between",
-          padding: 20,
-          gap: 5,
-        }}
-      >
-        <TouchableOpacity
-          disabled={openingVolunteerActivity}
-          style={[
-            styles.helpBTN,
-            {
-              flex: 1,
-              backgroundColor: isCleaned ? "#A5A5A5" : "#599A74",
-            },
-          ]}
-          onPress={openVolunteerActivity}
+      {!isCleaned && (
+        <View
+          style={{
+            flexDirection: "row",
+            justifyContent: "space-between",
+            padding: 20,
+            gap: 5,
+          }}
         >
-          <Text style={styles.helpText}>
-            {openingVolunteerActivity
+          <TouchableOpacity
+            disabled={openingVolunteerActivity}
+            style={[
+              styles.helpBTN,
+              {
+                flex: 1,
+                backgroundColor: "#599A74",
+              },
+            ]}
+            onPress={openVolunteerActivity}
+          >
+            <Text style={styles.helpText}>
+              {openingVolunteerActivity
                 ? "Loading..."
                 : existingVolunteerId
                   ? "Manage Volunteers"
                   : "Help"}
-          </Text>
-        </TouchableOpacity>
-
-        {!isCleaned && (
-          <TouchableOpacity
-            style={[
-              styles.helpBTN,
-              {
-                backgroundColor:
-                  effectiveCurrentTab === "ongoing" ? "#2DCC6F" : "#A5A5A5",
-                flex: isMobile ? 0 : 1,
-              },
-            ]}
-            onPress={
-              effectiveCurrentTab === "ongoing" ? markAsClean : setToOngoing
-            }
-          >
-            <Text style={styles.helpText}>
-              {effectiveCurrentTab === "ongoing"
-                ? "Mark as Clean"
-                : "Set to On-Going"}
             </Text>
           </TouchableOpacity>
-        )}
-      </View>}
+
+          {!isCleaned && (
+            <TouchableOpacity
+              style={[
+                styles.helpBTN,
+                {
+                  backgroundColor:
+                    effectiveCurrentTab === "ongoing" ? "#2DCC6F" : "#A5A5A5",
+                  flex: 1,
+                },
+              ]}
+              onPress={
+                effectiveCurrentTab === "ongoing" ? markAsClean : setToOngoing
+              }
+            >
+              <Text style={styles.helpText}>
+                {effectiveCurrentTab === "ongoing"
+                  ? "Mark as Clean"
+                  : "Set to On-Going"}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
 
       <Modal visible={showReasonModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
@@ -981,7 +918,7 @@ export default function PostDetail({
           </View>
         </View>
       </Modal>
-    </ScrollView>
+    </View>
   );
 }
 
@@ -1066,33 +1003,7 @@ const styles = StyleSheet.create({
   },
   screen: {
     flex: 1,
-    gap: 14,
-    backgroundColor: "#F5F6F5",
-  },
-  screenContent: {
-    padding: 16,
-    gap: 14,
-    flexGrow: 1,
-  },
-  actionRow: {
-    flexDirection: "row",
     justifyContent: "space-between",
-    gap: 10,
-  },
-  mobileActionRow: {
-    flexDirection: "column",
-  },
-  headerBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  headerContent: {
-    flex: 1,
-    minWidth: 0,
-    alignItems: "center",
-    justifyContent: "space-between",
-    flexDirection: "row",
     gap: 10,
   },
   title: {
@@ -1107,11 +1018,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flex: 1, // take full remaining vertical space
     gap: 20,
-    minHeight: 0,
-  },
-  mobileMainContainer: {
-    flexDirection: "column",
-    flex: 0,
+    marginBottom: 0,
   },
   left: {
     flex: 1,
@@ -1121,18 +1028,12 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 15,
     justifyContent: "space-between",
-    minWidth: 0,
-  },
-  mobileRight: {
-    flex: 0,
-    width: "100%",
   },
 
   card: {
     backgroundColor: "#fff",
     borderRadius: 10,
     padding: 10,
-    minWidth: 0,
   },
 
   postImage: {
@@ -1141,57 +1042,6 @@ const styles = StyleSheet.create({
     aspectRatio: 16 / 9,
     borderRadius: 10,
     resizeMode: "cover",
-  },
-
-  cleanupPhotosSection: {
-    marginTop: 12,
-    padding: 12,
-    borderRadius: 10,
-    backgroundColor: "#F3F8F4",
-    borderWidth: 1,
-    borderColor: "#D9E9DD",
-  },
-  cleanupPhotosTitle: {
-    color: "#234B33",
-    fontSize: 14,
-    fontWeight: "700",
-    marginBottom: 9,
-  },
-  cleanupPhotosRow: {
-    flexDirection: "row",
-    gap: 10,
-  },
-  cleanupPhotoButton: {
-    flex: 1,
-  },
-  cleanupPhotoPreview: {
-    width: "100%",
-    height: 100,
-    borderRadius: 8,
-    resizeMode: "cover",
-  },
-  cleanupPhotoPlaceholder: {
-    height: 100,
-    borderRadius: 8,
-    backgroundColor: "#E1EAE3",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  cleanupPhotoPlaceholderText: {
-    color: "#5E7565",
-    fontSize: 12,
-  },
-  cleanupPhotoLabel: {
-    color: "#276344",
-    fontSize: 12,
-    fontWeight: "700",
-    textAlign: "center",
-    marginTop: 5,
-  },
-  cleanupPhotosHint: {
-    color: "#6A7C70",
-    fontSize: 11,
-    marginTop: 8,
   },
 
   postInfo: {
@@ -1214,8 +1064,18 @@ const styles = StyleSheet.create({
   authorRow: { flexDirection: "row", alignItems: "flex-start" },
   authorImage: { width: 44, height: 44, borderRadius: 22, marginRight: 10 },
   authorDetails: { flex: 1 },
-  authorHeader: { flexDirection: "row", justifyContent: "space-between", gap: 10 },
-  authorIdentity: { flex: 1, flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 7 },
+  authorHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  authorIdentity: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 7,
+  },
   pointsText: { color: "#2E7D32", fontSize: 12, fontWeight: "700" },
   badgeRow: { flexDirection: "row", alignItems: "center", gap: 5 },
   badge: {
@@ -1284,11 +1144,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     borderRadius: 10,
     padding: 15,
-  },
-  mobileCommentSection: {
-    flex: 0,
-    minHeight: 260,
-    maxHeight: 360,
   },
   commentRow: {
     flexDirection: "row",
