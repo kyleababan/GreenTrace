@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import Navbar from "../components/navbar";
 import { auth, db } from "../firebaseConfig";
+import { hideBadWords } from "../utils/hideBadWords";
 
 export default function ReportPosts() {
   const router = useRouter();
@@ -90,7 +91,7 @@ export default function ReportPosts() {
                 </Text>
 
                 <Text style={styles.reportDescription} numberOfLines={2}>
-                  {post.title || "Untitled waste report"}
+                  {hideBadWords(post.title) || "Untitled waste report"}
                 </Text>
 
                 <View style={styles.locationRow}>

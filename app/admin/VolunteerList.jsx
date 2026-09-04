@@ -20,6 +20,7 @@ import {
 } from "react-native";
 
 import { db } from "../../firebaseConfig";
+import { hideBadWords } from "../../utils/hideBadWords";
 
 export default function VolunteerList({ setActivePage }) {
   const [posts, setPosts] = useState([]);
@@ -42,16 +43,22 @@ export default function VolunteerList({ setActivePage }) {
       const activePosts = await Promise.all(
         data.map(async (volunteerPost) => {
           if (volunteerPost.status === "cleaned") return null;
-          if (!volunteerPost.postId) return volunteerPost;
+
+          if (!volunteerPost.postId) {
+            return volunteerPost;
+          }
 
           try {
             const sourcePost = await getDoc(
               doc(db, "posts", volunteerPost.postId),
             );
 
-            return sourcePost.exists() && sourcePost.data().status === "cleaned"
-              ? null
-              : volunteerPost;
+            if (!sourcePost.exists()) return volunteerPost;
+
+            const sourceData = sourcePost.data();
+            if (sourceData.status === "cleaned") return null;
+
+            return volunteerPost;
           } catch (error) {
             console.error("Unable to check volunteer post status:", error);
             return volunteerPost;
@@ -76,11 +83,10 @@ export default function VolunteerList({ setActivePage }) {
 
     return posts.filter(
       (post) =>
-        post.status !== "cleaned" &&
-        (!keyword ||
-          post.title?.toLowerCase().includes(keyword) ||
-          post.description?.toLowerCase().includes(keyword) ||
-          post.locationName?.toLowerCase().includes(keyword)),
+        (post.status !== "cleaned" && !keyword) ||
+        post.title?.toLowerCase().includes(keyword) ||
+        post.description?.toLowerCase().includes(keyword) ||
+        post.locationName?.toLowerCase().includes(keyword),
     );
   }, [posts, search]);
 
@@ -114,10 +120,10 @@ export default function VolunteerList({ setActivePage }) {
             <View key={post.id} style={styles.card}>
               {/* LEFT */}
               <View style={styles.cardLeft}>
-                <Text style={styles.title}>{post.title}</Text>
+                <Text style={styles.title}>{hideBadWords(post.title)}</Text>
 
                 <Text style={styles.desc} numberOfLines={3}>
-                  {post.description}
+                  {hideBadWords(post.description)}
                 </Text>
 
                 <View style={styles.locationRow}>
@@ -145,7 +151,6 @@ export default function VolunteerList({ setActivePage }) {
                 </TouchableOpacity>
               </View>
 
-              {/* RIGHT IMAGE */}
               <View style={styles.imageWrapper}>
                 <Image source={{ uri: post.imageUrl }} style={styles.image} />
               </View>

@@ -40,7 +40,10 @@ const getInitials = (name) =>
 const formatMeetingDate = (value) => {
   if (!value) return "Date not specified";
 
-  const date = typeof value?.toDate === "function" ? value.toDate() : new Date(`${value}T00:00:00`);
+  const date =
+    typeof value?.toDate === "function"
+      ? value.toDate()
+      : new Date(`${value}T00:00:00`);
   if (Number.isNaN(date.getTime())) return String(value);
 
   return date.toLocaleDateString(undefined, {
@@ -101,7 +104,9 @@ export default function Volunteering() {
     if (activityId) loadActivity();
   }, [activityId]);
 
-  const members = Array.isArray(activity?.volunteers) ? activity.volunteers : [];
+  const members = Array.isArray(activity?.volunteers)
+    ? activity.volunteers
+    : [];
   const isJoined = members.some(
     (member) => getMemberId(member) === currentUser?.id,
   );

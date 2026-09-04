@@ -1,11 +1,6 @@
 import { useRouter } from "expo-router";
 import { signOut } from "firebase/auth";
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-} from "firebase/firestore";
+import { collection, doc, getDoc, getDocs } from "firebase/firestore";
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -19,8 +14,8 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import Navbar from "../components/navbar";
 import BadgeWithDetails from "../components/BadgeWithDetails";
+import Navbar from "../components/navbar";
 import {
   BADGES,
   getUserContributionStats,
@@ -316,7 +311,6 @@ export default function ProfileScreen() {
               </View>
             </View>
           </Modal>
-
         </View>
       </View>
     </SafeAreaView>

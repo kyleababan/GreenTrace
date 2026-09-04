@@ -1,9 +1,13 @@
-import * as ImagePicker from "expo-image-picker";
+import * as Location from "expo-location";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
+  Alert,
   Image,
   Modal,
+  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,16 +16,15 @@ import {
   View,
 } from "react-native";
 import Navbar from "../components/navbar";
-
-import * as Location from "expo-location";
-
 import { auth, db } from "../firebaseConfig";
-
-import { doc, getDoc, updateDoc } from "firebase/firestore";
+import { hideBadWords } from "../utils/hideBadWords";
 
 const formatPostedAt = (timestamp) => {
   if (!timestamp) return "Posted just now";
-  const date = typeof timestamp.toDate === "function" ? timestamp.toDate() : new Date(timestamp);
+  const date =
+    typeof timestamp.toDate === "function"
+      ? timestamp.toDate()
+      : new Date(timestamp);
   if (Number.isNaN(date.getTime())) return "Posted just now";
   return `Posted ${date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
 };
@@ -50,6 +53,7 @@ export default function CreateReport() {
   }, []);
 
   const [uploading, setUploading] = useState(false);
+  const [loadingPost, setLoadingPost] = useState(true);
 
   const [userName, setUserName] = useState("");
   const router = useRouter();
@@ -67,32 +71,6 @@ export default function CreateReport() {
   const [manualLocationModal, setManualLocationModal] = useState(false);
   const [locationName, setLocationName] = useState("Set Location...");
 
-  const pickImage = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      quality: 0.8,
-      allowsEditing: true,
-    });
-
-    if (result.canceled) return;
-
-    const asset = result.assets[0];
-
-    // Reject videos
-    if (asset.type === "video") {
-      alert("Videos are not supported.");
-      return;
-    }
-
-    // 2.5 MB limit
-    if (asset.fileSize && asset.fileSize > 2.5 * 1024 * 1024) {
-      alert("Image must be smaller than 2.5 MB.");
-      return;
-    }
-
-    setImage(asset);
-  };
-
   useEffect(() => {
     loadPost();
   }, []);
@@ -101,7 +79,11 @@ export default function CreateReport() {
     try {
       const snapshot = await getDoc(doc(db, "posts", id));
 
-      if (!snapshot.exists()) return;
+      if (!snapshot.exists()) {
+        Alert.alert("Post not found.");
+        router.back();
+        return;
+      }
 
       const data = snapshot.data();
 
@@ -118,6 +100,9 @@ export default function CreateReport() {
       });
     } catch (error) {
       console.log(error);
+      Alert.alert("Unable to load the post.");
+    } finally {
+      setLoadingPost(false);
     }
   };
 
@@ -126,7 +111,7 @@ export default function CreateReport() {
       const { status } = await Location.requestForegroundPermissionsAsync();
 
       if (status !== "granted") {
-        alert("Location permission denied");
+        Alert.alert("Location permission denied");
 
         return;
       }
@@ -167,8 +152,8 @@ export default function CreateReport() {
         status === "ongoing" || status === "on-going" || status === "cleaned";
 
       const updates = {
-        title: title.trim(),
-        caption,
+        title: hideBadWords(title.trim()),
+        caption: hideBadWords(caption.trim()),
         locationName,
       };
 
@@ -182,7 +167,7 @@ export default function CreateReport() {
         updates,
       );
 
-      alert("Post updated!");
+      Alert.alert("Post updated!");
 
       router.back();
     } catch (error) {
@@ -192,8 +177,18 @@ export default function CreateReport() {
     }
   };
 
+  if (loadingPost) {
+    return (
+      <SafeAreaView style={styles.wrapper}>
+        <View style={styles.loadingState}>
+          <ActivityIndicator size="large" color="#5F9C76" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
-    <View style={styles.wrapper}>
+    <SafeAreaView style={styles.wrapper}>
       <View style={styles.container}>
         {/* CONTENT WRAPPER */}
         <View style={styles.contentWrapper}>
@@ -212,7 +207,12 @@ export default function CreateReport() {
           </View>
 
           {/* MAIN CONTENT */}
-          <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <ScrollView
+            style={styles.content}
+            contentContainerStyle={styles.contentContainer}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
             {/* USER + POST BUTTON */}
             <View style={styles.userRow}>
               <View style={styles.userInfo}>
@@ -282,23 +282,32 @@ export default function CreateReport() {
                   },
                 ]}
               >
-                <Text style={styles.statusText}>{status === "critical" ? "Critical" : status === "moderate" ? "Moderate" : status === "ongoing" ? "On-going" : status === "cleaned" ? "Cleaned" : "Pending"}</Text>
+                <Text style={styles.statusText}>
+                  {status === "critical"
+                    ? "Critical"
+                    : status === "moderate"
+                      ? "Moderate"
+                      : status === "ongoing"
+                        ? "On-going"
+                        : status === "cleaned"
+                          ? "Cleaned"
+                          : "Pending"}
+                </Text>
               </View>
               {image ? (
-                <>
-                  <Image source={{ uri: image.uri }} style={styles.previewImage} resizeMode="cover" />
-                  <TouchableOpacity style={styles.changePhotoButton} onPress={pickImage}>
-                    <Text style={styles.changePhotoText}>Change photo</Text>
-                  </TouchableOpacity>
-                </>
+                <Image
+                  source={{ uri: image.uri }}
+                  style={styles.previewImage}
+                  resizeMode="cover"
+                />
               ) : (
-                <TouchableOpacity style={styles.imagePlaceholderContent} onPress={pickImage}>
+                <View style={styles.imagePlaceholderContent}>
                   <Image
                     source={require("../assets/images/image.png")}
                     style={styles.imageIcon}
                   />
                   <Text style={styles.imageText}>Choose Image</Text>
-                </TouchableOpacity>
+                </View>
               )}
             </View>
           </ScrollView>
@@ -379,11 +388,16 @@ export default function CreateReport() {
           <Navbar />
         </View>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  loadingState: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   contentWrapper: {
     flex: 1, // 👈 THIS PUSHES NAVBAR DOWN
   },
@@ -542,8 +556,6 @@ const styles = StyleSheet.create({
     color: "#555",
   },
   previewImage: { width: "100%", height: "100%", borderRadius: 10 },
-  changePhotoButton: { position: "absolute", left: 12, bottom: 12, backgroundColor: "rgba(0, 0, 0, 0.65)", borderRadius: 18, paddingHorizontal: 14, paddingVertical: 8 },
-  changePhotoText: { color: "#FFFFFF", fontSize: 12, fontWeight: "700" },
 
   statusDot: {
     position: "absolute",

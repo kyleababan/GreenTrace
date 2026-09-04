@@ -33,16 +33,16 @@ import {
   updateDoc,
   where,
 } from "firebase/firestore";
-import Navbar from "../components/navbar";
 import FormError from "../components/form-error";
+import Navbar from "../components/navbar";
 import { auth, db } from "../firebaseConfig";
-import { censorText } from "../utils/censorText";
+import { deleteRelatedDocuments } from "../utils/deletePostHelper";
+import { hideBadWords } from "../utils/hideBadWords";
 import {
   COMMENTS_PER_PAGE,
   getUserPointsMap,
   mergeUniqueById,
 } from "../utils/pagination";
-import { deleteRelatedDocuments } from "./guards/deletePostHelper";
 
 const formatPostedAt = (timestamp) => {
   if (!timestamp) return "Posted just now";
@@ -214,7 +214,7 @@ export default function Post() {
 
       const enrichedComments = rawComments.map((item) => ({
         ...item,
-        comment: censorText(item.comment),
+        comment: hideBadWords(item.comment),
         currentPoints: pointsMap[item.userId] ?? item.points ?? 0,
       }));
 
@@ -222,7 +222,8 @@ export default function Post() {
         if (reset) return enrichedComments;
         return mergeUniqueById(currentComments, enrichedComments);
       });
-      lastCommentDocRef.current = snapshot.docs[snapshot.docs.length - 1] || null;
+      lastCommentDocRef.current =
+        snapshot.docs[snapshot.docs.length - 1] || null;
       setHasMoreComments(snapshot.docs.length === COMMENTS_PER_PAGE);
     } catch (error) {
       console.error("Error loading comments:", error);
@@ -257,7 +258,7 @@ export default function Post() {
         firstName: freshUserData?.firstName || "",
         lastName: freshUserData?.lastName || "",
         points: currentPoints,
-        comment: censorText(comment.trim()),
+        comment: hideBadWords(comment.trim()),
         createdAt: serverTimestamp(),
       });
 
@@ -266,9 +267,7 @@ export default function Post() {
       });
 
       setPost((prev) =>
-        prev
-          ? { ...prev, commentCount: (prev.commentCount ?? 0) + 1 }
-          : prev,
+        prev ? { ...prev, commentCount: (prev.commentCount ?? 0) + 1 } : prev,
       );
 
       if (currentUser.uid !== post.userId) {
@@ -411,8 +410,12 @@ export default function Post() {
             showsVerticalScrollIndicator={false}
             scrollEventThrottle={200}
             onScroll={({ nativeEvent }) => {
-              const { contentOffset, contentSize, layoutMeasurement } = nativeEvent;
-              if (layoutMeasurement.height + contentOffset.y >= contentSize.height - 160) {
+              const { contentOffset, contentSize, layoutMeasurement } =
+                nativeEvent;
+              if (
+                layoutMeasurement.height + contentOffset.y >=
+                contentSize.height - 160
+              ) {
                 loadComments();
               }
             }}
@@ -495,7 +498,9 @@ export default function Post() {
 
               {/* CAPTION */}
               {Boolean(post.title) && (
-                <Text style={styles.reportTitle}>{censorText(post.title)}</Text>
+                <Text style={styles.reportTitle}>
+                  {hideBadWords(post.title)}
+                </Text>
               )}
               {Boolean(post.caption) && (
                 <View>
@@ -503,10 +508,12 @@ export default function Post() {
                     style={styles.caption}
                     numberOfLines={expandedCaption ? undefined : 3}
                   >
-                    {censorText(post.caption)}
+                    {hideBadWords(post.caption)}
                   </Text>
                   {post.caption.length > 140 && (
-                    <TouchableOpacity onPress={() => setExpandedCaption((current) => !current)}>
+                    <TouchableOpacity
+                      onPress={() => setExpandedCaption((current) => !current)}
+                    >
                       <Text style={styles.captionToggle}>
                         {expandedCaption ? "See less" : "See more"}
                       </Text>
@@ -543,7 +550,17 @@ export default function Post() {
                     },
                   ]}
                 >
-                  <Text style={styles.statusText}>{post.status === "critical" ? "Critical" : post.status === "moderate" ? "Moderate" : post.status === "ongoing" ? "On-going" : post.status === "cleaned" ? "Cleaned" : "Pending"}</Text>
+                  <Text style={styles.statusText}>
+                    {post.status === "critical"
+                      ? "Critical"
+                      : post.status === "moderate"
+                        ? "Moderate"
+                        : post.status === "ongoing"
+                          ? "On-going"
+                          : post.status === "cleaned"
+                            ? "Cleaned"
+                            : "Pending"}
+                  </Text>
                 </View>
               </TouchableOpacity>
             </View>
@@ -605,7 +622,9 @@ export default function Post() {
                     </Text>
                   </View>
 
-                  <Text style={styles.commentText}>{censorText(item.comment)}</Text>
+                  <Text style={styles.commentText}>
+                    {hideBadWords(item.comment)}
+                  </Text>
                 </View>
               </View>
             ))}

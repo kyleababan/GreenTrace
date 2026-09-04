@@ -14,6 +14,7 @@ import {
   normalizePurok,
 } from "../../../constants/locationFormat";
 import { db } from "../../../firebaseConfig";
+import { hideBadWords } from "../../../utils/hideBadWords";
 
 const STATUS_DETAILS = {
   pending: { label: "Not Assessed", color: "#A5A5A5" },
@@ -257,12 +258,12 @@ export default function AssessmentList({
 
                   {Boolean(post.title) && (
                     <Text style={styles.postTitle} numberOfLines={1}>
-                      {post.title}
+                      {hideBadWords(post.title)}
                     </Text>
                   )}
                   {Boolean(post.caption) && (
                     <Text style={styles.postDescription} numberOfLines={3}>
-                      {post.caption}
+                      {hideBadWords(post.caption)}
                     </Text>
                   )}
 

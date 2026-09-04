@@ -21,6 +21,7 @@ import {
   isBadgeEarned,
 } from "../constants/badges";
 import { formatLocationWithPurok } from "../constants/locationFormat";
+import { hideBadWords } from "../utils/hideBadWords";
 
 import {
   addDoc,
@@ -535,6 +536,7 @@ export default function Home() {
                   />
 
                   <View style={styles.userDetails}>
+                    <Text style={styles.reportedByLabel}>Reported by</Text>
                     <View style={styles.userHeader}>
                       <Text style={styles.username}>
                         {post.firstName} {post.lastName}
@@ -614,7 +616,9 @@ export default function Home() {
 
                 {/* Caption */}
                 {Boolean(post.title) && (
-                  <Text style={styles.reportTitle}>{post.title}</Text>
+                  <Text style={styles.reportTitle}>
+                    {hideBadWords(post.title)}
+                  </Text>
                 )}
                 {Boolean(post.caption) && (
                   <View>
@@ -622,7 +626,7 @@ export default function Home() {
                       style={styles.caption}
                       numberOfLines={expandedPosts[post.id] ? undefined : 3}
                     >
-                      {post.caption}
+                      {hideBadWords(post.caption)}
                     </Text>
                     {post.caption.length > 140 && (
                       <TouchableOpacity
@@ -636,23 +640,56 @@ export default function Home() {
                   </View>
                 )}
 
+                {post.status === "cleaned" && post.afterImageUrl && (
+                  <View style={styles.cleanupResult}>
+                    <View style={styles.cleanupResultHeader}>
+                      <Text style={styles.cleanupResultTitle}>
+                        Cleanup Result
+                      </Text>
+                      <Text style={styles.cleanupAdmin} numberOfLines={1}>
+                        By {post.cleanedByName || "Admin"}
+                      </Text>
+                    </View>
+                    <View style={styles.cleanupImages}>
+                      <View style={styles.cleanupImageColumn}>
+                        <Text style={styles.cleanupImageLabel}>Before</Text>
+                        <Image
+                          source={{ uri: post.imageUrl }}
+                          style={styles.cleanupImage}
+                          resizeMode="cover"
+                        />
+                      </View>
+                      <View style={styles.cleanupImageColumn}>
+                        <Text style={styles.cleanupImageLabel}>After</Text>
+                        <Image
+                          source={{ uri: post.afterImageUrl }}
+                          style={styles.cleanupImage}
+                          resizeMode="cover"
+                        />
+                      </View>
+                    </View>
+                  </View>
+                )}
+
                 {/* Image Container */}
-                <TouchableOpacity
-                  style={styles.imageContainer}
-                  activeOpacity={0.9}
-                  onPress={() =>
-                    router.push({
-                      pathname: "/post",
-                      params: { id: post.id },
-                    })
-                  }
-                >
-                  <Image
-                    source={{ uri: post.imageUrl }}
-                    style={styles.postImage}
-                    resizeMode="cover"
-                  />
-                </TouchableOpacity>
+                {!(post.status === "cleaned" && post.afterImageUrl) && (
+                  <TouchableOpacity
+                    style={styles.imageContainer}
+                    activeOpacity={0.9}
+                    onPress={() =>
+                      router.push({
+                        pathname: "/post",
+                        params: { id: post.id },
+                      })
+                    }
+                  >
+                    <Image
+                      source={{ uri: post.imageUrl }}
+                      style={styles.postImage}
+                      resizeMode="cover"
+                    />
+                  </TouchableOpacity>
+                )}
 
                 {/* Action Row */}
                 <View style={styles.actionsContainer}>
@@ -861,6 +898,12 @@ const styles = StyleSheet.create({
   userDetails: {
     flex: 1,
   },
+  reportedByLabel: {
+    color: "#7A8A80",
+    fontSize: 10,
+    fontWeight: "700",
+    marginBottom: 1,
+  },
   userHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -937,6 +980,52 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginTop: -6,
     marginBottom: 10,
+  },
+  cleanupResult: {
+    marginBottom: 12,
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: "#F4FAF6",
+    borderWidth: 1,
+    borderColor: "#D8E6DC",
+  },
+  cleanupResultHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    marginBottom: 7,
+  },
+  cleanupResultTitle: {
+    color: "#397A51",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  cleanupAdmin: {
+    flex: 1,
+    color: "#68746C",
+    fontSize: 10,
+    textAlign: "right",
+  },
+  cleanupImages: {
+    flexDirection: "row",
+    gap: 8,
+    width: "100%",
+  },
+  cleanupImageColumn: {
+    flex: 1,
+    minWidth: 0,
+  },
+  cleanupImageLabel: {
+    color: "#68746C",
+    fontSize: 10,
+    fontWeight: "700",
+    marginBottom: 3,
+  },
+  cleanupImage: {
+    width: "100%",
+    aspectRatio: 4 / 3,
+    borderRadius: 7,
   },
   imageContainer: {
     width: "100%",

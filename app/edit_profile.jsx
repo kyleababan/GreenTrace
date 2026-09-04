@@ -88,7 +88,6 @@ export default function EditProfile() {
               style={styles.backIcon}
             />
           </TouchableOpacity>
-
         </View>
 
         {/* FORM */}

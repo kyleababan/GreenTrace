@@ -10,20 +10,41 @@ import {
 } from "react-native";
 
 import { useRouter } from "expo-router";
+import { doc, getDoc } from "firebase/firestore";
+import { useEffect, useState } from "react";
+import { auth, db } from "../firebaseConfig";
 
 export default function Sidebar() {
   const router = useRouter();
+  const [admin, setAdmin] = useState(null);
 
   const { width } = useWindowDimensions();
 
-  const sidebarWidth =
-    width >= 1024
-      ? 300
-      : Math.max(200, width * 0.25);
+  const sidebarWidth = width >= 1024 ? 300 : Math.max(200, width * 0.25);
+
+  useEffect(() => {
+    const loadAdmin = async () => {
+      const currentUser = auth.currentUser;
+      if (!currentUser) return;
+
+      try {
+        const snapshot = await getDoc(doc(db, "users", currentUser.uid));
+        if (snapshot.exists()) setAdmin(snapshot.data());
+      } catch (error) {
+        console.error("Unable to load admin profile:", error);
+      }
+    };
+
+    loadAdmin();
+  }, []);
+
+  const adminName = admin
+    ? [admin.firstName, admin.lastName].filter(Boolean).join(" ")
+    : "Admin";
+  const adminRole = admin?.role || "admin";
 
   return (
     <View style={[styles.sidebar, { width: sidebarWidth }]}>
-
       {/* LOGO */}
 
       {/* <Image
@@ -37,98 +58,67 @@ export default function Sidebar() {
         style={styles.divider}
         onPress={() => router.push("/admin/profile")}
       >
-
         <Image
           source={require("../assets/images/profile.png")}
           style={styles.Aprofile}
         />
 
         <View>
-          <Text style={styles.adminName}>
-            Magistrate GB
-          </Text>
+          <Text style={styles.adminName}>{adminName}</Text>
 
-          <Text style={styles.adminRole}>
-            Admin
-          </Text>
+          <Text style={styles.adminRole}>{adminRole}</Text>
         </View>
-
       </TouchableOpacity>
 
       {/* MENU */}
 
       <View style={styles.menu}>
-
         <TouchableOpacity
           style={styles.item}
-          onPress={() =>
-            router.push("/admin/dashboard")
-          }
+          onPress={() => router.push("/admin/dashboard")}
         >
-
           <Image
             source={require("../assets/images/Dashboard Logo.png")}
             style={styles.icon}
           />
 
-          <Text style={styles.itemText}>
-            Dashboard
-          </Text>
-
+          <Text style={styles.itemText}>Dashboard</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.item}
-          onPress={() =>
-            router.push("/admin/situtation_assessment")
-          }
+          onPress={() => router.push("/admin/situtation_assessment")}
         >
-
           <Image
             source={require("../assets/images/Situation Assessment Logo.png")}
             style={styles.icon}
           />
 
-          <Text style={styles.itemText}>
-            Situation Assessment
-          </Text>
-
+          <Text style={styles.itemText}>Situation Assessment</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.item}
-          onPress={() =>
-            router.push("/admin/VolunteerList")
-          }
+          onPress={() => router.push("/admin/VolunteerList")}
         >
-
           <Image
             source={require("../assets/images/vlist.png")}
             style={styles.icon}
           />
 
-          <Text style={styles.itemText}>
-            Volunteer List
-          </Text>
-
+          <Text style={styles.itemText}>Volunteer List</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.item}
-          onPress={() =>
-            router.push("/admin/UserList")
-          }
+          onPress={() => router.push("/admin/UserList")}
         >
-
           <Image
             source={require("../assets/images/acc.png")}
             style={styles.icon}
           />
 
-          <Text style={styles.itemText}>
-            Users
-          </Text>
-
+          <Text style={styles.itemText}>Users</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -141,47 +131,30 @@ export default function Sidebar() {
           />
           <Text style={styles.itemText}>Scheduled Date</Text>
         </TouchableOpacity>
-
       </View>
 
       {/* BOTTOM */}
 
       <View style={styles.bottom}>
-
-        <TouchableOpacity
-          onPress={() =>
-            router.push("/admin/settings")
-          }
-        >
-
+        <TouchableOpacity onPress={() => router.push("/admin/settings")}>
           <Image
             source={require("../assets/images/settings.png")}
             style={styles.settings}
           />
-
         </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.logoutContainer}
-          onPress={() =>
-            router.replace("/signin")
-          }
+          onPress={() => router.replace("/signin")}
         >
-
-          <Text style={styles.logout}>
-            Logout
-          </Text>
-
+          <Text style={styles.logout}>Logout</Text>
         </TouchableOpacity>
-
       </View>
-
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-
   sidebar: {
     backgroundColor: "#599A74",
     padding: 20,
