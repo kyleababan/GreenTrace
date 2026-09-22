@@ -159,9 +159,12 @@ export default function Post() {
           id: snapshot.id,
           ...snapshot.data(),
         });
+      } else {
+        router.replace("/post-unavailable");
       }
     } catch (error) {
       console.log(error);
+      router.replace("/post-unavailable");
       setSendingComment(false);
     }
   };
@@ -490,6 +493,36 @@ export default function Post() {
                     </Text>
                   </View>
 
+                  <View
+                    style={[
+                      styles.statusTag,
+                      {
+                        backgroundColor:
+                          post.status === "critical"
+                            ? "#FF5B5B"
+                            : post.status === "moderate"
+                              ? "#ff8c40"
+                              : post.status === "cleaned"
+                                ? "#34C759"
+                                : post.status === "ongoing"
+                                  ? "#FFC940"
+                                  : "#A5A5A5",
+                      },
+                    ]}
+                  >
+                    <Text style={styles.statusText}>
+                      {post.status === "critical"
+                        ? "Critical"
+                        : post.status === "moderate"
+                          ? "Moderate"
+                          : post.status === "ongoing"
+                            ? "On-going"
+                            : post.status === "cleaned"
+                              ? "Cleaned"
+                              : "Pending"}
+                    </Text>
+                  </View>
+
                   <Text style={styles.postedAt}>
                     {formatPostedAt(post.createdAt)}
                   </Text>
@@ -523,46 +556,47 @@ export default function Post() {
               )}
 
               {/* POST IMAGE */}
-              <TouchableOpacity
-                activeOpacity={0.9}
-                style={styles.imageContainer}
-                onPress={() => setShowImage(true)}
-              >
-                <Image
-                  source={{ uri: post.imageUrl }}
-                  style={styles.postImage}
-                />
-
-                <View
-                  style={[
-                    styles.statusDot,
-                    {
-                      backgroundColor:
-                        post.status === "critical"
-                          ? "#FF5B5B"
-                          : post.status === "moderate"
-                            ? "#FFC940"
-                            : post.status === "cleaned"
-                              ? "#34C759"
-                              : post.status === "ongoing"
-                                ? "#7DD3FC"
-                                : "#A5A5A5",
-                    },
-                  ]}
+              {!(post.status === "cleaned" && post.afterImageUrl) && (
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  style={styles.imageContainer}
+                  onPress={() => setShowImage(true)}
                 >
-                  <Text style={styles.statusText}>
-                    {post.status === "critical"
-                      ? "Critical"
-                      : post.status === "moderate"
-                        ? "Moderate"
-                        : post.status === "ongoing"
-                          ? "On-going"
-                          : post.status === "cleaned"
-                            ? "Cleaned"
-                            : "Pending"}
-                  </Text>
+                  <Image
+                    source={{ uri: post.imageUrl }}
+                    style={styles.postImage}
+                  />
+                </TouchableOpacity>
+              )}
+
+              {post.status === "cleaned" && post.afterImageUrl && (
+                <View style={styles.beforeAfterSection}>
+                  <View style={styles.cleanupResultHeader}>
+                    <Text style={styles.beforeAfterTitle}>Cleanup Result</Text>
+                    <Text style={styles.cleanupAdmin} numberOfLines={1}>
+                      By {post.cleanedByName || "Admin"}
+                    </Text>
+                  </View>
+                  <View style={styles.beforeAfterRow}>
+                    <View style={styles.beforeAfterColumn}>
+                      <Text style={styles.beforeAfterLabel}>Before</Text>
+                      <Image
+                        source={{ uri: post.imageUrl }}
+                        style={styles.beforeAfterImage}
+                        resizeMode="cover"
+                      />
+                    </View>
+                    <View style={styles.beforeAfterColumn}>
+                      <Text style={styles.beforeAfterLabel}>After</Text>
+                      <Image
+                        source={{ uri: post.afterImageUrl }}
+                        style={styles.beforeAfterImage}
+                        resizeMode="cover"
+                      />
+                    </View>
+                  </View>
                 </View>
-              </TouchableOpacity>
+              )}
             </View>
 
             {/* COMMENTS SECTION */}
@@ -956,6 +990,60 @@ const styles = StyleSheet.create({
     borderColor: "#FFFFFF",
   },
   statusText: { color: "#FFFFFF", fontSize: 10, fontWeight: "700" },
+  statusTag: {
+    alignSelf: "flex-start",
+    marginTop: 6,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+
+  beforeAfterSection: {
+    marginTop: 2,
+    marginBottom: 2,
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: "#F4FAF6",
+    borderWidth: 1,
+    borderColor: "#D8E6DC",
+  },
+  cleanupResultHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    marginBottom: 7,
+  },
+  beforeAfterTitle: {
+    color: "#397A51",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  cleanupAdmin: {
+    flex: 1,
+    color: "#68746C",
+    fontSize: 10,
+    textAlign: "right",
+  },
+  beforeAfterRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  beforeAfterColumn: {
+    flex: 1,
+  },
+  beforeAfterLabel: {
+    fontWeight: "700",
+    color: "#68746C",
+    fontSize: 10,
+    marginBottom: 3,
+  },
+  beforeAfterImage: {
+    width: "100%",
+    aspectRatio: 4 / 3,
+    borderRadius: 7,
+    backgroundColor: "#EBEBEB",
+  },
 
   /* Comments Section */
   commentsHeader: {

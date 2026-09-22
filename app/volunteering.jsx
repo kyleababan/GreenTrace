@@ -301,16 +301,26 @@ export default function Volunteering() {
 
           <View style={styles.meetingRow}>
             <View style={styles.meetingItem}>
-              <Ionicons name="calendar-outline" size={16} color="#5F9C76" />
-              <Text style={styles.meetingText}>
-                {formatMeetingDate(activity.meetingDate)}
-              </Text>
+              <View style={styles.meetingIcon}>
+                <Ionicons name="calendar-outline" size={18} color="#397A51" />
+              </View>
+              <View style={styles.meetingCopy}>
+                <Text style={styles.meetingLabel}>DATE</Text>
+                <Text style={styles.meetingText} numberOfLines={2}>
+                  {formatMeetingDate(activity.meetingDate)}
+                </Text>
+              </View>
             </View>
             <View style={styles.meetingItem}>
-              <Ionicons name="time-outline" size={16} color="#5F9C76" />
-              <Text style={styles.meetingText}>
-                {activity.meetingTime || "Time not specified"}
-              </Text>
+              <View style={styles.meetingIcon}>
+                <Ionicons name="time-outline" size={18} color="#397A51" />
+              </View>
+              <View style={styles.meetingCopy}>
+                <Text style={styles.meetingLabel}>TIME</Text>
+                <Text style={styles.meetingText} numberOfLines={2}>
+                  {activity.meetingTime || "Time not specified"}
+                </Text>
+              </View>
             </View>
           </View>
 
@@ -554,6 +564,47 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "500",
     color: "#0F172A",
+  },
+  meetingRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  meetingItem: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#DDE9E0",
+    backgroundColor: "#F5FAF6",
+  },
+  meetingIcon: {
+    width: 34,
+    height: 34,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 10,
+    backgroundColor: "#E1F0E5",
+  },
+  meetingCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  meetingLabel: {
+    color: "#7A8A80",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.7,
+    marginBottom: 3,
+  },
+  meetingText: {
+    color: "#234B33",
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 18,
   },
 
   /* CARDS */

@@ -6,9 +6,10 @@ import {
   getDocs,
   updateDoc,
 } from "firebase/firestore";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
   Image,
   Modal,
   Pressable,
@@ -142,6 +143,7 @@ export default function RankScreen() {
   const [hoveredBadge, setHoveredBadge] = useState("");
   const [selectedBadge, setSelectedBadge] = useState(null);
   const [countdownNow, setCountdownNow] = useState(() => Date.now());
+  const rankingTransition = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     const countdownInterval = setInterval(
@@ -296,6 +298,24 @@ export default function RankScreen() {
       ? "Top Contributor of the Month"
       : "All Time Top Contributor";
 
+  const switchFilter = (nextFilter) => {
+    if (nextFilter === activeFilter) return;
+
+    Animated.timing(rankingTransition, {
+      toValue: 1,
+      duration: 140,
+      useNativeDriver: true,
+    }).start(() => {
+      setActiveFilter(nextFilter);
+      rankingTransition.setValue(-1);
+      Animated.timing(rankingTransition, {
+        toValue: 0,
+        duration: 260,
+        useNativeDriver: true,
+      }).start();
+    });
+  };
+
   const renderContributorBadges = (user) => {
     const badges = Array.isArray(user.contributorBadges)
       ? user.contributorBadges
@@ -353,7 +373,7 @@ export default function RankScreen() {
               styles.filterButton,
               activeFilter === "monthly" && styles.activeFilterButton,
             ]}
-            onPress={() => setActiveFilter("monthly")}
+            onPress={() => switchFilter("monthly")}
           >
             <Ionicons
               name="calendar-outline"
@@ -374,7 +394,7 @@ export default function RankScreen() {
               styles.filterButton,
               activeFilter === "allTime" && styles.activeFilterButton,
             ]}
-            onPress={() => setActiveFilter("allTime")}
+            onPress={() => switchFilter("allTime")}
           >
             <Ionicons
               name="trophy-outline"
@@ -392,6 +412,25 @@ export default function RankScreen() {
           </TouchableOpacity>
         </View>
 
+        <Animated.View
+          style={[
+            styles.rankingTransition,
+            {
+              opacity: rankingTransition.interpolate({
+                inputRange: [-1, 0, 1],
+                outputRange: [0, 1, 0],
+              }),
+              transform: [
+                {
+                  translateX: rankingTransition.interpolate({
+                    inputRange: [-1, 0, 1],
+                    outputRange: [-28, 0, 28],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
         <View style={styles.summaryContainer}>
           <View style={styles.summaryCard}>
             <View style={styles.summaryHeader}>
@@ -437,7 +476,10 @@ export default function RankScreen() {
             </View>
           ) : (
             rankings.map((user, index) => (
-              <View key={user.id} style={styles.rankCard}>
+              <View
+                key={user.id}
+                style={[styles.rankCard, { zIndex: rankings.length - index }]}
+              >
                 <View
                   style={[styles.rankBadge, index < 3 && styles.topRankBadge]}
                 >
@@ -483,6 +525,7 @@ export default function RankScreen() {
             ))
           )}
         </ScrollView>
+        </Animated.View>
 
         <View style={styles.navbarContainer}>
           <Navbar />
@@ -613,6 +656,9 @@ const styles = StyleSheet.create({
     fontVariant: ["tabular-nums"],
   },
   summaryText: { color: "#5F6F65", fontSize: 13, lineHeight: 19 },
+  rankingTransition: {
+    flex: 1,
+  },
   rankCard: {
     flexDirection: "row",
     alignItems: "center",
@@ -649,8 +695,16 @@ const styles = StyleSheet.create({
   },
   userName: { color: "#1F2937", fontSize: 15, fontWeight: "700" },
   reportCount: { color: "#6B7280", fontSize: 12, marginTop: 3 },
-  contributorBadges: { flexDirection: "row", alignItems: "center", gap: 4 },
-  badgeWrapper: { position: "relative" },
+  contributorBadges: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    zIndex: 100,
+  },
+  badgeWrapper: {
+    position: "relative",
+    zIndex: 100,
+  },
   contributorBadge: {
     width: 24,
     height: 24,
@@ -666,14 +720,16 @@ const styles = StyleSheet.create({
     position: "absolute",
     zIndex: 20,
     left: -85,
-    bottom: 30,
+    top: 30,
     width: 200,
     padding: 10,
     borderRadius: 8,
     backgroundColor: "#25372C",
+    elevation: 12,
     shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
-    shadowRadius: 5,
+    shadowRadius: 8,
   },
   badgeTooltipTitle: { color: "#FFFFFF", fontSize: 12, fontWeight: "800" },
   badgeTooltipPeriod: { color: "#BDE3C8", fontSize: 11, marginTop: 2 },

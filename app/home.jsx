@@ -73,6 +73,7 @@ const formatRelativeTime = (timestamp, now) => {
 };
 
 const POSTS_PER_PAGE = 10;
+const HOME_CAROUSEL_INTERVAL = 5000;
 
 export default function Home() {
   const router = useRouter();
@@ -84,6 +85,12 @@ export default function Home() {
   const [animations, setAnimations] = useState({});
   const [currentUserData, setCurrentUserData] = useState(null);
   const [announcement, setAnnouncement] = useState(null);
+  const [announcementSlides, setAnnouncementSlides] = useState([]);
+  const [announcementIndex, setAnnouncementIndex] = useState(0);
+  const [announcementCardWidth, setAnnouncementCardWidth] = useState(0);
+  const [userRankSummary, setUserRankSummary] = useState(null);
+  const [openVolunteerActivity, setOpenVolunteerActivity] = useState(null);
+  const announcementTranslate = useRef(new Animated.Value(0)).current;
 
   // Live lookup for points across feed
   const [authorPoints, setAuthorPoints] = useState({});
@@ -173,6 +180,8 @@ export default function Home() {
     loadUserReactions();
     loadCurrentUser();
     loadAnnouncement();
+    loadUserRankSummary();
+    loadOpenVolunteerActivity();
     loadAuthorBadges();
 
     return () => {
@@ -231,22 +240,146 @@ export default function Home() {
     setUserReactions(reacted);
   };
 
+  const formatDateKey = (date) =>
+    [
+      date.getFullYear(),
+      String(date.getMonth() + 1).padStart(2, "0"),
+      String(date.getDate()).padStart(2, "0"),
+    ].join("-");
+
   const loadAnnouncement = async () => {
     try {
-      const snapshot = await getDocs(
-        query(
-          collection(db, "announcements"),
-          orderBy("createdAt", "desc"),
-          limit(1),
-        ),
+      const snapshot = await getDocs(collection(db, "announcements"));
+      const announcements = snapshot.docs.map((document) => ({
+        id: document.id,
+        ...document.data(),
+      }));
+      const todayKey = formatDateKey(new Date());
+      const todaysAnnouncement = announcements.find((item) =>
+        Array.isArray(item.scheduledDateKeys)
+          ? item.scheduledDateKeys.includes(todayKey)
+          : false,
       );
-      if (!snapshot.empty)
-        setAnnouncement({
-          id: snapshot.docs[0].id,
-          ...snapshot.docs[0].data(),
-        });
+
+      if (todaysAnnouncement) {
+        setAnnouncement(todaysAnnouncement);
+        return;
+      }
+
+      const todayLabel = new Date().toLocaleDateString(undefined, {
+        weekday: "long",
+      });
+
+      setAnnouncement({
+        id: "no_schedule",
+        title: "No schedule for today",
+        schedule: `${todayLabel} — no LGU pickup schedule assigned.`,
+        area: "",
+        message: "Check back tomorrow for the next cleanup schedule.",
+        isFallback: true,
+      });
     } catch (error) {
       console.log("Error loading announcement:", error);
+    }
+  };
+
+  const loadUserRankSummary = async () => {
+    try {
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        setUserRankSummary(null);
+        return;
+      }
+
+      const usersSnapshot = await getDocs(collection(db, "users"));
+      const pointTransactionsSnapshot = await getDocs(
+        collection(db, "point_transactions"),
+      );
+      const currentMonthKey = `${new Date().getFullYear()}-${String(
+        new Date().getMonth() + 1,
+      ).padStart(2, "0")}`;
+      const monthlyPointsByUser = {};
+
+      pointTransactionsSnapshot.forEach((transactionDocument) => {
+        const transaction = transactionDocument.data();
+        const createdAt =
+          typeof transaction.createdAt?.toDate === "function"
+            ? transaction.createdAt.toDate()
+            : new Date(transaction.createdAt);
+        if (Number.isNaN(createdAt.getTime())) return;
+
+        const transactionMonthKey = `${createdAt.getFullYear()}-${String(
+          createdAt.getMonth() + 1,
+        ).padStart(2, "0")}`;
+        if (transactionMonthKey !== currentMonthKey) return;
+
+        monthlyPointsByUser[transaction.userId] =
+          (monthlyPointsByUser[transaction.userId] || 0) +
+          (Number(transaction.amount) || 0);
+      });
+
+      const leaderboard = usersSnapshot.docs
+        .map((userDocument) => ({
+          id: userDocument.id,
+          ...userDocument.data(),
+          monthlyPoints: monthlyPointsByUser[userDocument.id] || 0,
+        }))
+        .filter((user) => Number(user.monthlyPoints) > 0)
+        .sort((first, second) => second.monthlyPoints - first.monthlyPoints);
+
+      const userIndex = leaderboard.findIndex(
+        (user) => user.id === currentUser.uid,
+      );
+      const userEntry = leaderboard[userIndex];
+
+      if (!userEntry) {
+        setUserRankSummary(null);
+        return;
+      }
+
+      setUserRankSummary({
+        rank: userIndex + 1,
+        points: userEntry.monthlyPoints,
+        name:
+          [userEntry.firstName, userEntry.lastName].filter(Boolean).join(" ") ||
+          "You",
+      });
+    } catch (error) {
+      console.log("Error loading monthly leaderboard summary:", error);
+      setUserRankSummary(null);
+    }
+  };
+
+  const loadOpenVolunteerActivity = async () => {
+    try {
+      const snapshot = await getDocs(collection(db, "volunteer_posts"));
+      const openActivities = snapshot.docs
+        .map((activityDocument) => ({
+          id: activityDocument.id,
+          ...activityDocument.data(),
+        }))
+        .filter((activity) => activity.status === "open");
+
+      setOpenVolunteerActivity(openActivities[0] || null);
+    } catch (error) {
+      console.log("Error loading volunteer activity:", error);
+      setOpenVolunteerActivity(null);
+    }
+  };
+
+  const handleAnnouncementPress = (slide) => {
+    if (!slide) return;
+
+    if (slide.type === "rank") {
+      router.push("/rank");
+      return;
+    }
+
+    if (slide.type === "volunteer" && slide.activityId) {
+      router.push({
+        pathname: "/volunteering",
+        params: { volunteerId: slide.activityId },
+      });
     }
   };
 
@@ -407,6 +540,76 @@ export default function Home() {
     setFilteredPosts(filtered);
   }, [search, posts]);
 
+  useEffect(() => {
+    const slides = [];
+
+    if (announcement) {
+      slides.push({
+        type: "schedule",
+        title: announcement.title,
+        details: announcement.isFallback
+          ? announcement.schedule
+          : `${announcement.schedule}${announcement.area ? ` • ${announcement.area}` : ""}`,
+        message: announcement.message,
+      });
+    }
+
+    if (userRankSummary) {
+      slides.push({
+        type: "rank",
+        title: `${userRankSummary.name || "You"} is currently at top`,
+        details: `#${userRankSummary.rank} in the monthly leaderboard`,
+        message: `has contributed ${userRankSummary.points} points this month!`,
+        actionText: "Click here to see more",
+      });
+    }
+
+    if (openVolunteerActivity) {
+      slides.push({
+        type: "volunteer",
+        title: openVolunteerActivity.title || "Volunteer opportunity",
+        details:
+          openVolunteerActivity.locationName || "Open volunteer activity",
+        message: `${openVolunteerActivity.joinedCount || 0}/${openVolunteerActivity.maxVolunteers || 0} volunteers joined`,
+        actionText: "Join now",
+        activityId: openVolunteerActivity.id,
+      });
+    }
+
+    if (slides.length === 0) {
+      setAnnouncementSlides([]);
+      return;
+    }
+
+    setAnnouncementSlides(slides);
+    setAnnouncementIndex((currentIndex) =>
+      Math.min(currentIndex, Math.max(slides.length - 1, 0)),
+    );
+  }, [announcement, userRankSummary, openVolunteerActivity]);
+
+  useEffect(() => {
+    if (announcementSlides.length < 2 || !announcementCardWidth)
+      return undefined;
+
+    const timer = setInterval(() => {
+      setAnnouncementIndex(
+        (currentIndex) => (currentIndex + 1) % announcementSlides.length,
+      );
+    }, HOME_CAROUSEL_INTERVAL);
+
+    return () => clearInterval(timer);
+  }, [announcementCardWidth, announcementSlides.length]);
+
+  useEffect(() => {
+    if (!announcementCardWidth) return;
+
+    Animated.timing(announcementTranslate, {
+      toValue: -announcementIndex * announcementCardWidth,
+      duration: 350,
+      useNativeDriver: true,
+    }).start();
+  }, [announcementCardWidth, announcementIndex, announcementTranslate]);
+
   const loadPosts = async (reset = false) => {
     if (loadingPostsRef.current || (!reset && !hasMorePostsRef.current)) return;
 
@@ -509,20 +712,91 @@ export default function Home() {
               }
             }}
           >
-            {announcement && (
-              <View style={styles.announcementCard}>
-                <Text style={styles.announcementLabel}>SCHEDULED DATE</Text>
-                <Text style={styles.announcementTitle}>
-                  {announcement.title}
-                </Text>
-                <Text style={styles.announcementDetails}>
-                  {announcement.schedule}
-                  {announcement.area ? ` • ${announcement.area}` : ""}
-                </Text>
-                {Boolean(announcement.message) && (
-                  <Text style={styles.announcementMessage}>
-                    {announcement.message}
-                  </Text>
+            {announcementSlides.length > 0 && (
+              <View
+                style={styles.announcementCard}
+                onLayout={(event) =>
+                  setAnnouncementCardWidth(event.nativeEvent.layout.width)
+                }
+              >
+                <View style={styles.announcementCarousel}>
+                  <Animated.View
+                    style={[
+                      styles.announcementTrack,
+                      {
+                        transform: [{ translateX: announcementTranslate }],
+                      },
+                    ]}
+                  >
+                    {announcementSlides.map((slide, index) => {
+                      const label =
+                        slide.type === "rank"
+                          ? "TOP CONTRIBUTER"
+                          : slide.type === "volunteer"
+                            ? "VOLUNTEER"
+                            : "SCHEDULED DATE";
+
+                      return (
+                        <View
+                          key={`${slide.type}-${index}`}
+                          style={[
+                            styles.announcementSlide,
+                            { width: announcementCardWidth || "100%" },
+                          ]}
+                        >
+                          <View style={styles.announcementHeader}>
+                            <Text style={styles.announcementLabel}>
+                              {label}
+                            </Text>
+                            <TouchableOpacity
+                              activeOpacity={0.8}
+                              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                              onPress={() => handleAnnouncementPress(slide)}
+                              style={styles.announcementActionButton}
+                            ></TouchableOpacity>
+                          </View>
+
+                          <Text style={styles.announcementTitle}>
+                            {slide.title}
+                          </Text>
+                          <Text style={styles.announcementDetails}>
+                            {slide.details}
+                          </Text>
+                          {Boolean(slide.message) && (
+                            <Text style={styles.announcementMessage}>
+                              {slide.message}
+                            </Text>
+                          )}
+                          {Boolean(slide.actionText) && (
+                            <TouchableOpacity
+                              activeOpacity={0.7}
+                              onPress={() => handleAnnouncementPress(slide)}
+                            >
+                              <Text style={styles.announcementActionText}>
+                                {slide.actionText}
+                              </Text>
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                      );
+                    })}
+                  </Animated.View>
+                </View>
+
+                {announcementSlides.length > 1 && (
+                  <View style={styles.dotRow}>
+                    {announcementSlides.map((slide, index) => (
+                      <TouchableOpacity
+                        key={`dot-${slide.type}-${index}`}
+                        activeOpacity={0.8}
+                        onPress={() => setAnnouncementIndex(index)}
+                        style={[
+                          styles.dot,
+                          announcementIndex === index && styles.dotActive,
+                        ]}
+                      />
+                    ))}
+                  </View>
                 )}
               </View>
             )}
@@ -590,11 +864,11 @@ export default function Home() {
                             post.status === "critical"
                               ? "#FF5B5B"
                               : post.status === "moderate"
-                                ? "#FFC940"
+                                ? "#ff8c40"
                                 : post.status === "cleaned"
                                   ? "#34C759"
                                   : post.status === "ongoing"
-                                    ? "#7DD3FC"
+                                    ? "#FFC940"
                                     : "#A5A5A5",
                         },
                       ]}
@@ -850,12 +1124,38 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 14,
     marginBottom: 16,
+    overflow: "hidden",
+  },
+  announcementCarousel: {
+    overflow: "hidden",
+    borderRadius: 8,
+  },
+  announcementTrack: {
+    flexDirection: "row",
+    width: "100%",
+  },
+  announcementSlide: {
+    paddingRight: 8,
+  },
+  announcementHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
   },
   announcementLabel: {
     color: "#397A51",
     fontSize: 11,
     fontWeight: "800",
     letterSpacing: 0.6,
+    flexShrink: 1,
+  },
+
+  announcementActionButtonText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "700",
+    lineHeight: 16,
   },
   announcementTitle: {
     color: "#234B33",
@@ -874,6 +1174,30 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     marginTop: 6,
+  },
+  announcementActionText: {
+    color: "#1F6B46",
+    fontSize: 12,
+    fontWeight: "800",
+    marginTop: 8,
+    textDecorationLine: "underline",
+  },
+  dotRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 12,
+    gap: 8,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: "#B9D3C5",
+  },
+  dotActive: {
+    width: 20,
+    backgroundColor: "#397A51",
   },
   reportTitle: {
     fontSize: 16,

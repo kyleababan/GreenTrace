@@ -89,6 +89,16 @@ export default function VolunteerPostCreate({
   );
   const [loading, setLoading] = useState(isEditing);
   const [saving, setSaving] = useState(false);
+  const [errors, setErrors] = useState({});
+
+  const clearError = (field) => {
+    setErrors((current) => {
+      if (!current[field]) return current;
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (!isEditing) return;
@@ -142,17 +152,24 @@ export default function VolunteerPostCreate({
       .map((item) => item.trim())
       .filter(Boolean);
 
-    if (!title.trim()) return Alert.alert("Please enter a title.");
-    if (!desc.trim()) return Alert.alert("Please enter a description.");
-    if (!cleanedRequirements.length)
-      return Alert.alert("Please add at least one requirement.");
-    if (!meetingLocation.trim())
-      return Alert.alert("Please enter the meeting location.");
-    if (!meetingDate) return Alert.alert("Please select the meeting date.");
-    if (!meetingTime.trim())
-      return Alert.alert("Please enter the meeting time.");
-    if (!maxVolunteers || Number(maxVolunteers) < 1)
-      return Alert.alert("Please enter the maximum volunteers.");
+    const nextErrors = {
+      ...(!title.trim() ? { title: "Title is required." } : {}),
+      ...(!desc.trim() ? { desc: "Description is required." } : {}),
+      ...(!cleanedRequirements.length
+        ? { requirements: "Add at least one requirement." }
+        : {}),
+      ...(!meetingLocation.trim()
+        ? { meetingLocation: "Meeting location is required." }
+        : {}),
+      ...(!meetingDate ? { meetingDate: "Select a meeting date." } : {}),
+      ...(!meetingTime.trim() ? { meetingTime: "Meeting time is required." } : {}),
+      ...(!maxVolunteers || Number(maxVolunteers) < 1
+        ? { maxVolunteers: "Enter at least 1 volunteer." }
+        : {}),
+    };
+
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length) return;
 
     setSaving(true);
 
@@ -286,8 +303,11 @@ export default function VolunteerPostCreate({
               <Text style={styles.fieldLabel}>Meeting date and time</Text>
               <View style={styles.meetingDateRow}>
                 <TouchableOpacity
-                  style={[styles.inputBox, { flex: 1 }]}
-                  onPress={() => setShowCalendar(true)}
+                  style={[styles.inputBox, { flex: 1 }, errors.meetingDate && styles.inputError]}
+                  onPress={() => {
+                    clearError("meetingDate");
+                    setShowCalendar(true);
+                  }}
                 >
                   <Ionicons name="calendar-outline" size={20} color="#276344" />
                   <Text
@@ -311,11 +331,20 @@ export default function VolunteerPostCreate({
                   <TextInput
                     placeholder="Time (e.g. 8:00 AM)"
                     value={meetingTime}
-                    onChangeText={setMeetingTime}
-                    style={[styles.input, { marginLeft: 8 }]}
+                    onChangeText={(value) => {
+                      setMeetingTime(value);
+                      clearError("meetingTime");
+                    }}
+                    style={[styles.input, { marginLeft: 8 }, errors.meetingTime && styles.inputError]}
                   />
                 </View>
               </View>
+              {errors.meetingDate && (
+                <Text style={styles.fieldError}>{errors.meetingDate}</Text>
+              )}
+              {errors.meetingTime && (
+                <Text style={styles.fieldError}>{errors.meetingTime}</Text>
+              )}
             </View>
           </View>
 
@@ -329,20 +358,28 @@ export default function VolunteerPostCreate({
               <TextInput
                 placeholder="Title"
                 value={title}
-                onChangeText={setTitle}
-                style={styles.input}
+                style={[styles.input, errors.title && styles.inputError]}
+                onChangeText={(value) => {
+                  setTitle(value);
+                  clearError("title");
+                }}
               />
             </View>
+            {errors.title && <Text style={styles.fieldError}>{errors.title}</Text>}
             <View style={[styles.inputBox, { minHeight: 100 }]}>
               <TextInput
                 placeholder="Write something"
                 value={desc}
-                onChangeText={setDesc}
+                onChangeText={(value) => {
+                  setDesc(value);
+                  clearError("desc");
+                }}
                 multiline
-                style={[styles.input, { minHeight: 100 }]}
+                style={[styles.input, { minHeight: 100 }, errors.desc && styles.inputError]}
                 textAlignVertical="top"
               />
             </View>
+            {errors.desc && <Text style={styles.fieldError}>{errors.desc}</Text>}
 
             <View style={styles.requirementBox}>
               <Text style={styles.fieldLabel}>Requirements</Text>
@@ -354,8 +391,11 @@ export default function VolunteerPostCreate({
                   <TextInput
                     placeholder="Requirement"
                     value={item}
-                    onChangeText={(text) => updateRequirement(text, index)}
-                    style={styles.requirementInput}
+                    onChangeText={(text) => {
+                      updateRequirement(text, index);
+                      clearError("requirements");
+                    }}
+                    style={[styles.requirementInput, errors.requirements && styles.inputError]}
                   />
                   {requirements.length > 1 && (
                     <TouchableOpacity
@@ -369,11 +409,17 @@ export default function VolunteerPostCreate({
               ))}
               <TouchableOpacity
                 style={styles.addButton}
-                onPress={addRequirement}
+                onPress={() => {
+                  clearError("requirements");
+                  addRequirement();
+                }}
               >
                 <Ionicons name="add-circle-outline" size={22} color="#276344" />
                 <Text style={styles.addButtonText}>Add requirement</Text>
               </TouchableOpacity>
+              {errors.requirements && (
+                <Text style={styles.fieldError}>{errors.requirements}</Text>
+              )}
             </View>
 
             <View style={styles.meetingBox}>
@@ -383,11 +429,17 @@ export default function VolunteerPostCreate({
                 <TextInput
                   placeholder="Meeting location"
                   value={meetingLocation}
-                  onChangeText={setMeetingLocation}
-                  style={[styles.input, { marginLeft: 8 }]}
+                  onChangeText={(value) => {
+                    setMeetingLocation(value);
+                    clearError("meetingLocation");
+                  }}
+                  style={[styles.input, { marginLeft: 8 }, errors.meetingLocation && styles.inputError]}
                 />
               </View>
             </View>
+            {errors.meetingLocation && (
+              <Text style={styles.fieldError}>{errors.meetingLocation}</Text>
+            )}
 
             <View style={styles.bottomRow}>
               <View style={[styles.inputBox, { flex: 1 }]}>
@@ -396,14 +448,18 @@ export default function VolunteerPostCreate({
                   placeholder="Max"
                   keyboardType="numeric"
                   value={maxVolunteers}
-                  onChangeText={(text) =>
-                    setMaxVolunteers(text.replace(/[^0-9]/g, ""))
-                  }
+                  onChangeText={(text) => {
+                    setMaxVolunteers(text.replace(/[^0-9]/g, ""));
+                    clearError("maxVolunteers");
+                  }}
                   maxLength={3}
-                  style={styles.maxVolunteerInput}
+                  style={[styles.maxVolunteerInput, errors.maxVolunteers && styles.inputError]}
                 />
               </View>
             </View>
+            {errors.maxVolunteers && (
+              <Text style={styles.fieldError}>{errors.maxVolunteers}</Text>
+            )}
           </View>
         </View>
 
@@ -569,6 +625,17 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   fieldLabel: { fontWeight: "700", color: "#1d2b21" },
+  inputError: {
+    borderWidth: 1.5,
+    borderColor: "#D93025",
+  },
+  fieldError: {
+    color: "#B42318",
+    fontSize: 12,
+    fontWeight: "600",
+    marginTop: -7,
+    marginBottom: 2,
+  },
   requirementRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   requirementInput: {
     flex: 1,

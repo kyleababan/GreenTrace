@@ -11,7 +11,14 @@ import {
 } from "react-native";
 import { db } from "../../firebaseConfig";
 
-function AnalyticsBar({ label, value, color, highestValue, chartHeight, index }) {
+function AnalyticsBar({
+  label,
+  value,
+  color,
+  highestValue,
+  chartHeight,
+  index,
+}) {
   const progress = useRef(new Animated.Value(0)).current;
   const [displayValue, setDisplayValue] = useState(0);
   const barHeight =
@@ -37,7 +44,10 @@ function AnalyticsBar({ label, value, color, highestValue, chartHeight, index })
 
     const countUp = () => {
       const elapsed = Date.now() - startTime;
-      const nextValue = Math.min(value, Math.round((Math.max(0, elapsed) / 700) * value));
+      const nextValue = Math.min(
+        value,
+        Math.round((Math.max(0, elapsed) / 700) * value),
+      );
       setDisplayValue(nextValue);
 
       if (nextValue < value) frameId = requestAnimationFrame(countUp);
@@ -79,97 +89,78 @@ export default function Dashboard() {
 
   const [stats, setStats] = useState(null);
 
-const loadDashboard = async () => {
-
+  const loadDashboard = async () => {
     try {
+      const snapshot = await getDocs(collection(db, "posts"));
 
-        const snapshot = await getDocs(
-            collection(db, "posts")
-        );
+      let critical = 0;
+      let pending = 0;
+      let moderate = 0;
+      let cleaned = 0;
+      let ongoing = 0;
 
-        let critical = 0;
-        let pending = 0;
-        let moderate = 0;
-        let cleaned = 0;
-        let ongoing = 0;
+      snapshot.forEach((doc) => {
+        const post = doc.data();
 
-        snapshot.forEach((doc) => {
+        switch (post.status) {
+          case "pending":
+            pending++;
+            break;
 
-            const post = doc.data();
+          case "critical":
+            critical++;
+            break;
 
-            switch (post.status) {
+          case "moderate":
+            moderate++;
+            break;
 
-                case "pending":
-                    pending++;
-                    break;
+          case "cleaned":
+            cleaned++;
+            break;
 
-                case "critical":
-                    critical++;
-                    break;
+          case "ongoing":
+            ongoing++;
+            break;
+        }
+      });
 
-                case "moderate":
-                    moderate++;
-                    break;
+      setStats({
+        critical,
 
-                case "cleaned":
-                    cleaned++;
-                    break;
+        pending,
 
-                case "ongoing":
-                    ongoing++;
-                    break;
+        moderate,
 
-            }
+        cleaned,
 
-        });
-
-        setStats({
-
-            critical,
-
-            pending,
-
-            moderate,
-
-            cleaned,
-
-            ongoing,
-
-        });
-
+        ongoing,
+      });
     } catch (error) {
-
-        console.log(error);
-        setStats({
-            critical: 0,
-            pending: 0,
-            moderate: 0,
-            cleaned: 0,
-            ongoing: 0,
-        });
-
+      console.log(error);
+      setStats({
+        critical: 0,
+        pending: 0,
+        moderate: 0,
+        cleaned: 0,
+        ongoing: 0,
+      });
     }
+  };
 
-};
-
-useEffect(() => {
-
+  useEffect(() => {
     loadDashboard();
-
-}, []);
+  }, []);
 
   const isDesktop = width >= 1024;
 
   const chartHeight = isDesktop ? 360 : 250;
-  const highestValue = stats
-    ? Math.max(...Object.values(stats), 1)
-    : 1;
+  const highestValue = stats ? Math.max(...Object.values(stats), 1) : 1;
   const chartStats = [
-    { key: "pending", label: "Not Yet Assessed", color: "#A5A5A5" },
-    { key: "critical", label: "Critical Situation", color: "#FF6666" },
-    { key: "moderate", label: "Moderate Situation", color: "#FFCF30" },
-    { key: "cleaned", label: "Cleaned", color: "#2DCC6F" },
-    { key: "ongoing", label: "On-going", color: "#7DD3FC" },
+    { key: "critical", label: "Critical Situation", color: "#FF5B5B" },
+    { key: "moderate", label: "Moderate Situation", color: "#ff8c40" },
+    { key: "ongoing", label: "On-going", color: "#FFC940" },
+    { key: "cleaned", label: "Cleaned", color: "#34C759" },
   ];
 
   return (
@@ -208,9 +199,9 @@ const styles = StyleSheet.create({
 
   title: {
     fontSize: 32,
-    fontWeight: 'bold',
+    fontWeight: "bold",
     marginBottom: 50,
-    color: '#599A74',
+    color: "#599A74",
   },
 
   loadingContainer: {
@@ -220,51 +211,50 @@ const styles = StyleSheet.create({
   },
 
   cards: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: 12,
-    alignItems: 'flex-start',
+    alignItems: "flex-start",
   },
 
   cardContainer: {
     flexGrow: 1,
     flexBasis: 140,
-    alignItems: 'center',
+    alignItems: "center",
   },
 
   statColumn: {
-    width: '100%',
-    alignItems: 'center',
+    width: "100%",
+    alignItems: "center",
   },
 
   barTrack: {
-    width: '100%',
-    justifyContent: 'flex-end',
-    overflow: 'hidden',
+    width: "100%",
+    justifyContent: "flex-end",
+    overflow: "hidden",
     borderRadius: 14,
-    backgroundColor: '#E7ECE9',
+    backgroundColor: "#E7ECE9",
   },
 
   bar: {
-    width: '100%',
+    width: "100%",
     minHeight: 1,
     borderRadius: 14,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
 
   barValue: {
     fontSize: 32,
-    fontWeight: 'bold',
-    color: '#fff',
+    fontWeight: "bold",
+    color: "#fff",
   },
 
   cardLabel: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: "bold",
     marginTop: 12,
-    color: '#599A74',
-    textAlign: 'center',
+    color: "#599A74",
+    textAlign: "center",
   },
-
 });

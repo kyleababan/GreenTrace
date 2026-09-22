@@ -29,6 +29,33 @@ import { db } from "../../firebaseConfig";
 const WEEK_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const EVENT_COLORS = ["#599A74", "#E69B45", "#5B8DEF", "#C76DBA", "#D85B5B"];
 const SCHEDULES_PER_PAGE = 10;
+const BARANGAYS = [
+  "Anislag",
+  "Anopog",
+  "Binabag",
+  "Buhingtubig",
+  "Busay",
+  "Butong",
+  "Cabiangon",
+  "Camugao",
+  "Duangan",
+  "Guimbawian",
+  "Lamac",
+  "Lut-od",
+  "Mangoto",
+  "Opao",
+  "Poblacion",
+  "Punod",
+  "Rizal",
+  "Sacsac",
+  "Sambagon",
+  "Sibago",
+  "Tajao",
+  "Tangub",
+  "Tanibag",
+  "Tupas",
+  "Tutay",
+].sort((first, second) => first.localeCompare(second));
 
 const startOfMonth = (date) => new Date(date.getFullYear(), date.getMonth(), 1);
 
@@ -115,6 +142,7 @@ export default function PickupSchedule() {
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [operationName, setOperationName] = useState("Waste Collection");
   const [barangay, setBarangay] = useState("");
+  const [barangayDropdownOpen, setBarangayDropdownOpen] = useState(false);
   const [purok, setPurok] = useState("");
   const [pickupTime, setPickupTime] = useState("");
   const [instructions, setInstructions] = useState("");
@@ -132,10 +160,14 @@ export default function PickupSchedule() {
         ),
       )
     : [];
+  const matchingBarangays = BARANGAYS.filter((name) =>
+    name.toLowerCase().includes(barangay.trim().toLowerCase()),
+  );
 
   const resetForm = () => {
     setOperationName("Waste Collection");
     setBarangay("");
+    setBarangayDropdownOpen(false);
     setPurok("");
     setPickupTime("");
     setInstructions("");
@@ -152,6 +184,7 @@ export default function PickupSchedule() {
   const openEditModal = (operation) => {
     setOperationName(operation.title || "Waste Collection");
     setBarangay(operation.barangay || "");
+    setBarangayDropdownOpen(false);
     setPurok(operation.purok || "");
     setPickupTime(operation.time || "");
     setInstructions(operation.message || "");
@@ -642,16 +675,47 @@ export default function PickupSchedule() {
               />
 
               <View style={styles.locationFields}>
-                <View style={styles.halfField}>
+                <View style={[styles.halfField, styles.barangayHalfField]}>
                   <Text style={styles.fieldLabel}>Barangay</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={barangay}
-                    onChangeText={setBarangay}
-                    placeholder="Example: Tajao"
-                  />
+                  <View style={styles.barangayField}>
+                    <TextInput
+                      style={styles.input}
+                      value={barangay}
+                      onFocus={() => setBarangayDropdownOpen(true)}
+                      onChangeText={(value) => {
+                        setBarangay(value);
+                        setBarangayDropdownOpen(true);
+                      }}
+                      placeholder="Example: Tajao"
+                    />
+                    {barangayDropdownOpen && (
+                      <ScrollView
+                        style={styles.barangayDropdown}
+                        nestedScrollEnabled
+                        keyboardShouldPersistTaps="handled"
+                      >
+                        {matchingBarangays.map((name) => (
+                          <TouchableOpacity
+                            key={name}
+                            style={styles.barangayOption}
+                            onPress={() => {
+                              setBarangay(name);
+                              setBarangayDropdownOpen(false);
+                            }}
+                          >
+                            <Text style={styles.barangayOptionText}>{name}</Text>
+                          </TouchableOpacity>
+                        ))}
+                        {matchingBarangays.length === 0 && (
+                          <Text style={styles.noBarangayMatch}>
+                            No matching barangay. You can keep typing.
+                          </Text>
+                        )}
+                      </ScrollView>
+                    )}
+                  </View>
                 </View>
-                <View style={styles.halfField}>
+                <View style={[styles.halfField, styles.purokHalfField]}>
                   <Text style={styles.fieldLabel}>Purok</Text>
                   <View style={styles.purokInputRow}>
                     <Text style={styles.purokPrefix}>Pk.</Text>
@@ -1214,9 +1278,53 @@ const styles = StyleSheet.create({
   locationFields: {
     flexDirection: "row",
     gap: 12,
+    position: "relative",
+    zIndex: 4,
   },
   halfField: {
     flex: 1,
+  },
+  barangayField: {
+    position: "relative",
+    zIndex: 2,
+  },
+  barangayHalfField: {
+    zIndex: 5,
+  },
+  purokHalfField: {
+    zIndex: 1,
+  },
+  barangayDropdown: {
+    position: "absolute",
+    top: 48,
+    left: 0,
+    right: 0,
+    maxHeight: 170,
+    borderWidth: 1,
+    borderColor: "#D8E2DC",
+    borderRadius: 8,
+    backgroundColor: "#FFFFFF",
+    elevation: 6,
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.16,
+    shadowRadius: 6,
+    zIndex: 3,
+  },
+  barangayOption: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF2F0",
+  },
+  barangayOptionText: {
+    color: "#1F2937",
+    fontSize: 14,
+  },
+  noBarangayMatch: {
+    color: "#7A8A80",
+    fontSize: 12,
+    padding: 12,
   },
   purokInputRow: {
     flexDirection: "row",

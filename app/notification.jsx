@@ -100,8 +100,13 @@ export default function Notification() {
 
             if (postSnap.exists()) {
               item.postImage = postSnap.data().imageUrl;
+              item.postAvailable = true;
+            } else {
+              item.postAvailable = false;
             }
-          } catch (_error) {}
+          } catch (_error) {
+            item.postAvailable = false;
+          }
 
           return item;
         }),
@@ -182,12 +187,12 @@ export default function Notification() {
                   style={styles.notificationCard}
                   activeOpacity={0.8}
                   onPress={() =>
-                    router.push({
-                      pathname: "/post",
-                      params: {
-                        id: item.postId,
-                      },
-                    })
+                    item.postAvailable
+                      ? router.push({
+                          pathname: "/post",
+                          params: { id: item.postId },
+                        })
+                      : router.push("/post-unavailable")
                   }
                 >
                   <View style={styles.iconWrapper}>

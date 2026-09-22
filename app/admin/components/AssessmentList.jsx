@@ -19,9 +19,9 @@ import { hideBadWords } from "../../../utils/hideBadWords";
 const STATUS_DETAILS = {
   pending: { label: "Not Assessed", color: "#A5A5A5" },
   critical: { label: "Critical", color: "#FF5B5B" },
-  moderate: { label: "Moderate", color: "#FFC940" },
+  moderate: { label: "Moderate", color: "#ff8c40" },
   cleaned: { label: "Cleaned", color: "#34C759" },
-  ongoing: { label: "On-going", color: "#7DD3FC" },
+  ongoing: { label: "On-going", color: "#FFC940" },
 };
 
 const getLocationParts = (locationName = "") =>

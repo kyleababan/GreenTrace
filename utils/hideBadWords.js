@@ -2,6 +2,8 @@ import BadWordsNext from "bad-words-next";
 import englishDictionary from "bad-words-next/lib/en";
 
 const tagalogWords = [
+  "ampota",
+  "amputa",
   "anak_ng_puta",
   "anak_ng_tupa",
   "bobo",

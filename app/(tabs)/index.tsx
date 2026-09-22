@@ -80,7 +80,7 @@ export default function HomeScreen() {
           to get a fresh <ThemedText type="defaultSemiBold">app</ThemedText>{" "}
           directory. This will move the current{" "}
           <ThemedText type="defaultSemiBold">app</ThemedText> to{" "}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
+          <ThemedText type="defaultSemiBold">app-example</ThemedText>
         </ThemedText>
       </ThemedView>
     </ParallaxScrollView>

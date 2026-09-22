@@ -65,7 +65,7 @@ export default function SituationAssessment() {
             <Text
               style={[
                 {
-                  backgroundColor: "#FF6666",
+                  backgroundColor: "#FF5B5B",
                   color: "#fff",
                   borderRadius: 5,
                   width: "24%",
@@ -85,7 +85,7 @@ export default function SituationAssessment() {
             <Text
               style={[
                 {
-                  backgroundColor: "#FFCF30",
+                  backgroundColor: "#ff8c40",
                   color: "#fff",
                   borderRadius: 5,
                   width: "24%",
@@ -105,27 +105,7 @@ export default function SituationAssessment() {
             <Text
               style={[
                 {
-                  backgroundColor: "#2DCC6F",
-                  color: "#fff",
-                  borderRadius: 5,
-                  width: "24%",
-                  height: "100%",
-                  textAlign: "center",
-                  paddingVertical: 10,
-                },
-                activeTab === "cleaned" && styles.activeTab,
-              ]}
-              onPress={() => {
-                setActiveTab("cleaned");
-                setSelectedPost(null);
-              }}
-            >
-              Cleaned
-            </Text>
-            <Text
-              style={[
-                {
-                  backgroundColor: "#7DD3FC",
+                  backgroundColor: "#FFC940",
                   color: "#0F172A",
                   borderRadius: 5,
                   width: "24%",
@@ -141,6 +121,26 @@ export default function SituationAssessment() {
               }}
             >
               On-going
+            </Text>
+            <Text
+              style={[
+                {
+                  backgroundColor: "#34C759",
+                  color: "#fff",
+                  borderRadius: 5,
+                  width: "24%",
+                  height: "100%",
+                  textAlign: "center",
+                  paddingVertical: 10,
+                },
+                activeTab === "cleaned" && styles.activeTab,
+              ]}
+              onPress={() => {
+                setActiveTab("cleaned");
+                setSelectedPost(null);
+              }}
+            >
+              Cleaned
             </Text>
           </View>
 
