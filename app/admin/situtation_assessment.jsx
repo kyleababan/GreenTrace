@@ -12,7 +12,7 @@ import VolunteerPostCreate from "./assessments/post_view/VolunteerPostCreate";
 import AssessmentList from "./components/AssessmentList";
 
 export default function SituationAssessment() {
-  const [activeTab, setActiveTab] = useState("pending");
+  const [activeTab, setActiveTab] = useState("critical");
   const [selectedPost, setSelectedPost] = useState(null);
   const [search, setSearch] = useState("");
   const [showFilters, setShowFilters] = useState(false);
@@ -65,30 +65,10 @@ export default function SituationAssessment() {
             <Text
               style={[
                 {
-                  backgroundColor: "#A5A5A5",
-                  color: "#fff",
-                  borderRadius: 5,
-                  width: "19%",
-                  height: "100%",
-                  textAlign: "center",
-                  paddingVertical: 10,
-                },
-                activeTab === "pending" && styles.activeTab,
-              ]}
-              onPress={() => {
-                setActiveTab("pending");
-                setSelectedPost(null);
-              }}
-            >
-              Not Assessed
-            </Text>
-            <Text
-              style={[
-                {
                   backgroundColor: "#FF6666",
                   color: "#fff",
                   borderRadius: 5,
-                  width: "19%",
+                  width: "24%",
                   height: "100%",
                   textAlign: "center",
                   paddingVertical: 10,
@@ -108,7 +88,7 @@ export default function SituationAssessment() {
                   backgroundColor: "#FFCF30",
                   color: "#fff",
                   borderRadius: 5,
-                  width: "19%",
+                  width: "24%",
                   height: "100%",
                   textAlign: "center",
                   paddingVertical: 10,
@@ -128,7 +108,7 @@ export default function SituationAssessment() {
                   backgroundColor: "#2DCC6F",
                   color: "#fff",
                   borderRadius: 5,
-                  width: "19%",
+                  width: "24%",
                   height: "100%",
                   textAlign: "center",
                   paddingVertical: 10,
@@ -148,7 +128,7 @@ export default function SituationAssessment() {
                   backgroundColor: "#7DD3FC",
                   color: "#0F172A",
                   borderRadius: 5,
-                  width: "19%",
+                  width: "24%",
                   height: "100%",
                   textAlign: "center",
                   paddingVertical: 10,
