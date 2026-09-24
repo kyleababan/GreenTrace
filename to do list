@@ -1,0 +1,37 @@
+- fix delete image from cloudinary
+- User selects photo → GreenTrace checks/moderates it → if acceptable → upload to Cloudinary
+
+- Photos must only show the reported waste/location. Nudity, sexual content, violence, or unrelated images are not allowed.
+
+- fix the top card not showing in different browser
+
+Resident selects photo
+│
+▼
+Cloudinary Moderation
+│
+┌────┴────┐
+▼ ▼
+Safe NSFW
+│ │
+▼ ▼
+YOLOv8 Reject
+│
+▼
+Classify waste
+│
+▼
+Save classification
+│
+▼
+Upload/store image
+
+- Fix GPS
+
+- Fix Delete button not doing a loading (in home)
+
+- Fix mark as clean button not doing a loading in admin, almost all button dont do loading
+
+- sharing feature (share will be directed in facebook)
+
+- fix volunteer create

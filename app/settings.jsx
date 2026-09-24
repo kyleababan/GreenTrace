@@ -126,7 +126,7 @@ export default function ProfileScreen() {
                 </TouchableOpacity>
               </View>
 
-              {userData.cellNumber && (
+              {Boolean(userData.cellNumber) && (
                 <Text style={styles.phoneText}>#{userData.cellNumber}</Text>
               )}
             </View>

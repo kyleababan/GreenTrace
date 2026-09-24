@@ -1,44 +1,48 @@
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Animated,
-  Image,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Animated,
+    Image,
+    SafeAreaView,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import BadgeWithDetails from "../components/BadgeWithDetails";
 import Navbar from "../components/navbar";
 import {
-  BADGES,
-  getUserContributionStats,
-  getVolunteerId,
-  isBadgeEarned,
+    BADGES,
+    getUserContributionStats,
+    getVolunteerId,
+    isBadgeEarned,
 } from "../constants/badges";
 import { formatLocationWithPurok } from "../constants/locationFormat";
+import {
+    formatWasteLabel,
+    getWasteCategoryColor,
+} from "../constants/wasteCategories";
 import { hideBadWords } from "../utils/hideBadWords";
 
 import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  getDoc,
-  getDocs,
-  increment,
-  limit,
-  onSnapshot,
-  orderBy,
-  query,
-  serverTimestamp,
-  startAfter,
-  updateDoc,
-  where,
+    addDoc,
+    collection,
+    deleteDoc,
+    doc,
+    getDoc,
+    getDocs,
+    increment,
+    limit,
+    onSnapshot,
+    orderBy,
+    query,
+    serverTimestamp,
+    startAfter,
+    updateDoc,
+    where,
 } from "firebase/firestore";
 
 import { auth, db } from "../firebaseConfig";
@@ -855,35 +859,54 @@ export default function Home() {
                       </Text>
                     </View>
 
-                    {/* Report Status Tag */}
-                    <View
-                      style={[
-                        styles.statusTag,
-                        {
-                          backgroundColor:
-                            post.status === "critical"
-                              ? "#FF5B5B"
-                              : post.status === "moderate"
-                                ? "#ff8c40"
+                    {/* Report Status & Waste Category Tags */}
+                    <View style={styles.tagsRow}>
+                      <View
+                        style={[
+                          styles.statusTag,
+                          {
+                            backgroundColor:
+                              post.status === "critical"
+                                ? "#FF5B5B"
+                                : post.status === "moderate"
+                                  ? "#ff8c40"
+                                  : post.status === "cleaned"
+                                    ? "#34C759"
+                                    : post.status === "ongoing"
+                                      ? "#FFC940"
+                                      : "#A5A5A5",
+                          },
+                        ]}
+                      >
+                        <Text style={styles.statusText}>
+                          {post.status === "critical"
+                            ? "Critical"
+                            : post.status === "moderate"
+                              ? "Moderate"
+                              : post.status === "ongoing"
+                                ? "On-going"
                                 : post.status === "cleaned"
-                                  ? "#34C759"
-                                  : post.status === "ongoing"
-                                    ? "#FFC940"
-                                    : "#A5A5A5",
-                        },
-                      ]}
-                    >
-                      <Text style={styles.statusText}>
-                        {post.status === "critical"
-                          ? "Critical"
-                          : post.status === "moderate"
-                            ? "Moderate"
-                            : post.status === "ongoing"
-                              ? "On-going"
-                              : post.status === "cleaned"
-                                ? "Cleaned"
-                                : "Pending"}
-                      </Text>
+                                  ? "Cleaned"
+                                  : "Pending"}
+                        </Text>
+                      </View>
+
+                      {Boolean(formatWasteLabel(post.wasteClassification)) && (
+                        <View
+                          style={[
+                            styles.wasteTag,
+                            {
+                              backgroundColor: getWasteCategoryColor(
+                                post.wasteClassification?.category,
+                              ),
+                            },
+                          ]}
+                        >
+                          <Text style={styles.wasteTagText}>
+                            {formatWasteLabel(post.wasteClassification)}
+                          </Text>
+                        </View>
+                      )}
                     </View>
                   </View>
                 </View>
@@ -1375,14 +1398,29 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "100%",
   },
-  statusTag: {
-    alignSelf: "flex-start",
+  tagsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 6,
     marginTop: 6,
+  },
+  statusTag: {
     paddingHorizontal: 9,
     paddingVertical: 4,
     borderRadius: 6,
   },
   statusText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  wasteTag: {
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  wasteTagText: {
     color: "#FFFFFF",
     fontSize: 10,
     fontWeight: "700",

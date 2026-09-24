@@ -13,6 +13,10 @@ import {
   formatLocationWithPurok,
   normalizePurok,
 } from "../../../constants/locationFormat";
+import {
+  formatWasteLabel,
+  getWasteCategoryColor,
+} from "../../../constants/wasteCategories";
 import { db } from "../../../firebaseConfig";
 import { hideBadWords } from "../../../utils/hideBadWords";
 
@@ -235,20 +239,42 @@ export default function AssessmentList({
                         </Text>
                       </View>
 
-                      <View
-                        style={[
-                          styles.statusTag,
-                          { backgroundColor: postStatus.color },
-                        ]}
-                      >
-                        <Text
+                      {/* Report Status & Waste Category Tags */}
+                      <View style={styles.tagsRow}>
+                        <View
                           style={[
-                            styles.statusText,
-                            { color: postStatus.textColor },
+                            styles.statusTag,
+                            { backgroundColor: postStatus.color },
                           ]}
                         >
-                          {postStatus.label}
-                        </Text>
+                          <Text
+                            style={[
+                              styles.statusText,
+                              { color: postStatus.textColor },
+                            ]}
+                          >
+                            {postStatus.label}
+                          </Text>
+                        </View>
+
+                        {Boolean(
+                          formatWasteLabel(post.wasteClassification),
+                        ) && (
+                          <View
+                            style={[
+                              styles.wasteTag,
+                              {
+                                backgroundColor: getWasteCategoryColor(
+                                  post.wasteClassification?.category,
+                                ),
+                              },
+                            ]}
+                          >
+                            <Text style={styles.wasteTagText}>
+                              {formatWasteLabel(post.wasteClassification)}
+                            </Text>
+                          </View>
+                        )}
                       </View>
                     </View>
                   </View>
@@ -372,14 +398,29 @@ const styles = StyleSheet.create({
     marginRight: 4,
   },
   locationText: { flex: 1, color: "#666666", fontSize: 12 },
-  statusTag: {
-    alignSelf: "flex-start",
+  tagsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 6,
     marginTop: 6,
+  },
+  statusTag: {
     paddingHorizontal: 9,
     paddingVertical: 4,
     borderRadius: 6,
   },
   statusText: { color: "#FFFFFF", fontSize: 10, fontWeight: "700" },
+  wasteTag: {
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  wasteTagText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "700",
+  },
   postTitle: {
     color: "#234B33",
     fontSize: 15,

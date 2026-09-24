@@ -4,16 +4,16 @@ import { useRouter } from "expo-router";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { useState } from "react";
 import {
-  ActivityIndicator,
-  Image,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-  useWindowDimensions,
+    ActivityIndicator,
+    Image,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+    useWindowDimensions,
 } from "react-native";
 import { uploadToCloudinary } from "../../cloudinary";
 import { auth, db } from "../../firebaseConfig";
@@ -216,7 +216,10 @@ export default function AddEvent() {
 
     setSaving(true);
     try {
-      const imageUrl = await uploadToCloudinary(image);
+      const imageUrl = await uploadToCloudinary(image, {
+        skipModeration: true,
+        skipAi: true,
+      });
 
       await addDoc(collection(db, "volunteer_posts"), {
         title: hideBadWords(title.trim()),

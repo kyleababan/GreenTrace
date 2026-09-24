@@ -1,5 +1,6 @@
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
+import { signOut } from "firebase/auth";
 import { useEffect, useState } from "react";
 import {
   Image,
@@ -14,6 +15,7 @@ import {
 } from "react-native";
 import { uploadToCloudinary } from "../cloudinary";
 import Navbar from "../components/navbar";
+import NsfwWarningModal from "../components/nsfw-warning-modal";
 import { normalizePurok } from "../constants/locationFormat";
 import { auth, db } from "../firebaseConfig";
 import { hideBadWords } from "../utils/hideBadWords";
@@ -24,6 +26,7 @@ import {
   doc,
   getDoc,
   serverTimestamp,
+  updateDoc,
 } from "firebase/firestore";
 
 const BARANGAYS = [
@@ -73,6 +76,12 @@ export default function CreateReport() {
   const [errors, setErrors] = useState({});
   const [locationName, setLocationName] = useState("");
 
+  // NSFW Warning & Ban Modal States
+  const [warningModalVisible, setWarningModalVisible] = useState(false);
+  const [warningIsBanned, setWarningIsBanned] = useState(false);
+  const [warningsCount, setWarningsCount] = useState(1);
+  const [warningReason, setWarningReason] = useState("");
+
   const validateLocation = () => ({
     ...(!manualBarangay ? { barangay: "Select a barangay." } : {}),
     ...(!normalizePurok(manualPurok) ? { purok: "Purok is required." } : {}),
@@ -87,6 +96,16 @@ export default function CreateReport() {
         const userSnap = await getDoc(doc(db, "users", currentUser.uid));
         if (userSnap.exists()) {
           const data = userSnap.data();
+          if (data.isBanned) {
+            setWarningIsBanned(true);
+            setWarningsCount(data.nsfwWarnings || 3);
+            setWarningReason(
+              data.banReason ||
+                "Account banned for violating Terms and Policy.",
+            );
+            setWarningModalVisible(true);
+            return;
+          }
           setUserName(`${data.firstName} ${data.lastName}`);
         }
       } catch (error) {
@@ -127,7 +146,11 @@ export default function CreateReport() {
     }
 
     setImage(asset);
-    setErrors((previous) => ({ ...previous, image: "" }));
+    setErrors((previous) => {
+      const next = { ...previous };
+      delete next.image;
+      return next;
+    });
   };
 
   const createPost = async () => {
@@ -162,7 +185,13 @@ export default function CreateReport() {
 
       const userData = userSnap.data();
 
-      const imageUrl = await uploadToCloudinary(image);
+      const uploadRes = await uploadToCloudinary(image, {
+        classifyWaste: true,
+      });
+      const imageUrl =
+        typeof uploadRes === "string" ? uploadRes : uploadRes.secureUrl;
+      const wasteClassification =
+        typeof uploadRes === "object" ? uploadRes.classification : null;
 
       await addDoc(
         collection(db, "posts"),
@@ -188,6 +217,8 @@ export default function CreateReport() {
 
           status: "moderate",
 
+          wasteClassification: wasteClassification || null,
+
           reactionCount: 0,
 
           commentCount: 0,
@@ -199,9 +230,64 @@ export default function CreateReport() {
       router.replace("/home");
     } catch (error) {
       console.log(error);
-      setErrors({ form: error.message || "Could not create the post." });
+      const msg = error.message || "Could not create the post.";
+
+      if (
+        msg.toLowerCase().includes("image rejected") ||
+        msg.toLowerCase().includes("nsfw") ||
+        msg.toLowerCase().includes("inappropriate") ||
+        msg.toLowerCase().includes("suggestive") ||
+        msg.toLowerCase().includes("flagged")
+      ) {
+        try {
+          const currentUser = auth.currentUser;
+          if (currentUser) {
+            const userRef = doc(db, "users", currentUser.uid);
+            const userSnap = await getDoc(userRef);
+            const curData = userSnap.exists() ? userSnap.data() : {};
+            const curWarnings = curData.nsfwWarnings || 0;
+            const newCount = curWarnings + 1;
+            const banned = newCount >= 3;
+
+            await updateDoc(userRef, {
+              nsfwWarnings: newCount,
+              ...(banned
+                ? {
+                    isBanned: true,
+                    banReason:
+                      "Violated Terms and Policy: Uploaded inappropriate/NSFW content after 3 warnings.",
+                  }
+                : {}),
+            });
+
+            setWarningsCount(newCount);
+            setWarningIsBanned(banned);
+            setWarningReason(msg.replace(/^Image rejected:\s*/i, ""));
+            setImage(null); // Clear the violating photo
+            setWarningModalVisible(true);
+          }
+        } catch (dbErr) {
+          console.warn("Could not record warning:", dbErr);
+          setWarningsCount(1);
+          setWarningIsBanned(false);
+          setWarningReason(msg.replace(/^Image rejected:\s*/i, ""));
+          setImage(null);
+          setWarningModalVisible(true);
+        }
+      } else {
+        setErrors({ form: msg });
+      }
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+      router.replace("/signin");
+    } catch (e) {
+      router.replace("/signin");
     }
   };
 
@@ -268,13 +354,15 @@ export default function CreateReport() {
                 {locationName || "Set Location..."}
               </Text>
             </TouchableOpacity>
-            {errors.location && (
+            {!!errors.location && (
               <Text style={styles.fieldError}>{errors.location}</Text>
             )}
-            {errors.image && (
+            {!!errors.image && (
               <Text style={styles.fieldError}>{errors.image}</Text>
             )}
-            {errors.form && <Text style={styles.formError}>{errors.form}</Text>}
+            {!!errors.form && (
+              <Text style={styles.formError}>{errors.form}</Text>
+            )}
 
             {/* TITLE */}
             <TextInput
@@ -406,11 +494,12 @@ export default function CreateReport() {
                       onPress={() => {
                         setManualBarangay(barangay);
                         setBarangayDropdownOpen(false);
-                        setErrors((previous) => ({
-                          ...previous,
-                          barangay: "",
-                          location: "",
-                        }));
+                        setErrors((previous) => {
+                          const next = { ...previous };
+                          delete next.barangay;
+                          delete next.location;
+                          return next;
+                        });
                       }}
                     >
                       <Text>{barangay}</Text>
@@ -418,7 +507,7 @@ export default function CreateReport() {
                   ))}
                 </ScrollView>
               )}
-              {errors.barangay && (
+              {!!errors.barangay && (
                 <Text style={styles.fieldError}>{errors.barangay}</Text>
               )}
 
@@ -429,11 +518,16 @@ export default function CreateReport() {
                   value={manualPurok}
                   onChangeText={(value) => {
                     setManualPurok(value);
-                    setErrors((previous) => ({
-                      ...previous,
-                      purok: normalizePurok(value) ? "" : "Purok is required.",
-                      location: "",
-                    }));
+                    setErrors((previous) => {
+                      const next = { ...previous };
+                      if (normalizePurok(value)) {
+                        delete next.purok;
+                      } else {
+                        next.purok = "Purok is required.";
+                      }
+                      delete next.location;
+                      return next;
+                    });
                   }}
                   style={[
                     styles.purokTextInput,
@@ -441,7 +535,7 @@ export default function CreateReport() {
                   ]}
                 />
               </View>
-              {errors.purok && (
+              {!!errors.purok && (
                 <Text style={styles.fieldError}>{errors.purok}</Text>
               )}
 
@@ -456,7 +550,11 @@ export default function CreateReport() {
 
                   setManualPurok(purok);
                   setLocationName(`${manualBarangay}, Pk. ${purok}`);
-                  setErrors((previous) => ({ ...previous, location: "" }));
+                  setErrors((previous) => {
+                    const next = { ...previous };
+                    delete next.location;
+                    return next;
+                  });
                   setManualLocationModal(false);
                 }}
               >
@@ -511,6 +609,17 @@ export default function CreateReport() {
             </View>
           </View>
         </Modal>
+
+        {/* NSFW Warning / Ban Modal */}
+        <NsfwWarningModal
+          visible={warningModalVisible}
+          isBanned={warningIsBanned}
+          warningsCount={warningsCount}
+          reason={warningReason}
+          onClose={() => setWarningModalVisible(false)}
+          onSignOut={handleSignOut}
+        />
+
         <View style={styles.navbarContainer}>
           <Navbar />
         </View>

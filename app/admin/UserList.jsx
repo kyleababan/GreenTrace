@@ -1,23 +1,23 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import {
-  collection,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-  startAfter,
+    collection,
+    getDocs,
+    limit,
+    orderBy,
+    query,
+    startAfter,
 } from "firebase/firestore";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-  useWindowDimensions,
+    ActivityIndicator,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+    useWindowDimensions,
 } from "react-native";
 
 import { db } from "../../firebaseConfig";
@@ -88,9 +88,11 @@ export default function UserList() {
     }
   }, []);
 
-  useEffect(() => {
-    loadUsers(true);
-  }, [loadUsers]);
+  useFocusEffect(
+    useCallback(() => {
+      loadUsers(true);
+    }, [loadUsers]),
+  );
 
   const filteredUsers = useMemo(() => {
     const keyword = search.trim().toLowerCase();
@@ -161,15 +163,30 @@ export default function UserList() {
                   <Text style={styles.avatarText}>{getInitials(name)}</Text>
                 </View>
                 <View style={styles.cardText}>
-                  <Text style={styles.name} numberOfLines={1}>
-                    {name}
-                  </Text>
+                  <View style={styles.nameRow}>
+                    <Text style={styles.name} numberOfLines={1}>
+                      {name}
+                    </Text>
+                    {user.isBanned ? (
+                      <View style={styles.bannedPill}>
+                        <Text style={styles.bannedPillText}>Banned</Text>
+                      </View>
+                    ) : null}
+                  </View>
                   <Text style={styles.subtext} numberOfLines={1}>
                     {user.email || user.cellNumber || "No contact information"}
                   </Text>
-                  <Text style={styles.points}>
-                    {Number(user.points) || 0} pts
-                  </Text>
+                  <View style={styles.statsRow}>
+                    <Text style={styles.points}>
+                      {Number(user.points) || 0} pts
+                    </Text>
+                    {Boolean(user.nsfwWarnings && user.nsfwWarnings > 0) && (
+                      <Text style={styles.warningCountText}>
+                        {user.nsfwWarnings} warning
+                        {user.nsfwWarnings > 1 ? "s" : ""}
+                      </Text>
+                    )}
+                  </View>
                 </View>
               </TouchableOpacity>
             );
@@ -251,10 +268,39 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   avatarText: { color: "#fff", fontWeight: "700" },
-  cardText: { flex: 1, minWidth: 0 },
-  name: { fontWeight: "700", fontSize: 14, color: "#1d2b21" },
+  nameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  name: { fontWeight: "700", fontSize: 14, color: "#1d2b21", flexShrink: 1 },
+  bannedPill: {
+    backgroundColor: "#fff0f0",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "#ffd6d6",
+  },
+  bannedPillText: {
+    color: "#c62828",
+    fontSize: 10,
+    fontWeight: "700",
+  },
   subtext: { fontSize: 12, color: "#63756a", marginTop: 2 },
-  points: { fontSize: 12, color: "#27734d", marginTop: 3, fontWeight: "700" },
+  statsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 3,
+  },
+  points: { fontSize: 12, color: "#27734d", fontWeight: "700" },
+  warningCountText: {
+    fontSize: 11,
+    color: "#d97706",
+    fontWeight: "600",
+  },
   emptyText: {
     width: "100%",
     color: "#63756a",

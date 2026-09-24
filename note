@@ -16,3 +16,15 @@ git pull
 git switch assistant-work
 git pull
 
+//if pushing your work to assistant-work
+git add .
+git commit -m ""
+git push origin assistant-work
+
+
+//do this after pushing your work to assistant-work
+git switch main
+git pull origin main
+git fetch origin
+git merge origin/assistant-work
+git push origin main

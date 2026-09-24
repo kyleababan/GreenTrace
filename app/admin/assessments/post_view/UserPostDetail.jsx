@@ -1,30 +1,30 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  increment,
-  query,
-  serverTimestamp,
-  updateDoc,
-  where,
-  writeBatch,
+    collection,
+    doc,
+    getDoc,
+    getDocs,
+    increment,
+    query,
+    serverTimestamp,
+    updateDoc,
+    where,
+    writeBatch,
 } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-  useWindowDimensions,
+    ActivityIndicator,
+    Alert,
+    Image,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+    useWindowDimensions,
 } from "react-native";
 
 import { db } from "../../../../firebaseConfig";
@@ -58,8 +58,10 @@ export default function UserPostDetail() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showBanModal, setShowBanModal] = useState(false);
   const [banReason, setBanReason] = useState("");
+  const [showUnbanModal, setShowUnbanModal] = useState(false);
   const [deletingUser, setDeletingUser] = useState(false);
   const [banningUser, setBanningUser] = useState(false);
+  const [unbanningUser, setUnbanningUser] = useState(false);
 
   useEffect(() => {
     const loadUserData = async () => {
@@ -161,6 +163,32 @@ export default function UserPostDetail() {
     }
   };
 
+  const unbanUser = async () => {
+    if (unbanningUser) return;
+
+    setUnbanningUser(true);
+    try {
+      await updateDoc(doc(db, "users", user.id), {
+        isBanned: false,
+        banReason: "",
+        nsfwWarnings: 0,
+        unbannedAt: serverTimestamp(),
+      });
+      setUser((currentUser) => ({
+        ...currentUser,
+        isBanned: false,
+        banReason: "",
+        nsfwWarnings: 0,
+      }));
+      setShowUnbanModal(false);
+    } catch (error) {
+      console.error("Unable to unban user:", error);
+      Alert.alert("Error", "Unable to unban user. Please try again.");
+    } finally {
+      setUnbanningUser(false);
+    }
+  };
+
   const deleteUserAccount = async () => {
     if (deletingUser) return;
 
@@ -241,16 +269,39 @@ export default function UserPostDetail() {
             <Text style={styles.userDetail}>Birth date: {user.birthDate}</Text>
           ) : null}
           {user.isBanned ? (
-            <Text style={styles.bannedBadge}>Banned</Text>
+            <View style={styles.bannedContainer}>
+              <Text style={styles.bannedBadge}>Banned</Text>
+              {Boolean(user.banReason) && (
+                <Text style={styles.banReasonText}>
+                  Reason: {user.banReason}
+                </Text>
+              )}
+            </View>
+          ) : user.nsfwWarnings ? (
+            <Text style={styles.warningBadge}>
+              Warnings: {user.nsfwWarnings} / 3
+            </Text>
           ) : null}
 
           <View style={styles.accountActions}>
-            <TouchableOpacity style={styles.banButton} onPress={openBanModal}>
-              <Ionicons name="ban-outline" size={17} color="#9a5b00" />
-              <Text style={styles.banButtonText}>
-                {user.isBanned ? "Update Ban" : "Ban"}
-              </Text>
-            </TouchableOpacity>
+            {user.isBanned ? (
+              <TouchableOpacity
+                style={styles.unbanButton}
+                onPress={() => setShowUnbanModal(true)}
+              >
+                <Ionicons
+                  name="shield-checkmark-outline"
+                  size={17}
+                  color="#2e7d32"
+                />
+                <Text style={styles.unbanButtonText}>Unban</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity style={styles.banButton} onPress={openBanModal}>
+                <Ionicons name="ban-outline" size={17} color="#9a5b00" />
+                <Text style={styles.banButtonText}>Ban</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={styles.deleteButton}
               onPress={() => setShowDeleteModal(true)}
@@ -358,9 +409,20 @@ export default function UserPostDetail() {
                 disabled={addingPoints}
                 onPress={addPoints}
               >
-                <Text style={styles.confirmButtonText}>
-                  {addingPoints ? "Adding..." : "Add points"}
-                </Text>
+                {addingPoints ? (
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <ActivityIndicator size="small" color="#fff" />
+                    <Text style={styles.confirmButtonText}>Adding...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.confirmButtonText}>Add points</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -401,9 +463,20 @@ export default function UserPostDetail() {
                 onPress={deleteUserAccount}
                 disabled={deletingUser}
               >
-                <Text style={styles.confirmButtonText}>
-                  {deletingUser ? "Deleting..." : "Delete"}
-                </Text>
+                {deletingUser ? (
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <ActivityIndicator size="small" color="#fff" />
+                    <Text style={styles.confirmButtonText}>Deleting...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.confirmButtonText}>Delete</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -447,9 +520,78 @@ export default function UserPostDetail() {
                 onPress={banUser}
                 disabled={!banReason.trim() || banningUser}
               >
-                <Text style={styles.confirmButtonText}>
-                  {banningUser ? "Banning..." : "Ban user"}
-                </Text>
+                {banningUser ? (
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <ActivityIndicator size="small" color="#fff" />
+                    <Text style={styles.confirmButtonText}>Banning...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.confirmButtonText}>Ban user</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showUnbanModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowUnbanModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modal} accessibilityRole="alert">
+            <View style={styles.unbanIcon}>
+              <Ionicons
+                name="shield-checkmark-outline"
+                size={28}
+                color="#2e7d32"
+              />
+            </View>
+            <Text style={[styles.modalTitle, styles.centerText]}>
+              Unban {name}?
+            </Text>
+            <Text style={[styles.modalText, styles.centerText]}>
+              This will unban the account and reset their warning count to 0.
+              The user will regain full access to sign in and post reports.
+            </Text>
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => setShowUnbanModal(false)}
+                disabled={unbanningUser}
+              >
+                <Text>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.unbanConfirmButton,
+                  unbanningUser && styles.disabledButton,
+                ]}
+                onPress={unbanUser}
+                disabled={unbanningUser}
+              >
+                {unbanningUser ? (
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <ActivityIndicator size="small" color="#fff" />
+                    <Text style={styles.confirmButtonText}>Unbanning...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.confirmButtonText}>Unban user</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -538,8 +680,30 @@ const styles = StyleSheet.create({
     marginTop: 5,
     textAlign: "center",
   },
+  bannedContainer: {
+    marginTop: 10,
+    alignItems: "center",
+    width: "100%",
+  },
+  banReasonText: {
+    marginTop: 4,
+    fontSize: 11,
+    color: "#9c2525",
+    textAlign: "center",
+    paddingHorizontal: 8,
+  },
+  warningBadge: {
+    marginTop: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    overflow: "hidden",
+    color: "#d97706",
+    backgroundColor: "#fffbeb",
+    fontWeight: "700",
+    fontSize: 12,
+  },
   bannedBadge: {
-    marginTop: 12,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
@@ -566,6 +730,17 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff5df",
   },
   banButtonText: { color: "#9a5b00", fontWeight: "700" },
+  unbanButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    paddingVertical: 9,
+    borderRadius: 7,
+    backgroundColor: "#e8f5e9",
+  },
+  unbanButtonText: { color: "#2e7d32", fontWeight: "700" },
   deleteButton: {
     flex: 1,
     flexDirection: "row",
@@ -710,5 +885,21 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 7,
     backgroundColor: "#b97912",
+  },
+  unbanIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignSelf: "center",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#e8f5e9",
+    marginBottom: 12,
+  },
+  unbanConfirmButton: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 7,
+    backgroundColor: "#2e7d32",
   },
 });

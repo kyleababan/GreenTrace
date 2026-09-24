@@ -3,39 +3,43 @@ import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Image,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 
 import {
-  addDoc,
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  increment,
-  query,
-  runTransaction,
-  serverTimestamp,
-  updateDoc,
-  where,
+    addDoc,
+    collection,
+    doc,
+    getDoc,
+    getDocs,
+    increment,
+    query,
+    runTransaction,
+    serverTimestamp,
+    updateDoc,
+    where,
 } from "firebase/firestore";
 
 import { uploadToCloudinary } from "../../../../cloudinary";
 import {
-  BADGES,
-  getUserContributionStats,
-  isBadgeEarned,
+    BADGES,
+    getUserContributionStats,
+    isBadgeEarned,
 } from "../../../../constants/badges";
 import { formatLocationWithPurok } from "../../../../constants/locationFormat";
+import {
+    formatWasteLabel,
+    getWasteCategoryColor,
+} from "../../../../constants/wasteCategories";
 import { auth, db } from "../../../../firebaseConfig";
 import { deleteRelatedDocuments } from "../../../../utils/deletePostHelper";
 import { hideBadWords } from "../../../../utils/hideBadWords";
@@ -118,6 +122,7 @@ export default function PostDetail({
     suppliedPost?.afterImageUrl || "",
   );
   const [uploadingCleanupImage, setUploadingCleanupImage] = useState(false);
+  const [pendingAssessmentStatus, setPendingAssessmentStatus] = useState(null);
 
   useEffect(() => {
     if (suppliedPost || !postId) return;
@@ -366,7 +371,10 @@ export default function PostDetail({
 
       if (result.canceled) return;
 
-      const imageUrl = await uploadToCloudinary(result.assets[0]);
+      const imageUrl = await uploadToCloudinary(result.assets[0], {
+        skipModeration: true,
+        skipAi: true,
+      });
       setCleanupImageUrl(imageUrl);
       Alert.alert(
         "Cleanup image added",
@@ -572,6 +580,7 @@ export default function PostDetail({
     }
 
     setUpdating(true);
+    setPendingAssessmentStatus(nextStatus);
 
     try {
       await updateDoc(doc(db, "posts", post.id), {
@@ -580,6 +589,7 @@ export default function PostDetail({
         assessmentUpdatedAt: serverTimestamp(),
       });
 
+      setShowAssessmentModal(false);
       Alert.alert(
         nextStatus === "critical"
           ? "Report assessed as Critical."
@@ -590,6 +600,7 @@ export default function PostDetail({
       console.error("Unable to update assessment:", error);
       Alert.alert("Failed to update the situation assessment.");
       setUpdating(false);
+      setPendingAssessmentStatus(null);
     }
   };
 
@@ -651,11 +662,11 @@ export default function PostDetail({
         {/* LEFT - POST */}
         <View style={styles.left}>
           <View style={styles.card}>
-            {!(isCleaned && post.afterImageUrl) && (
+            {!Boolean(isCleaned && post.afterImageUrl) && (
               <Image source={{ uri: post.imageUrl }} style={styles.postImage} />
             )}
 
-            {isCleaned && post.afterImageUrl && (
+            {Boolean(isCleaned && post.afterImageUrl) && (
               <View style={styles.beforeAfterSection}>
                 <Text style={styles.beforeAfterTitle}>Cleanup Result</Text>
                 <View style={styles.beforeAfterRow}>
@@ -728,22 +739,45 @@ export default function PostDetail({
                     </Text>
                   </View>
 
-                  <View
-                    style={[
-                      styles.statusTag,
-                      {
-                        backgroundColor: (
-                          STATUS_DETAILS[post.status] || STATUS_DETAILS.pending
-                        ).color,
-                      },
-                    ]}
-                  >
-                    <Text style={styles.statusTagText}>
-                      {
-                        (STATUS_DETAILS[post.status] || STATUS_DETAILS.pending)
-                          .label
-                      }
-                    </Text>
+                  {/* Report Status & Waste Category Tags */}
+                  <View style={styles.tagsRow}>
+                    <View
+                      style={[
+                        styles.statusTag,
+                        {
+                          backgroundColor: (
+                            STATUS_DETAILS[post.status] ||
+                            STATUS_DETAILS.pending
+                          ).color,
+                        },
+                      ]}
+                    >
+                      <Text style={styles.statusTagText}>
+                        {
+                          (
+                            STATUS_DETAILS[post.status] ||
+                            STATUS_DETAILS.pending
+                          ).label
+                        }
+                      </Text>
+                    </View>
+
+                    {Boolean(formatWasteLabel(post.wasteClassification)) && (
+                      <View
+                        style={[
+                          styles.wasteTag,
+                          {
+                            backgroundColor: getWasteCategoryColor(
+                              post.wasteClassification?.category,
+                            ),
+                          },
+                        ]}
+                      >
+                        <Text style={styles.wasteTagText}>
+                          {formatWasteLabel(post.wasteClassification)}
+                        </Text>
+                      </View>
+                    )}
                   </View>
                 </View>
               </View>
@@ -921,27 +955,39 @@ export default function PostDetail({
           }}
         >
           <TouchableOpacity
-            disabled={openingVolunteerActivity}
+            disabled={openingVolunteerActivity || updating}
             style={[
               styles.helpBTN,
               {
                 flex: 1,
                 backgroundColor: "#599A74",
               },
+              (openingVolunteerActivity || updating) && styles.disabledButton,
             ]}
             onPress={openVolunteerActivity}
           >
-            <Text style={styles.helpText}>
-              {openingVolunteerActivity
-                ? "Loading..."
-                : existingVolunteerId
-                  ? "Manage Volunteers"
-                  : "Help"}
-            </Text>
+            {openingVolunteerActivity ? (
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                }}
+              >
+                <ActivityIndicator size="small" color="#FFFFFF" />
+                <Text style={styles.helpText}>Opening...</Text>
+              </View>
+            ) : (
+              <Text style={styles.helpText}>
+                {existingVolunteerId ? "Manage Volunteers" : "Help"}
+              </Text>
+            )}
           </TouchableOpacity>
 
           {!isCleaned && (
             <TouchableOpacity
+              disabled={updating || openingVolunteerActivity}
               style={[
                 styles.helpBTN,
                 {
@@ -949,16 +995,35 @@ export default function PostDetail({
                     effectiveCurrentTab === "ongoing" ? "#34C759" : "#A5A5A5",
                   flex: 1,
                 },
+                (updating || openingVolunteerActivity) && styles.disabledButton,
               ]}
               onPress={
                 effectiveCurrentTab === "ongoing" ? markAsClean : setToOngoing
               }
             >
-              <Text style={styles.helpText}>
-                {effectiveCurrentTab === "ongoing"
-                  ? "Mark as Clean"
-                  : "Set to On-Going"}
-              </Text>
+              {updating ? (
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
+                  }}
+                >
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                  <Text style={styles.helpText}>
+                    {effectiveCurrentTab === "ongoing"
+                      ? "Marking as Clean..."
+                      : "Setting to On-Going..."}
+                  </Text>
+                </View>
+              ) : (
+                <Text style={styles.helpText}>
+                  {effectiveCurrentTab === "ongoing"
+                    ? "Mark as Clean"
+                    : "Set to On-Going"}
+                </Text>
+              )}
             </TouchableOpacity>
           )}
         </View>
@@ -1057,12 +1122,26 @@ export default function PostDetail({
 
               <TouchableOpacity
                 disabled={deleting}
-                style={styles.confirmButton}
+                style={[
+                  styles.confirmButton,
+                  deleting && styles.disabledButton,
+                ]}
                 onPress={deletePost}
               >
-                <Text style={styles.confirmButtonText}>
-                  {deleting ? "Deleting..." : "Yes"}
-                </Text>
+                {deleting ? (
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                    <Text style={styles.confirmButtonText}>Deleting...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.confirmButtonText}>Yes</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -1084,7 +1163,10 @@ export default function PostDetail({
               </View>
               <TouchableOpacity
                 onPress={() => setShowCleanupModal(false)}
-              ></TouchableOpacity>
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons name="close" size={24} color="#555" />
+              </TouchableOpacity>
             </View>
             <Text style={styles.modalSubtitle}>
               The report photo is used as Before. Add an optional After image
@@ -1131,7 +1213,7 @@ export default function PostDetail({
                 )}
               </View>
             </View>
-            {cleanupImageUrl && (
+            {Boolean(cleanupImageUrl) && (
               <TouchableOpacity
                 style={styles.replaceCleanupButton}
                 onPress={uploadCleanupImage}
@@ -1195,26 +1277,48 @@ export default function PostDetail({
                     <TouchableOpacity
                       key={option.id}
                       disabled={updating || isSelected}
-                      onPress={() => {
-                        updateAssessment(option.id);
-                        setShowAssessmentModal(false);
-                      }}
+                      onPress={() => updateAssessment(option.id)}
                       style={[
                         styles.assessmentButton,
                         { borderColor: option.color },
                         isSelected && { backgroundColor: option.color },
+                        (updating || isSelected) && styles.disabledButton,
                       ]}
                     >
-                      <Text
-                        style={[
-                          styles.assessmentButtonText,
-                          isSelected && styles.assessmentButtonTextSelected,
-                        ]}
-                      >
-                        {isSelected
-                          ? `${option.label} (Current)`
-                          : option.label}
-                      </Text>
+                      {updating && pendingAssessmentStatus === option.id ? (
+                        <View
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: 6,
+                          }}
+                        >
+                          <ActivityIndicator
+                            size="small"
+                            color={isSelected ? "#FFFFFF" : option.color}
+                          />
+                          <Text
+                            style={[
+                              styles.assessmentButtonText,
+                              isSelected && styles.assessmentButtonTextSelected,
+                            ]}
+                          >
+                            Updating...
+                          </Text>
+                        </View>
+                      ) : (
+                        <Text
+                          style={[
+                            styles.assessmentButtonText,
+                            isSelected && styles.assessmentButtonTextSelected,
+                          ]}
+                        >
+                          {isSelected
+                            ? `${option.label} (Current)`
+                            : option.label}
+                        </Text>
+                      )}
                     </TouchableOpacity>
                   );
                 })}
@@ -1519,15 +1623,29 @@ const styles = StyleSheet.create({
   postedDate: { color: "#7B8580", fontSize: 11 },
   locationRow: { flexDirection: "row", alignItems: "center", marginTop: 5 },
   locationIcon: { width: 14, height: 14, marginRight: 5, tintColor: "#666666" },
-  locationText: { flex: 1, color: "#626C66", fontSize: 12 },
-  statusTag: {
-    alignSelf: "flex-start",
+  tagsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 6,
     marginTop: 7,
+  },
+  statusTag: {
     paddingHorizontal: 9,
     paddingVertical: 4,
     borderRadius: 6,
   },
   statusTagText: { color: "#FFFFFF", fontSize: 10, fontWeight: "800" },
+  wasteTag: {
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  wasteTagText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "800",
+  },
   description: {
     marginVertical: 10,
   },

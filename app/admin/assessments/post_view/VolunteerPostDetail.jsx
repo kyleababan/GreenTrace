@@ -3,15 +3,15 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { doc, getDoc, runTransaction, updateDoc } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
 import {
-  ActivityIndicator,
-  Image,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-  useWindowDimensions,
+    ActivityIndicator,
+    Image,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+    useWindowDimensions,
 } from "react-native";
 
 import { db } from "../../../../firebaseConfig";
@@ -503,10 +503,21 @@ export default function VolunteerPostDetail({
               disabled={startingCleanup}
               accessibilityRole="button"
             >
-              <Ionicons name="play-circle-outline" size={21} color="#fff" />
-              <Text style={styles.startCleanupText}>
-                {startingCleanup ? "Starting..." : "Start Clean-up Operation"}
-              </Text>
+              {startingCleanup ? (
+                <View
+                  style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+                >
+                  <ActivityIndicator size="small" color="#fff" />
+                  <Text style={styles.startCleanupText}>Starting...</Text>
+                </View>
+              ) : (
+                <>
+                  <Ionicons name="play-circle-outline" size={21} color="#fff" />
+                  <Text style={styles.startCleanupText}>
+                    Start Clean-up Operation
+                  </Text>
+                </>
+              )}
             </TouchableOpacity>
           </View>
         </View>
@@ -658,13 +669,27 @@ export default function VolunteerPostDetail({
                 <Text style={styles.cancelButtonText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={styles.confirmKickButton}
+                style={[
+                  styles.confirmKickButton,
+                  deletingActivity && styles.disabledButton,
+                ]}
                 onPress={confirmDeleteVolunteerActivity}
                 disabled={deletingActivity}
               >
-                <Text style={styles.confirmKickText}>
-                  {deletingActivity ? "Deleting..." : "Delete"}
-                </Text>
+                {deletingActivity ? (
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <ActivityIndicator size="small" color="#fff" />
+                    <Text style={styles.confirmKickText}>Deleting...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.confirmKickText}>Delete</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>

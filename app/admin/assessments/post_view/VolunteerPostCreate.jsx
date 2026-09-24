@@ -1,29 +1,29 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
-  addDoc,
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  query,
-  serverTimestamp,
-  updateDoc,
-  where,
+    addDoc,
+    collection,
+    doc,
+    getDoc,
+    getDocs,
+    query,
+    serverTimestamp,
+    updateDoc,
+    where,
 } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-  useWindowDimensions,
+    ActivityIndicator,
+    Alert,
+    Image,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+    useWindowDimensions,
 } from "react-native";
 
 import { db } from "../../../../firebaseConfig";
@@ -515,13 +515,23 @@ export default function VolunteerPostCreate({
           style={[styles.saveBtn, saving && styles.disabledButton]}
           onPress={saveVolunteerPost}
         >
-          <Text style={styles.saveText}>
-            {saving
-              ? "Saving..."
-              : isEditing
-                ? "Save changes"
-                : "Create activity"}
-          </Text>
+          {saving ? (
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
+              }}
+            >
+              <ActivityIndicator size="small" color="#fff" />
+              <Text style={styles.saveText}>Saving...</Text>
+            </View>
+          ) : (
+            <Text style={styles.saveText}>
+              {isEditing ? "Save changes" : "Create activity"}
+            </Text>
+          )}
         </TouchableOpacity>
       </ScrollView>
 

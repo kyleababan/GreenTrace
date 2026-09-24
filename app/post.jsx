@@ -2,46 +2,50 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 
 import {
-  ActivityIndicator,
-  Animated,
-  Image,
-  Modal,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Animated,
+    Image,
+    Modal,
+    SafeAreaView,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 
 import {
-  addDoc,
-  arrayUnion,
-  collection,
-  deleteDoc,
-  doc,
-  getDoc,
-  getDocs,
-  increment,
-  limit,
-  onSnapshot,
-  orderBy,
-  query,
-  serverTimestamp,
-  startAfter,
-  updateDoc,
-  where,
+    addDoc,
+    arrayUnion,
+    collection,
+    deleteDoc,
+    doc,
+    getDoc,
+    getDocs,
+    increment,
+    limit,
+    onSnapshot,
+    orderBy,
+    query,
+    serverTimestamp,
+    startAfter,
+    updateDoc,
+    where,
 } from "firebase/firestore";
 import FormError from "../components/form-error";
 import Navbar from "../components/navbar";
+import {
+    formatWasteLabel,
+    getWasteCategoryColor,
+} from "../constants/wasteCategories";
 import { auth, db } from "../firebaseConfig";
 import { deleteRelatedDocuments } from "../utils/deletePostHelper";
 import { hideBadWords } from "../utils/hideBadWords";
 import {
-  COMMENTS_PER_PAGE,
-  getUserPointsMap,
-  mergeUniqueById,
+    COMMENTS_PER_PAGE,
+    getUserPointsMap,
+    mergeUniqueById,
 } from "../utils/pagination";
 
 const formatPostedAt = (timestamp) => {
@@ -493,34 +497,54 @@ export default function Post() {
                     </Text>
                   </View>
 
-                  <View
-                    style={[
-                      styles.statusTag,
-                      {
-                        backgroundColor:
-                          post.status === "critical"
-                            ? "#FF5B5B"
-                            : post.status === "moderate"
-                              ? "#ff8c40"
+                  {/* Report Status & Waste Category Tags */}
+                  <View style={styles.tagsRow}>
+                    <View
+                      style={[
+                        styles.statusTag,
+                        {
+                          backgroundColor:
+                            post.status === "critical"
+                              ? "#FF5B5B"
+                              : post.status === "moderate"
+                                ? "#ff8c40"
+                                : post.status === "cleaned"
+                                  ? "#34C759"
+                                  : post.status === "ongoing"
+                                    ? "#FFC940"
+                                    : "#A5A5A5",
+                        },
+                      ]}
+                    >
+                      <Text style={styles.statusText}>
+                        {post.status === "critical"
+                          ? "Critical"
+                          : post.status === "moderate"
+                            ? "Moderate"
+                            : post.status === "ongoing"
+                              ? "On-going"
                               : post.status === "cleaned"
-                                ? "#34C759"
-                                : post.status === "ongoing"
-                                  ? "#FFC940"
-                                  : "#A5A5A5",
-                      },
-                    ]}
-                  >
-                    <Text style={styles.statusText}>
-                      {post.status === "critical"
-                        ? "Critical"
-                        : post.status === "moderate"
-                          ? "Moderate"
-                          : post.status === "ongoing"
-                            ? "On-going"
-                            : post.status === "cleaned"
-                              ? "Cleaned"
-                              : "Pending"}
-                    </Text>
+                                ? "Cleaned"
+                                : "Pending"}
+                      </Text>
+                    </View>
+
+                    {Boolean(formatWasteLabel(post.wasteClassification)) && (
+                      <View
+                        style={[
+                          styles.wasteTag,
+                          {
+                            backgroundColor: getWasteCategoryColor(
+                              post.wasteClassification?.category,
+                            ),
+                          },
+                        ]}
+                      >
+                        <Text style={styles.wasteTagText}>
+                          {formatWasteLabel(post.wasteClassification)}
+                        </Text>
+                      </View>
+                    )}
                   </View>
 
                   <Text style={styles.postedAt}>
@@ -989,13 +1013,28 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#FFFFFF",
   },
+  tagsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 6,
+  },
   statusText: { color: "#FFFFFF", fontSize: 10, fontWeight: "700" },
   statusTag: {
-    alignSelf: "flex-start",
-    marginTop: 6,
     paddingHorizontal: 9,
     paddingVertical: 4,
     borderRadius: 6,
+  },
+  wasteTag: {
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  wasteTagText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "700",
   },
 
   beforeAfterSection: {
