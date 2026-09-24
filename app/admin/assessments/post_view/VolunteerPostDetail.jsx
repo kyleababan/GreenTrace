@@ -61,6 +61,8 @@ export default function VolunteerPostDetail({
   const [kickDialog, setKickDialog] = useState(null);
   const [updatingLock, setUpdatingLock] = useState(false);
   const [startingCleanup, setStartingCleanup] = useState(false);
+  const [deletingActivity, setDeletingActivity] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
   useEffect(() => {
     if (suppliedPost || !volunteerId) return;
@@ -143,6 +145,54 @@ export default function VolunteerPostDetail({
       pathname: "/admin/assessments/post_view/VolunteerPostCreate",
       params: { volunteerId: post.id },
     });
+  };
+
+  const deleteVolunteerActivity = () => {
+    if (!post?.id || deletingActivity) return;
+
+    setShowDeleteDialog(true);
+  };
+
+  const confirmDeleteVolunteerActivity = async () => {
+    if (!post?.id || deletingActivity) return;
+
+    setDeletingActivity(true);
+    try {
+      await runTransaction(db, async (transaction) => {
+        const activityRef = doc(db, "volunteer_posts", post.id);
+        const activitySnapshot = await transaction.get(activityRef);
+
+        if (!activitySnapshot.exists()) {
+          throw new Error("This event no longer exists.");
+        }
+
+        const activity = activitySnapshot.data();
+        const activityMembers = Array.isArray(activity.volunteers)
+          ? activity.volunteers
+          : [];
+        const activityJoinedCount = Number(activity.joinedCount) || 0;
+
+        if (activity.status !== "open") {
+          throw new Error("Only open events can be deleted.");
+        }
+
+        if (activityMembers.length > 0 || activityJoinedCount > 0) {
+          throw new Error("Events with joined volunteers cannot be deleted.");
+        }
+
+        transaction.delete(activityRef);
+      });
+      router.replace("/admin/VolunteerList");
+    } catch (error) {
+      console.error("Unable to delete volunteer activity:", error);
+      setShowDeleteDialog(false);
+      setKickDialog({
+        title: "Unable to delete event",
+        message: error.message || "Please try again.",
+      });
+    } finally {
+      setDeletingActivity(false);
+    }
   };
 
   const toggleActivityLock = async () => {
@@ -354,6 +404,21 @@ export default function VolunteerPostDetail({
             >
               <Ionicons name="create-outline" size={19} color="#fff" />
               <Text style={styles.editButtonText}>Edit</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.deleteButton,
+                deletingActivity && styles.disabledAction,
+              ]}
+              onPress={deleteVolunteerActivity}
+              disabled={deletingActivity}
+              accessibilityRole="button"
+              accessibilityLabel="Delete volunteer event"
+            >
+              <Ionicons name="trash-outline" size={19} color="#B42318" />
+              <Text style={styles.deleteButtonText}>
+                {deletingActivity ? "Deleting..." : "Delete"}
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -567,6 +632,46 @@ export default function VolunteerPostDetail({
       </Modal>
 
       <Modal
+        visible={showDeleteDialog}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!deletingActivity) setShowDeleteDialog(false);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.confirmModal} accessibilityRole="alert">
+            <View style={styles.confirmIcon}>
+              <Ionicons name="warning-outline" size={28} color="#B42318" />
+            </View>
+            <Text style={styles.confirmTitle}>Delete this event?</Text>
+            <Text style={styles.confirmMessage}>
+              This cannot be undone. The original waste report will remain, but
+              this volunteer event will be removed.
+            </Text>
+            <View style={styles.confirmActions}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => setShowDeleteDialog(false)}
+                disabled={deletingActivity}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.confirmKickButton}
+                onPress={confirmDeleteVolunteerActivity}
+                disabled={deletingActivity}
+              >
+                <Text style={styles.confirmKickText}>
+                  {deletingActivity ? "Deleting..." : "Delete"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
         visible={Boolean(kickDialog)}
         transparent
         animationType="fade"
@@ -667,6 +772,18 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   editButtonText: { color: "#fff", fontWeight: "700" },
+  deleteButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#FDECEC",
+    borderWidth: 1,
+    borderColor: "#F2B8B5",
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderRadius: 8,
+  },
+  deleteButtonText: { color: "#B42318", fontWeight: "700" },
   row: { gap: 24 },
   leftColumn: { gap: 10 },
   detailsColumn: { gap: 14 },

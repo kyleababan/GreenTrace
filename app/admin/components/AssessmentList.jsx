@@ -17,11 +17,11 @@ import { db } from "../../../firebaseConfig";
 import { hideBadWords } from "../../../utils/hideBadWords";
 
 const STATUS_DETAILS = {
-  pending: { label: "Not Assessed", color: "#A5A5A5" },
-  critical: { label: "Critical", color: "#FF5B5B" },
-  moderate: { label: "Moderate", color: "#ff8c40" },
-  cleaned: { label: "Cleaned", color: "#34C759" },
-  ongoing: { label: "On-going", color: "#FFC940" },
+  pending: { label: "Not Assessed", color: "#A5A5A5", textColor: "#FFFFFF" },
+  critical: { label: "Critical", color: "#FF5B5B", textColor: "#FFFFFF" },
+  moderate: { label: "Moderate", color: "#ff8c40", textColor: "#3D2B00" },
+  cleaned: { label: "Cleaned", color: "#34C759", textColor: "#FFFFFF" },
+  ongoing: { label: "On-going", color: "#FFC940", textColor: "#FFFFFF" },
 };
 
 const getLocationParts = (locationName = "") =>
@@ -241,7 +241,12 @@ export default function AssessmentList({
                           { backgroundColor: postStatus.color },
                         ]}
                       >
-                        <Text style={styles.statusText}>
+                        <Text
+                          style={[
+                            styles.statusText,
+                            { color: postStatus.textColor },
+                          ]}
+                        >
                           {postStatus.label}
                         </Text>
                       </View>
@@ -312,8 +317,16 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: 14,
   },
-  title: { color: "#397A51", fontSize: 24, fontWeight: "800" },
-  resultCount: { color: "#7A8A80", fontSize: 12, marginTop: 2 },
+  title: {
+    color: "#234B33",
+    fontSize: 24,
+    fontWeight: "800",
+  },
+  resultCount: {
+    color: "#52675A",
+    fontSize: 12,
+    marginTop: 2,
+  },
   scrollContent: { paddingBottom: 30 },
   postContainer: {
     flexDirection: "row",
@@ -417,7 +430,11 @@ const styles = StyleSheet.create({
     backgroundColor: "#F0F2F5",
   },
   smallIcon: { width: 19, height: 19, resizeMode: "contain" },
-  actionText: { color: "#555555", fontSize: 12, fontWeight: "600" },
+  actionText: {
+    color: "#405047",
+    fontSize: 12,
+    fontWeight: "600",
+  },
   emptyState: {
     alignItems: "center",
     justifyContent: "center",

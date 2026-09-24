@@ -15,6 +15,8 @@ export default function SituationAssessment() {
   const [activeTab, setActiveTab] = useState("critical");
   const [selectedPost, setSelectedPost] = useState(null);
   const [search, setSearch] = useState("");
+  const [searchFocused, setSearchFocused] = useState(false);
+  const [focusedFilter, setFocusedFilter] = useState("");
   const [showFilters, setShowFilters] = useState(false);
   const [enabledFilters, setEnabledFilters] = useState([]);
   const [filters, setFilters] = useState({
@@ -66,7 +68,7 @@ export default function SituationAssessment() {
               style={[
                 {
                   backgroundColor: "#FF5B5B",
-                  color: "#fff",
+                  color: "#FFFFFF",
                   borderRadius: 5,
                   width: "24%",
                   height: "100%",
@@ -86,7 +88,7 @@ export default function SituationAssessment() {
               style={[
                 {
                   backgroundColor: "#ff8c40",
-                  color: "#fff",
+                  color: "#FFFFFF",
                   borderRadius: 5,
                   width: "24%",
                   height: "100%",
@@ -106,7 +108,7 @@ export default function SituationAssessment() {
               style={[
                 {
                   backgroundColor: "#FFC940",
-                  color: "#0F172A",
+                  color: "#FFFFFF",
                   borderRadius: 5,
                   width: "24%",
                   height: "100%",
@@ -126,7 +128,7 @@ export default function SituationAssessment() {
               style={[
                 {
                   backgroundColor: "#34C759",
-                  color: "#fff",
+                  color: "#FFFFFF",
                   borderRadius: 5,
                   width: "24%",
                   height: "100%",
@@ -144,7 +146,12 @@ export default function SituationAssessment() {
             </Text>
           </View>
 
-          <View style={styles.searchContainer}>
+          <View
+            style={[
+              styles.searchContainer,
+              searchFocused && styles.inputActive,
+            ]}
+          >
             <TouchableOpacity
               style={[
                 styles.filterButton,
@@ -172,6 +179,8 @@ export default function SituationAssessment() {
               placeholderTextColor="#888"
               value={search}
               onChangeText={setSearch}
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => setSearchFocused(false)}
             />
           </View>
 
@@ -253,7 +262,12 @@ export default function SituationAssessment() {
                           }
                           placeholder={option.placeholder}
                           placeholderTextColor="#929C96"
-                          style={styles.filterInput}
+                          style={[
+                            styles.filterInput,
+                            focusedFilter === option.id && styles.inputActive,
+                          ]}
+                          onFocus={() => setFocusedFilter(option.id)}
+                          onBlur={() => setFocusedFilter("")}
                         />
                       )}
                     </View>
@@ -271,13 +285,13 @@ export default function SituationAssessment() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 2 },
+  container: { flex: 1, padding: 8, backgroundColor: "#F4F8F5" },
   cardsRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     marginBottom: 20,
   },
-  activeTab: { fontWeight: "bold" },
+  activeTab: { fontWeight: "800", borderWidth: 2, borderColor: "#234B33" },
   tabContent: { flex: 1 },
   searchContainer: {
     flexDirection: "row",
@@ -286,6 +300,16 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     borderRadius: 10,
     paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: "transparent",
+  },
+  inputActive: {
+    borderColor: "#5F9C76",
+    shadowColor: "#5F9C76",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.16,
+    shadowRadius: 4,
+    elevation: 2,
   },
   filterButton: {
     width: 34,
@@ -308,7 +332,15 @@ const styles = StyleSheet.create({
     backgroundColor: "#234B33",
   },
   filterCountText: { color: "#FFFFFF", fontSize: 10, fontWeight: "700" },
-  searchInput: { flex: 1, height: 40 },
+  searchInput: {
+    flex: 1,
+    minWidth: 0,
+    height: 40,
+    color: "#24352A",
+    fontSize: 14,
+    borderWidth: 0,
+    outlineStyle: "none",
+  },
   filterPanel: {
     marginTop: -7,
     marginBottom: 15,
@@ -346,5 +378,6 @@ const styles = StyleSheet.create({
     borderColor: "#D8E3DC",
     color: "#28362D",
     backgroundColor: "#F8FAF9",
+    outlineStyle: "none",
   },
 });

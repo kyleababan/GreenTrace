@@ -25,6 +25,7 @@ import { hideBadWords } from "../../utils/hideBadWords";
 export default function VolunteerList({ setActivePage }) {
   const [posts, setPosts] = useState([]);
   const [search, setSearch] = useState("");
+  const [searchFocused, setSearchFocused] = useState(false);
 
   const loadVolunteerPosts = useCallback(async () => {
     try {
@@ -94,20 +95,38 @@ export default function VolunteerList({ setActivePage }) {
     <View style={styles.page}>
       <View style={styles.content}>
         {/* TOP BAR */}
-        <View style={styles.searchContainer}>
-          <Ionicons
-            name="search"
-            size={20}
-            color="#888"
-            style={styles.searchIcon}
-          />
-          <TextInput
-            placeholder="Search"
-            style={styles.searchInput}
-            placeholderTextColor="#888"
-            value={search}
-            onChangeText={setSearch}
-          />
+        <View style={styles.topBar}>
+          <View
+            style={[
+              styles.searchContainer,
+              searchFocused && styles.searchContainerFocused,
+            ]}
+          >
+            <Ionicons
+              name="search"
+              size={20}
+              color="#888"
+              style={styles.searchIcon}
+            />
+            <TextInput
+              placeholder="Search"
+              style={styles.searchInput}
+              placeholderTextColor="#888"
+              value={search}
+              onChangeText={setSearch}
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => setSearchFocused(false)}
+            />
+          </View>
+          <TouchableOpacity
+            style={styles.addEventButton}
+            activeOpacity={0.75}
+            onPress={() => router.push("/admin/add_event")}
+            accessibilityLabel="Add event"
+          >
+            <Ionicons name="add" size={20} color="#FFFFFF" />
+            <Text style={styles.addEventText}>Add Event</Text>
+          </TouchableOpacity>
         </View>
 
         {/* GRID */}
@@ -134,7 +153,6 @@ export default function VolunteerList({ setActivePage }) {
                   <Text style={styles.location}>{post.locationName}</Text>
                 </View>
 
-                {/* ✅ NAVIGATION FIX */}
                 <TouchableOpacity
                   style={styles.button}
                   onPress={() =>
@@ -176,19 +194,51 @@ const styles = StyleSheet.create({
   topBar: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 20,
+    gap: 12,
+    marginBottom: 15,
   },
 
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 15,
+    flex: 1,
+    minHeight: 44,
     backgroundColor: "#fff",
     borderRadius: 10,
     paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: "transparent",
+  },
+  searchContainerFocused: {
+    borderColor: "#5F9C76",
+    shadowColor: "#5F9C76",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 4,
+    elevation: 2,
   },
   searchIcon: { marginRight: 8 },
-  searchInput: { flex: 1, height: 40 },
+  searchInput: {
+    flex: 1,
+    minWidth: 0,
+    height: 44,
+    color: "#25332a",
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    outlineStyle: "none",
+  },
+
+  addEventButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "#5F9C76",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    height: 44,
+    flexShrink: 0,
+  },
+  addEventText: { color: "#FFFFFF", fontSize: 13, fontWeight: "700" },
 
   filterBtn: {
     marginLeft: 10,

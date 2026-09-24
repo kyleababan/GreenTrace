@@ -14,6 +14,15 @@ import { doc, getDoc } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import { auth, db } from "../firebaseConfig";
 
+const getInitials = (name) =>
+  name
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase() || "A";
+
 export default function Sidebar() {
   const router = useRouter();
   const [admin, setAdmin] = useState(null);
@@ -42,15 +51,16 @@ export default function Sidebar() {
     ? [admin.firstName, admin.lastName].filter(Boolean).join(" ")
     : "Admin";
   const adminRole = admin?.role || "admin";
+  const adminInitials = getInitials(adminName);
 
   return (
     <View style={[styles.sidebar, { width: sidebarWidth }]}>
-      {/* LOGO */}
-
-      {/* <Image
-        source={require("../assets/images/minicon.png")}
+      {/* ADMIN TOOL LABEL */}
+      <Image
+        source={require("../assets/images/GT-admintool-label.png")}
         style={styles.logo}
-      /> */}
+        resizeMode="contain"
+      />
 
       {/* ADMIN PROFILE */}
 
@@ -58,10 +68,9 @@ export default function Sidebar() {
         style={styles.divider}
         onPress={() => router.push("/admin/profile")}
       >
-        <Image
-          source={require("../assets/images/profile.png")}
-          style={styles.Aprofile}
-        />
+        <View style={styles.Aprofile}>
+          <Text style={styles.avatarText}>{adminInitials}</Text>
+        </View>
 
         <View>
           <Text style={styles.adminName}>{adminName}</Text>
@@ -157,73 +166,82 @@ export default function Sidebar() {
 const styles = StyleSheet.create({
   sidebar: {
     backgroundColor: "#599A74",
-    padding: 20,
+    padding: 14,
+    flexShrink: 0,
   },
 
   logo: {
-    width: 200,
-    height: 100,
-    marginBottom: 30,
-    resizeMode: "contain",
+    width: "85%",
+    height: 56,
+    marginBottom: 14,
+    alignSelf: "flex-start",
   },
 
   divider: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 20,
+    marginBottom: 12,
+    minWidth: 0,
   },
 
   adminName: {
     color: "#fff",
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: "bold",
+    flexShrink: 1,
   },
 
   adminRole: {
     color: "#fff",
-    fontSize: 14,
+    fontSize: 12,
   },
 
   Aprofile: {
-    width: 100,
-    height: 100,
-    borderRadius: 25,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     marginRight: 10,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
   },
 
+  avatarText: { color: "#599A74", fontSize: 18, fontWeight: "700" },
+
   menu: {
-    marginTop: 10,
+    marginTop: 2,
   },
 
   item: {
     width: "100%",
 
-    height: 70,
+    minHeight: 58,
 
     backgroundColor: "#f1f1f1",
 
     borderRadius: 10,
 
-    marginVertical: 10,
+    marginVertical: 5,
 
     flexDirection: "row",
 
     alignItems: "center",
 
-    paddingLeft: 25,
+    paddingHorizontal: 14,
 
-    gap: 15,
+    gap: 12,
   },
 
   icon: {
-    width: 25,
-    height: 25,
+    width: 24,
+    height: 24,
   },
 
   itemText: {
+    flex: 1,
     color: "#599A74",
 
-    fontSize: 15,
+    fontSize: 14,
 
     fontWeight: "bold",
   },
@@ -235,19 +253,19 @@ const styles = StyleSheet.create({
 
     alignItems: "center",
 
-    gap: 10,
+    gap: 8,
   },
 
   settings: {
-    width: 60,
+    width: 48,
 
-    height: 60,
+    height: 48,
   },
 
   logoutContainer: {
     flex: 1,
 
-    height: 60,
+    minHeight: 48,
 
     backgroundColor: "#f1f1f1",
 
@@ -261,7 +279,7 @@ const styles = StyleSheet.create({
   logout: {
     color: "#FF6666",
 
-    fontSize: 20,
+    fontSize: 15,
 
     fontWeight: "bold",
   },

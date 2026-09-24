@@ -66,7 +66,9 @@ export default function CreateReport() {
 
   const [manualBarangay, setManualBarangay] = useState("");
   const [manualPurok, setManualPurok] = useState("");
+  const [locationChoiceModal, setLocationChoiceModal] = useState(false);
   const [manualLocationModal, setManualLocationModal] = useState(false);
+  const [gpsModalVisible, setGpsModalVisible] = useState(false);
   const [barangayDropdownOpen, setBarangayDropdownOpen] = useState(false);
   const [errors, setErrors] = useState({});
   const [locationName, setLocationName] = useState("");
@@ -256,7 +258,7 @@ export default function CreateReport() {
                 styles.locationRow,
                 errors.location && styles.errorBorder,
               ]}
-              onPress={() => setManualLocationModal(true)}
+              onPress={() => setLocationChoiceModal(true)}
             >
               <Image
                 source={require("../assets/images/location.png")}
@@ -328,7 +330,52 @@ export default function CreateReport() {
         </View>
 
         {/* NAVBAR (ALWAYS AT BOTTOM) */}
-        <Modal visible={manualLocationModal} transparent animationType="fade">
+        <Modal
+          visible={locationChoiceModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setLocationChoiceModal(false)}
+        >
+          <View style={styles.modalBackground}>
+            <View style={styles.modalBox}>
+              <Text style={styles.modalTitle}>Choose Location Method</Text>
+
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={() => {
+                  setLocationChoiceModal(false);
+                  setManualLocationModal(true);
+                }}
+              >
+                <Text style={styles.modalButtonText}>Add Manually</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={() => {
+                  setLocationChoiceModal(false);
+                  setGpsModalVisible(true);
+                }}
+              >
+                <Text style={styles.modalButtonText}>Use GPS Tracking</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.modalCancel}
+                onPress={() => setLocationChoiceModal(false)}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal
+          visible={manualLocationModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setManualLocationModal(false)}
+        >
           <View style={styles.modalBackground}>
             <View style={styles.modalBox}>
               <Text style={styles.modalTitle}>Enter Location</Text>
@@ -425,6 +472,45 @@ export default function CreateReport() {
             </View>
           </View>
         </Modal>
+        <Modal
+          visible={gpsModalVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setGpsModalVisible(false)}
+        >
+          <View style={styles.modalBackground}>
+            <View style={[styles.modalBox, styles.gpsModalBox]}>
+              <Text style={styles.modalTitle}>GPS Tracking</Text>
+              <View style={styles.gpsPlaceholder} />
+              <View style={styles.gpsDetails}>
+                <View style={styles.gpsCoordinateRow}>
+                  <View style={styles.gpsDetailItem}>
+                    <Text style={styles.gpsDetailLabel}>Latitude</Text>
+                    <Text style={styles.gpsDetailValue}>--</Text>
+                  </View>
+                  <View style={styles.gpsDetailItem}>
+                    <Text style={styles.gpsDetailLabel}>Longitude</Text>
+                    <Text style={styles.gpsDetailValue}>--</Text>
+                  </View>
+                </View>
+                <View style={styles.gpsAddressRow}>
+                  <Text style={styles.gpsDetailLabel}>Barangay / Purok</Text>
+                  <Text style={styles.gpsDetailValue}>--</Text>
+                </View>
+                <View style={styles.gpsAddressRow}>
+                  <Text style={styles.gpsDetailLabel}>Street</Text>
+                  <Text style={styles.gpsDetailValue}>--</Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                style={styles.modalCancel}
+                onPress={() => setGpsModalVisible(false)}
+              >
+                <Text style={styles.modalCancelText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
         <View style={styles.navbarContainer}>
           <Navbar />
         </View>
@@ -510,6 +596,8 @@ const styles = StyleSheet.create({
 
   username: {
     fontWeight: "600",
+    fontSize: 14,
+    color: "#24352A",
   },
 
   postButton: {
@@ -556,7 +644,8 @@ const styles = StyleSheet.create({
     marginRight: 5,
   },
   locationText: {
-    color: "#555",
+    color: "#405047",
+    fontSize: 14,
   },
 
   captionInput: {
@@ -566,6 +655,8 @@ const styles = StyleSheet.create({
     height: 80,
     marginTop: 10,
     textAlignVertical: "top",
+    color: "#24352A",
+    fontSize: 14,
   },
   titleInput: {
     backgroundColor: "#E5E5E5",
@@ -573,6 +664,8 @@ const styles = StyleSheet.create({
     padding: 10,
     marginTop: 10,
     fontWeight: "600",
+    color: "#24352A",
+    fontSize: 14,
   },
   imageBox: {
     width: "100%",
@@ -639,10 +732,71 @@ const styles = StyleSheet.create({
     padding: 20,
   },
 
+  gpsModalBox: {
+    width: "92%",
+    maxWidth: 820,
+    padding: 24,
+  },
+
   modalTitle: {
     fontSize: 18,
     fontWeight: "bold",
     marginBottom: 15,
+  },
+
+  modalButtonText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+
+  modalCancelText: {
+    color: "#405047",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+
+  gpsPlaceholder: {
+    height: 240,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#E2E8E4",
+    backgroundColor: "#FAFCFB",
+  },
+
+  gpsDetails: {
+    marginTop: 16,
+    gap: 10,
+  },
+
+  gpsCoordinateRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+
+  gpsDetailItem: {
+    flex: 1,
+    padding: 10,
+    borderRadius: 8,
+    backgroundColor: "#F4F8F5",
+  },
+
+  gpsAddressRow: {
+    padding: 10,
+    borderRadius: 8,
+    backgroundColor: "#F4F8F5",
+  },
+
+  gpsDetailLabel: {
+    color: "#52675A",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+
+  gpsDetailValue: {
+    color: "#24352A",
+    fontSize: 14,
+    marginTop: 4,
   },
 
   modalButton: {

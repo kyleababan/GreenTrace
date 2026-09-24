@@ -474,6 +474,8 @@ const styles = StyleSheet.create({
 
   username: {
     fontWeight: "600",
+    fontSize: 14,
+    color: "#24352A",
   },
 
   postButton: {
@@ -501,7 +503,8 @@ const styles = StyleSheet.create({
   },
 
   locationText: {
-    color: "#555",
+    color: "#405047",
+    fontSize: 14,
   },
   postedAt: {
     color: "#8A8A8A",
@@ -517,6 +520,8 @@ const styles = StyleSheet.create({
     height: 80,
     marginTop: 10,
     textAlignVertical: "top",
+    color: "#24352A",
+    fontSize: 14,
   },
   titleInput: {
     backgroundColor: "#E5E5E5",
@@ -524,6 +529,8 @@ const styles = StyleSheet.create({
     padding: 10,
     marginTop: 10,
     fontWeight: "600",
+    color: "#24352A",
+    fontSize: 14,
   },
 
   imageBox: {

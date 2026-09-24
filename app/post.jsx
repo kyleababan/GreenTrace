@@ -909,7 +909,7 @@ const styles = StyleSheet.create({
   reactCount: {
     fontSize: 13,
     fontWeight: "600",
-    color: "#555",
+    color: "#405047",
     marginRight: 4,
   },
   settingsButtonTrigger: {
@@ -1052,7 +1052,7 @@ const styles = StyleSheet.create({
   commentLabel: {
     fontSize: 15,
     fontWeight: "700",
-    color: "#333",
+    color: "#24352A",
   },
   commentRow: {
     flexDirection: "row",
@@ -1067,7 +1067,7 @@ const styles = StyleSheet.create({
     height: 44,
     paddingHorizontal: 16,
     fontSize: 14,
-    color: "#333",
+    color: "#24352A",
     borderWidth: 1,
     borderColor: "#E2E8F0",
   },
@@ -1120,7 +1120,7 @@ const styles = StyleSheet.create({
   commentUsername: {
     fontSize: 13,
     fontWeight: "700",
-    color: "#222",
+    color: "#24352A",
   },
   commentPoints: {
     fontSize: 11,
@@ -1129,7 +1129,7 @@ const styles = StyleSheet.create({
   },
   commentText: {
     fontSize: 13,
-    color: "#444",
+    color: "#405047",
     lineHeight: 18,
   },
 

@@ -703,7 +703,9 @@ export default function PickupSchedule() {
                               setBarangayDropdownOpen(false);
                             }}
                           >
-                            <Text style={styles.barangayOptionText}>{name}</Text>
+                            <Text style={styles.barangayOptionText}>
+                              {name}
+                            </Text>
                           </TouchableOpacity>
                         ))}
                         {matchingBarangays.length === 0 && (
@@ -1274,6 +1276,7 @@ const styles = StyleSheet.create({
     color: "#1F2937",
     backgroundColor: "#FAFCFB",
     marginBottom: 14,
+    outlineStyle: "none",
   },
   locationFields: {
     flexDirection: "row",
@@ -1346,6 +1349,8 @@ const styles = StyleSheet.create({
     paddingVertical: 11,
     fontSize: 14,
     color: "#1F2937",
+    borderWidth: 0,
+    outlineStyle: "none",
   },
   recurrenceRow: {
     flexDirection: "row",
@@ -1380,6 +1385,7 @@ const styles = StyleSheet.create({
   instructionsInput: {
     minHeight: 82,
     textAlignVertical: "top",
+    outlineStyle: "none",
   },
   formErrorBox: {
     backgroundColor: "#FEF2F2",

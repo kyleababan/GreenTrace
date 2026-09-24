@@ -30,6 +30,12 @@ import { db } from "../../../../firebaseConfig";
 import { hideBadWords } from "../../../../utils/hideBadWords";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => {
+  const hour24 = Math.floor(index / 2);
+  const hour = hour24 % 12 || 12;
+  const minute = index % 2 === 0 ? "00" : "30";
+  return `${hour}:${minute} ${hour24 >= 12 ? "PM" : "AM"}`;
+});
 
 const formatDateKey = (date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -83,6 +89,11 @@ export default function VolunteerPostCreate({
   const [meetingDate, setMeetingDate] = useState(null);
   const [meetingTime, setMeetingTime] = useState("");
   const [showCalendar, setShowCalendar] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [showLocationChoice, setShowLocationChoice] = useState(false);
+  const [showLocationEditor, setShowLocationEditor] = useState(false);
+  const [showGpsPlaceholder, setShowGpsPlaceholder] = useState(false);
+  const [locationDraft, setLocationDraft] = useState("");
   const [visibleMonth, setVisibleMonth] = useState(() => new Date());
   const [maxVolunteers, setMaxVolunteers] = useState(
     suppliedPost?.maxVolunteers ? String(suppliedPost.maxVolunteers) : "",
@@ -162,7 +173,9 @@ export default function VolunteerPostCreate({
         ? { meetingLocation: "Meeting location is required." }
         : {}),
       ...(!meetingDate ? { meetingDate: "Select a meeting date." } : {}),
-      ...(!meetingTime.trim() ? { meetingTime: "Meeting time is required." } : {}),
+      ...(!meetingTime.trim()
+        ? { meetingTime: "Meeting time is required." }
+        : {}),
       ...(!maxVolunteers || Number(maxVolunteers) < 1
         ? { maxVolunteers: "Enter at least 1 volunteer." }
         : {}),
@@ -303,7 +316,11 @@ export default function VolunteerPostCreate({
               <Text style={styles.fieldLabel}>Meeting date and time</Text>
               <View style={styles.meetingDateRow}>
                 <TouchableOpacity
-                  style={[styles.inputBox, { flex: 1 }, errors.meetingDate && styles.inputError]}
+                  style={[
+                    styles.inputBox,
+                    { flex: 1 },
+                    errors.meetingDate && styles.inputError,
+                  ]}
                   onPress={() => {
                     clearError("meetingDate");
                     setShowCalendar(true);
@@ -326,18 +343,28 @@ export default function VolunteerPostCreate({
                   </Text>
                 </TouchableOpacity>
 
-                <View style={[styles.inputBox, { flex: 1 }]}>
+                <TouchableOpacity
+                  style={[
+                    styles.inputBox,
+                    styles.pickerInput,
+                    { flex: 1 },
+                    errors.meetingTime && styles.inputError,
+                  ]}
+                  onPress={() => {
+                    clearError("meetingTime");
+                    setShowTimePicker(true);
+                  }}
+                >
                   <Ionicons name="time-outline" size={20} color="#276344" />
-                  <TextInput
-                    placeholder="Time (e.g. 8:00 AM)"
-                    value={meetingTime}
-                    onChangeText={(value) => {
-                      setMeetingTime(value);
-                      clearError("meetingTime");
-                    }}
-                    style={[styles.input, { marginLeft: 8 }, errors.meetingTime && styles.inputError]}
-                  />
-                </View>
+                  <Text
+                    style={[
+                      styles.dateValue,
+                      !meetingTime && styles.placeholderValue,
+                    ]}
+                  >
+                    {meetingTime || "Meeting time"}
+                  </Text>
+                </TouchableOpacity>
               </View>
               {errors.meetingDate && (
                 <Text style={styles.fieldError}>{errors.meetingDate}</Text>
@@ -365,7 +392,9 @@ export default function VolunteerPostCreate({
                 }}
               />
             </View>
-            {errors.title && <Text style={styles.fieldError}>{errors.title}</Text>}
+            {errors.title && (
+              <Text style={styles.fieldError}>{errors.title}</Text>
+            )}
             <View style={[styles.inputBox, { minHeight: 100 }]}>
               <TextInput
                 placeholder="Write something"
@@ -375,11 +404,17 @@ export default function VolunteerPostCreate({
                   clearError("desc");
                 }}
                 multiline
-                style={[styles.input, { minHeight: 100 }, errors.desc && styles.inputError]}
+                style={[
+                  styles.input,
+                  { minHeight: 100 },
+                  errors.desc && styles.inputError,
+                ]}
                 textAlignVertical="top"
               />
             </View>
-            {errors.desc && <Text style={styles.fieldError}>{errors.desc}</Text>}
+            {errors.desc && (
+              <Text style={styles.fieldError}>{errors.desc}</Text>
+            )}
 
             <View style={styles.requirementBox}>
               <Text style={styles.fieldLabel}>Requirements</Text>
@@ -395,7 +430,10 @@ export default function VolunteerPostCreate({
                       updateRequirement(text, index);
                       clearError("requirements");
                     }}
-                    style={[styles.requirementInput, errors.requirements && styles.inputError]}
+                    style={[
+                      styles.requirementInput,
+                      errors.requirements && styles.inputError,
+                    ]}
                   />
                   {requirements.length > 1 && (
                     <TouchableOpacity
@@ -423,19 +461,25 @@ export default function VolunteerPostCreate({
             </View>
 
             <View style={styles.meetingBox}>
-              <Text style={styles.fieldLabel}>Meeting details</Text>
-              <View style={styles.inputBox}>
-                <Ionicons name="location-outline" size={20} color="#276344" />
-                <TextInput
-                  placeholder="Meeting location"
-                  value={meetingLocation}
-                  onChangeText={(value) => {
-                    setMeetingLocation(value);
-                    clearError("meetingLocation");
-                  }}
-                  style={[styles.input, { marginLeft: 8 }, errors.meetingLocation && styles.inputError]}
-                />
-              </View>
+              <Text style={styles.fieldLabel}>Meet up area</Text>
+              <TouchableOpacity
+                style={[
+                  styles.inputBox,
+                  styles.meetupLocationBox,
+                  errors.meetingLocation && styles.inputError,
+                ]}
+                onPress={() => {
+                  setLocationDraft(meetingLocation);
+                  setShowLocationChoice(true);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Set meetup area"
+              >
+                <Ionicons name="location-outline" size={20} color="#FFFFFF" />
+                <Text style={styles.meetupLocationText}>
+                  {meetingLocation || "Add meetup area"}
+                </Text>
+              </TouchableOpacity>
             </View>
             {errors.meetingLocation && (
               <Text style={styles.fieldError}>{errors.meetingLocation}</Text>
@@ -445,7 +489,7 @@ export default function VolunteerPostCreate({
               <View style={[styles.inputBox, { flex: 1 }]}>
                 <Ionicons name="people-outline" size={20} color="#276344" />
                 <TextInput
-                  placeholder="Max"
+                  placeholder="Max volunteers"
                   keyboardType="numeric"
                   value={maxVolunteers}
                   onChangeText={(text) => {
@@ -453,7 +497,10 @@ export default function VolunteerPostCreate({
                     clearError("maxVolunteers");
                   }}
                   maxLength={3}
-                  style={[styles.maxVolunteerInput, errors.maxVolunteers && styles.inputError]}
+                  style={[
+                    styles.maxVolunteerInput,
+                    errors.maxVolunteers && styles.inputError,
+                  ]}
                 />
               </View>
             </View>
@@ -585,6 +632,135 @@ export default function VolunteerPostCreate({
           </View>
         </View>
       </Modal>
+
+      <Modal
+        visible={showTimePicker}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowTimePicker(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.timeModal}>
+            <View style={styles.calendarHeader}>
+              <Text style={styles.calendarTitle}>Select meeting time</Text>
+              <TouchableOpacity onPress={() => setShowTimePicker(false)}>
+                <Ionicons name="close" size={25} color="#526158" />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.timeList}>
+              {TIME_OPTIONS.map((timeOption) => (
+                <TouchableOpacity
+                  key={timeOption}
+                  style={[
+                    styles.timeOption,
+                    meetingTime === timeOption && styles.selectedTime,
+                  ]}
+                  onPress={() => {
+                    setMeetingTime(timeOption);
+                    setShowTimePicker(false);
+                  }}
+                >
+                  <Ionicons name="time-outline" size={18} color="#276344" />
+                  <Text style={styles.timeOptionText}>{timeOption}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showLocationChoice}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowLocationChoice(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.timeModal}>
+            <View style={styles.calendarHeader}>
+              <Text style={styles.calendarTitle}>Choose meetup area</Text>
+              <TouchableOpacity onPress={() => setShowLocationChoice(false)}>
+                <Ionicons name="close" size={25} color="#526158" />
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity
+              style={styles.modalActionButton}
+              onPress={() => {
+                setShowLocationChoice(false);
+                setShowLocationEditor(true);
+              }}
+            >
+              <Text style={styles.modalActionText}>Add manually</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.modalActionButton}
+              onPress={() => {
+                setShowLocationChoice(false);
+                setShowGpsPlaceholder(true);
+              }}
+            >
+              <Text style={styles.modalActionText}>Use GPS tracking</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showLocationEditor}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowLocationEditor(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.timeModal}>
+            <View style={styles.calendarHeader}>
+              <Text style={styles.calendarTitle}>Meet up area</Text>
+              <TouchableOpacity onPress={() => setShowLocationEditor(false)}>
+                <Ionicons name="close" size={25} color="#526158" />
+              </TouchableOpacity>
+            </View>
+            <TextInput
+              value={locationDraft}
+              onChangeText={setLocationDraft}
+              placeholder="Barangay, Purok, or street"
+              placeholderTextColor="#91A198"
+              style={styles.locationModalInput}
+            />
+            <TouchableOpacity
+              style={styles.modalActionButton}
+              onPress={() => {
+                setMeetingLocation(locationDraft.trim());
+                clearError("meetingLocation");
+                setShowLocationEditor(false);
+              }}
+            >
+              <Text style={styles.modalActionText}>Save meetup area</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showGpsPlaceholder}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowGpsPlaceholder(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.timeModal}>
+            <View style={styles.calendarHeader}>
+              <Text style={styles.calendarTitle}>GPS tracking</Text>
+              <TouchableOpacity onPress={() => setShowGpsPlaceholder(false)}>
+                <Ionicons name="close" size={25} color="#526158" />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.gpsPlaceholder} />
+            <Text style={styles.gpsHint}>
+              GPS location will be available soon.
+            </Text>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -616,8 +792,16 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 12,
     minHeight: 48,
+    borderWidth: 1,
+    borderColor: "transparent",
   },
-  input: { flex: 1, fontSize: 15, paddingVertical: 10 },
+  input: {
+    flex: 1,
+    fontSize: 15,
+    paddingVertical: 10,
+    borderWidth: 0,
+    outlineStyle: "none",
+  },
   requirementBox: {
     backgroundColor: "#fff",
     borderRadius: 8,
@@ -643,6 +827,8 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     paddingHorizontal: 10,
     height: 42,
+    borderWidth: 0,
+    outlineStyle: "none",
   },
   addButton: {
     flexDirection: "row",
@@ -659,6 +845,50 @@ const styles = StyleSheet.create({
     padding: 12,
     gap: 10,
   },
+  meetupLocationBox: {
+    backgroundColor: "#5F9C76",
+    borderColor: "transparent",
+  },
+  meetupLocationInput: {
+    marginLeft: 8,
+    color: "#FFFFFF",
+  },
+  meetupLocationText: {
+    flex: 1,
+    marginLeft: 8,
+    color: "#FFFFFF",
+    fontSize: 15,
+  },
+  modalActionButton: {
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 12,
+    borderRadius: 8,
+    backgroundColor: "#5F9C76",
+  },
+  modalActionText: { color: "#FFFFFF", fontWeight: "700", fontSize: 14 },
+  locationModalInput: {
+    minHeight: 48,
+    marginTop: 14,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: "#D8E3DC",
+    borderRadius: 8,
+    backgroundColor: "#FAFCFB",
+    color: "#24352A",
+    fontSize: 14,
+    outlineStyle: "none",
+  },
+  gpsPlaceholder: {
+    height: 180,
+    marginTop: 14,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#D8E3DC",
+    backgroundColor: "#FAFCFB",
+  },
+  gpsHint: { color: "#718078", textAlign: "center", marginTop: 10 },
   imageMeetingDetails: {
     marginTop: 12,
     padding: 12,
@@ -667,13 +897,16 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
   },
   meetingDateRow: { flexDirection: "row", gap: 10 },
+  pickerInput: { borderColor: "#D8E3DC", backgroundColor: "#FAFCFB" },
   dateValue: { flex: 1, marginLeft: 8, color: "#1D2B21", fontSize: 14 },
   placeholderValue: { color: "#777" },
   maxVolunteerInput: {
     flex: 1,
-    textAlign: "center",
+    textAlign: "left",
     fontWeight: "700",
     paddingVertical: 10,
+    borderWidth: 0,
+    outlineStyle: "none",
   },
   saveBtn: {
     backgroundColor: "#5F9C76",
@@ -697,6 +930,24 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     backgroundColor: "#FFFFFF",
   },
+  timeModal: {
+    width: "100%",
+    maxWidth: 430,
+    maxHeight: "80%",
+    padding: 20,
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
+  },
+  timeList: { maxHeight: 360, marginTop: 12 },
+  timeOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    padding: 12,
+    borderRadius: 8,
+  },
+  selectedTime: { backgroundColor: "#EDF7F0" },
+  timeOptionText: { color: "#24352A", fontSize: 14 },
   calendarHeader: {
     flexDirection: "row",
     justifyContent: "space-between",

@@ -915,7 +915,16 @@ export default function Home() {
                 )}
 
                 {post.status === "cleaned" && post.afterImageUrl && (
-                  <View style={styles.cleanupResult}>
+                  <TouchableOpacity
+                    style={styles.cleanupResult}
+                    activeOpacity={0.9}
+                    onPress={() =>
+                      router.push({
+                        pathname: "/post",
+                        params: { id: post.id },
+                      })
+                    }
+                  >
                     <View style={styles.cleanupResultHeader}>
                       <Text style={styles.cleanupResultTitle}>
                         Cleanup Result
@@ -942,7 +951,7 @@ export default function Home() {
                         />
                       </View>
                     </View>
-                  </View>
+                  </TouchableOpacity>
                 )}
 
                 {/* Image Container */}
@@ -1312,6 +1321,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#F4FAF6",
     borderWidth: 1,
     borderColor: "#D8E6DC",
+    width: "100%",
   },
   cleanupResultHeader: {
     flexDirection: "row",
@@ -1372,7 +1382,11 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 6,
   },
-  statusText: { color: "#FFFFFF", fontSize: 10, fontWeight: "700" },
+  statusText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "700",
+  },
 
   /* Actions */
   actionsContainer: {
@@ -1399,6 +1413,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "600",
     color: "#555",
+    fontFamily: "sans-serif-medium",
   },
   commentBox: {
     flex: 1,

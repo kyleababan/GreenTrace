@@ -40,6 +40,7 @@ export default function UserList() {
   const router = useRouter();
   const { width } = useWindowDimensions();
   const [users, setUsers] = useState([]);
+  const [searchFocused, setSearchFocused] = useState(false);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -106,7 +107,12 @@ export default function UserList() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.searchContainer}>
+      <View
+        style={[
+          styles.searchContainer,
+          searchFocused && styles.searchContainerFocused,
+        ]}
+      >
         <Ionicons
           name="search"
           size={20}
@@ -119,6 +125,8 @@ export default function UserList() {
           placeholderTextColor="#78847c"
           value={search}
           onChangeText={setSearch}
+          onFocus={() => setSearchFocused(true)}
+          onBlur={() => setSearchFocused(false)}
         />
       </View>
 
@@ -191,12 +199,31 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     marginBottom: 15,
+    minHeight: 44,
     backgroundColor: "#fff",
     borderRadius: 10,
     paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: "transparent",
+  },
+  searchContainerFocused: {
+    borderColor: "#5F9C76",
+    shadowColor: "#5F9C76",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 4,
+    elevation: 2,
   },
   searchIcon: { marginRight: 8 },
-  searchInput: { flex: 1, height: 44, color: "#25332a" },
+  searchInput: {
+    flex: 1,
+    minWidth: 0,
+    height: 44,
+    color: "#25332a",
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    outlineStyle: "none",
+  },
   stateContainer: {
     flex: 1,
     alignItems: "center",
