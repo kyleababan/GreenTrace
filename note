@@ -12,6 +12,9 @@ git push -u origin main
 git branch // check if its on assistant-work, not on main
 git pull
 
+//check which branch youre in
+git branch
+
 // if its on main then do
 git switch assistant-work
 git pull
