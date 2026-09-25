@@ -1,4 +1,5 @@
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
+import { Platform } from "react-native";
 
 const MAX_BYTES = 2.5 * 1024 * 1024; // 2.5 MB
 
@@ -161,6 +162,79 @@ async function compressWeb(image) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Main upload function
+// Flow: Compress (≤ 2.5MB) -> Moderate & Classify with AI FIRST -> Safe? Upload : NSFW? Block!
+// ---------------------------------------------------------------------------
+export const uploadToCloudinary = async (image, options = {}) => {
+  let fileToUpload;
+  let base64Data = "";
+
+  // 1. Compress image to stay under 2.5 MB & get base64
+  if (Platform.OS === "web") {
+    const compressed = await compressWeb(image);
+    fileToUpload = compressed.blob;
+    base64Data = compressed.base64;
+  } else {
+    const compressed = await compressNative(image.uri);
+    fileToUpload = {
+      uri: compressed.uri,
+      type: "image/jpeg",
+      name: image.fileName ?? "upload.jpg",
+    };
+    base64Data = compressed.base64;
+  }
+
+  // 2. CHECK CONTENT WITH GEMINI VISION BEFORE UPLOADING
+  // Moderates for NSFW/inappropriate and classifies waste in a single call.
+  // If flagged as unsafe, rejects BEFORE it ever reaches Cloudinary.
+  let classification = null;
+  if (base64Data && !options.skipModeration && !options.skipAi) {
+    classification = await verifyGeminiModerationAndClassification(
+      base64Data,
+      options,
+    );
+  }
+
+  // 3. Image is safe — now upload to Cloudinary
+  const data = new FormData();
+
+  if (Platform.OS === "web") {
+    data.append(
+      "file",
+      fileToUpload,
+      image?.file?.name ?? image?.fileName ?? "upload.jpg",
+    );
+  } else {
+    data.append("file", fileToUpload);
+  }
+
+  data.append("upload_preset", "greentrace_uploads");
+  data.append("cloud_name", "dah7khha8");
+
+  const res = await fetch(
+    "https://api.cloudinary.com/v1_1/dah7khha8/image/upload",
+    {
+      method: "POST",
+      body: data,
+    },
+  );
+
+  const result = await res.json();
+
+  if (!result.secure_url) {
+    throw new Error(result.error?.message || "Cloudinary upload failed");
+  }
+
+  if (options.classifyWaste) {
+    return {
+      secureUrl: result.secure_url,
+      classification,
+    };
+  }
+
+  return result.secure_url;
+};
 
 // ---------------------------------------------------------------------------
 // Helper: verify moderation & classify waste with Gemini 3.5 Flash Lite (Free)
