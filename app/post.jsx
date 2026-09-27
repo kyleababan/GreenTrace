@@ -84,6 +84,7 @@ export default function Post() {
   const [showSettings, setShowSettings] = useState(false);
   const [sendingComment, setSendingComment] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletingPost, setDeletingPost] = useState(false);
   const [reactionLoading, setReactionLoading] = useState(false);
   const [expandedCaption, setExpandedCaption] = useState(false);
   const [hasMoreComments, setHasMoreComments] = useState(true);
@@ -775,6 +776,7 @@ export default function Post() {
             animationType="fade"
             transparent={true}
             visible={showDeleteModal}
+            onRequestClose={() => !deletingPost && setShowDeleteModal(false)}
           >
             <View style={styles.settingsOverlay}>
               <View style={styles.settingsBox}>
@@ -786,22 +788,47 @@ export default function Post() {
                 </Text>
 
                 <TouchableOpacity
-                  style={styles.confirmDeleteBtn}
+                  style={[
+                    styles.confirmDeleteBtn,
+                    deletingPost && { opacity: 0.6 },
+                  ]}
+                  disabled={deletingPost}
                   onPress={async () => {
+                    if (deletingPost) return;
                     try {
+                      setDeletingPost(true);
                       await deleteRelatedDocuments(post.id);
                       setShowDeleteModal(false);
                       router.replace("/home");
                     } catch (error) {
                       console.log(error);
+                      setDeletingPost(false);
                     }
                   }}
                 >
-                  <Text style={styles.confirmDeleteText}>Delete</Text>
+                  {deletingPost ? (
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 8,
+                      }}
+                    >
+                      <ActivityIndicator size="small" color="#fff" />
+                      <Text style={styles.confirmDeleteText}>Deleting...</Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.confirmDeleteText}>Delete</Text>
+                  )}
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={styles.cancelModalButton}
+                  style={[
+                    styles.cancelModalButton,
+                    deletingPost && { opacity: 0.5 },
+                  ]}
+                  disabled={deletingPost}
                   onPress={() => setShowDeleteModal(false)}
                 >
                   <Text style={styles.cancelModalText}>Cancel</Text>

@@ -1,10 +1,14 @@
+import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
+import * as Location from "expo-location";
 import { useRouter } from "expo-router";
 import { signOut } from "firebase/auth";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Image,
   Modal,
+  Platform,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -116,18 +120,257 @@ export default function CreateReport() {
     loadUser();
   }, []);
 
-  const pickImage = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      quality: 0.8,
-      allowsEditing: true,
-    });
+  // Camera & GPS State
+  const [imageSourceModalVisible, setImageSourceModalVisible] = useState(false);
+  const [coords, setCoords] = useState({
+    latitude: 10.2705,
+    longitude: 123.5855,
+  });
+  const [postCoordinates, setPostCoordinates] = useState(null);
+  const [gpsBarangay, setGpsBarangay] = useState("");
+  const [gpsStreet, setGpsStreet] = useState("");
+  const [gpsLoading, setGpsLoading] = useState(false);
+  const [gpsReverseLoading, setGpsReverseLoading] = useState(false);
+  const [mapSessionId, setMapSessionId] = useState(1);
+  const reverseGeocodeTimeoutRef = useRef(null);
 
-    if (result.canceled) return;
+  // Report Posting Guidelines & Instructions Modal States
+  const [guideModalVisible, setGuideModalVisible] = useState(false);
+  const [guideStep, setGuideStep] = useState(0);
+  const [locationStatus, setLocationStatus] = useState(null); // 'checking' | 'granted' | 'denied'
+  const [locationMessage, setLocationMessage] = useState("");
 
-    const asset = result.assets[0];
+  const testAndRequestLocationPermission = async () => {
+    setLocationStatus("checking");
+    setLocationMessage("Checking and requesting location access...");
 
-    // Reject videos
+    try {
+      if (
+        Platform.OS === "web" &&
+        typeof navigator !== "undefined" &&
+        navigator.geolocation
+      ) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const newLat = parseFloat(pos.coords.latitude.toFixed(6));
+            const newLng = parseFloat(pos.coords.longitude.toFixed(6));
+            setLocationStatus("granted");
+            setLocationMessage(
+              `✅ Location allowed & active! (GPS: ${newLat}, ${newLng}). Make sure device location toggle is ON.`,
+            );
+            setCoords({ latitude: newLat, longitude: newLng });
+            setMapSessionId((prev) => prev + 1);
+          },
+          (err) => {
+            setLocationStatus("denied");
+            if (err.code === 1) {
+              setLocationMessage(
+                "❌ Permission denied. In your browser URL bar, click the lock / site settings icon, set Location to 'Allow', and reload the page.",
+              );
+            } else {
+              setLocationMessage(
+                "⚠️ Could not retrieve GPS location. Please make sure your device Location / GPS switch is turned ON.",
+              );
+            }
+          },
+          { enableHighAccuracy: true, timeout: 8000 },
+        );
+      } else {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === "granted") {
+          try {
+            const loc = await Location.getCurrentPositionAsync({
+              accuracy: Location.Accuracy.Balanced,
+            });
+            const newLat = parseFloat(loc.coords.latitude.toFixed(6));
+            const newLng = parseFloat(loc.coords.longitude.toFixed(6));
+            setLocationStatus("granted");
+            setLocationMessage(
+              `✅ Location allowed & active! (GPS: ${newLat}, ${newLng})`,
+            );
+            setCoords({ latitude: newLat, longitude: newLng });
+            setMapSessionId((prev) => prev + 1);
+          } catch (gpsErr) {
+            setLocationStatus("granted");
+            setLocationMessage(
+              "✅ Location permission granted! Please ensure your device GPS toggle is turned ON.",
+            );
+          }
+        } else {
+          setLocationStatus("denied");
+          setLocationMessage(
+            "❌ Location permission denied. Please allow GreenTrace location access in your device Settings.",
+          );
+        }
+      }
+    } catch (err) {
+      setLocationStatus("denied");
+      setLocationMessage("⚠️ Error: " + err.message);
+    }
+  };
+
+  // Listen to pin drag/click events from the embedded Leaflet iframe
+  useEffect(() => {
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      const handleWindowMessage = (event) => {
+        try {
+          const payload =
+            typeof event.data === "string"
+              ? JSON.parse(event.data)
+              : event.data;
+          if (payload?.type === "GPS_PIN_MOVED" && payload.lat && payload.lng) {
+            const newLat = parseFloat(Number(payload.lat).toFixed(6));
+            const newLng = parseFloat(Number(payload.lng).toFixed(6));
+            setCoords({ latitude: newLat, longitude: newLng });
+            triggerReverseGeocode(newLat, newLng);
+          }
+        } catch (e) {
+          // Ignore non-JSON messages
+        }
+      };
+
+      window.addEventListener("message", handleWindowMessage);
+      return () => window.removeEventListener("message", handleWindowMessage);
+    }
+  }, [manualBarangay]);
+
+  const triggerReverseGeocode = (lat, lng) => {
+    if (reverseGeocodeTimeoutRef.current) {
+      clearTimeout(reverseGeocodeTimeoutRef.current);
+    }
+    reverseGeocodeTimeoutRef.current = setTimeout(() => {
+      reverseGeocodeCoordinates(lat, lng);
+    }, 400);
+  };
+
+  const reverseGeocodeCoordinates = async (lat, lng) => {
+    try {
+      setGpsReverseLoading(true);
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
+        {
+          headers: {
+            Accept: "application/json",
+          },
+        },
+      );
+      const data = await res.json();
+      if (data && data.address) {
+        const addr = data.address;
+        const candidateBarangay =
+          addr.suburb ||
+          addr.village ||
+          addr.quarter ||
+          addr.neighbourhood ||
+          addr.hamlet ||
+          "";
+
+        // Try to match against official Pinamungajan barangays
+        const matched = BARANGAYS.find(
+          (b) => b.toLowerCase() === candidateBarangay.toLowerCase().trim(),
+        );
+
+        const barangayVal =
+          matched || candidateBarangay || manualBarangay || "Poblacion";
+        const roadVal =
+          addr.road || addr.pedestrian || addr.street || addr.residential || "";
+
+        setGpsBarangay(barangayVal);
+        setGpsStreet(
+          roadVal ||
+            (addr.town || addr.city ? `${addr.town || addr.city}` : ""),
+        );
+      }
+    } catch (err) {
+      console.warn("Reverse geocode error:", err);
+    } finally {
+      setGpsReverseLoading(false);
+    }
+  };
+
+  const detectGpsLocation = async () => {
+    setGpsLoading(true);
+    let lat = 10.2705; // Pinamungajan center default
+    let lng = 123.5855;
+
+    try {
+      if (
+        Platform.OS === "web" &&
+        typeof navigator !== "undefined" &&
+        navigator.geolocation
+      ) {
+        const pos = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 8000,
+            maximumAge: 10000,
+          });
+        });
+        lat = parseFloat(pos.coords.latitude.toFixed(6));
+        lng = parseFloat(pos.coords.longitude.toFixed(6));
+      } else {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === "granted") {
+          const loc = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+          lat = parseFloat(loc.coords.latitude.toFixed(6));
+          lng = parseFloat(loc.coords.longitude.toFixed(6));
+        }
+      }
+    } catch (locErr) {
+      console.warn("Could not get GPS, using Pinamungajan default:", locErr);
+    }
+
+    setCoords({ latitude: lat, longitude: lng });
+    setMapSessionId((prev) => prev + 1);
+    await reverseGeocodeCoordinates(lat, lng);
+    setGpsLoading(false);
+    setGpsModalVisible(true);
+  };
+
+  const handleUseCamera = async () => {
+    setImageSourceModalVisible(false);
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        setErrors((prev) => ({
+          ...prev,
+          image: "Camera permission is required to take a photo.",
+        }));
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ["images"],
+        quality: 0.8,
+        allowsEditing: true,
+      });
+
+      if (result.canceled) return;
+      await processSelectedImage(result.assets[0]);
+    } catch (err) {
+      console.error("Camera error:", err);
+    }
+  };
+
+  const handleUploadGallery = async () => {
+    setImageSourceModalVisible(false);
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        quality: 0.8,
+        allowsEditing: true,
+      });
+
+      if (result.canceled) return;
+      await processSelectedImage(result.assets[0]);
+    } catch (err) {
+      console.error("Gallery error:", err);
+    }
+  };
+
+  const processSelectedImage = async (asset) => {
     if (asset.type === "video") {
       setErrors((previous) => ({
         ...previous,
@@ -136,7 +379,6 @@ export default function CreateReport() {
       return;
     }
 
-    // 2.5 MB limit
     if (asset.fileSize && asset.fileSize > 2.5 * 1024 * 1024) {
       setErrors((previous) => ({
         ...previous,
@@ -151,7 +393,87 @@ export default function CreateReport() {
       delete next.image;
       return next;
     });
+
+    // Automatically trigger GPS tracking detection & show map
+    await detectGpsLocation();
   };
+
+  const handleConfirmGpsLocation = () => {
+    const barangay = gpsBarangay.trim() || manualBarangay || "Poblacion";
+    const street = gpsStreet.trim();
+
+    let purokVal = manualPurok;
+    const purokMatch = street.match(/(?:pk\.?|purok)\s*(\d+|[a-zA-Z0-9]+)/i);
+    if (purokMatch) {
+      purokVal = purokMatch[1];
+      setManualPurok(purokVal);
+    } else if (!manualPurok) {
+      purokVal = "1";
+      setManualPurok("1");
+    }
+
+    setManualBarangay(barangay);
+    setLocationName(`${barangay}, ${street ? street : `Pk. ${purokVal}`}`);
+    setPostCoordinates({
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+    });
+
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next.location;
+      delete next.barangay;
+      delete next.purok;
+      return next;
+    });
+
+    setGpsModalVisible(false);
+  };
+
+  const leafletHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    html, body, #map { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <script>
+    var lat = ${coords.latitude || 10.2705};
+    var lng = ${coords.longitude || 123.5855};
+    var map = L.map('map', {
+      zoomControl: true,
+      attributionControl: false
+    }).setView([lat, lng], 16);
+
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+    }).addTo(map);
+
+    var marker = L.marker([lat, lng], { draggable: true }).addTo(map);
+
+    function notify(pos) {
+      window.parent.postMessage(JSON.stringify({ type: 'GPS_PIN_MOVED', lat: pos.lat, lng: pos.lng }), '*');
+    }
+
+    marker.on('dragend', function() {
+      notify(marker.getLatLng());
+    });
+
+    map.on('click', function(e) {
+      marker.setLatLng(e.latlng);
+      notify(e.latlng);
+    });
+  </script>
+</body>
+</html>
+`;
 
   const createPost = async () => {
     if (uploading) return;
@@ -213,7 +535,15 @@ export default function CreateReport() {
 
           locationName,
 
+          barangay: manualBarangay || null,
+
           purok: normalizePurok(manualPurok) || null,
+
+          coordinates:
+            postCoordinates ||
+            (coords.latitude
+              ? { latitude: coords.latitude, longitude: coords.longitude }
+              : null),
 
           status: "moderate",
 
@@ -291,6 +621,290 @@ export default function CreateReport() {
     }
   };
 
+  const guideSteps = [
+    {
+      stepNumber: 1,
+      title: "1. Turn On & Allow Location",
+      subtitle: "Precise GPS coordinates are required for community response",
+      image: require("../assets/images/guide/step_location.jpg"),
+      badge: "Location & GPS",
+      badgeColor: "#2E7D32",
+      badgeBg: "#E8F5E9",
+      content: (
+        <View style={styles.guideStepContent}>
+          <Text style={styles.guideParagraph}>
+            GreenTrace requires GPS location so LGU personnel and waste
+            collection teams can find the exact area in Pinamungajan.
+          </Text>
+          <Text style={styles.guideParagraph}>
+            Your device GPS must be turned{" "}
+            <Text style={{ fontWeight: "700" }}>ON</Text> and location
+            permissions must be{" "}
+            <Text style={{ fontWeight: "700" }}>ALLOWED</Text>.
+          </Text>
+
+          {/* INTERACTIVE LOCATION PERMISSION CHECKER */}
+          <View style={styles.locationHelpBox}>
+            <View style={styles.locationHelpHeader}>
+              <Ionicons name="location" size={18} color="#276344" />
+              <Text style={styles.locationHelpTitle}>
+                Location Permission Check
+              </Text>
+            </View>
+            <Text style={styles.locationHelpDesc}>
+              Tap below to request or test your browser/device location access:
+            </Text>
+
+            <TouchableOpacity
+              style={styles.locationCheckBtn}
+              onPress={testAndRequestLocationPermission}
+              disabled={locationStatus === "checking"}
+            >
+              {locationStatus === "checking" ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Ionicons name="locate" size={16} color="#FFFFFF" />
+              )}
+              <Text style={styles.locationCheckBtnText}>
+                {locationStatus === "checking"
+                  ? "Checking Location..."
+                  : locationStatus === "granted"
+                    ? "Location Active (Re-check)"
+                    : "Ask / Check Location Permission"}
+              </Text>
+            </TouchableOpacity>
+
+            {locationMessage ? (
+              <View
+                style={[
+                  styles.locationStatusMsgBox,
+                  locationStatus === "granted"
+                    ? styles.locationStatusGranted
+                    : styles.locationStatusDenied,
+                ]}
+              >
+                <Ionicons
+                  name={
+                    locationStatus === "granted"
+                      ? "checkmark-circle"
+                      : "alert-circle"
+                  }
+                  size={18}
+                  color={locationStatus === "granted" ? "#1B5E20" : "#B71C1C"}
+                />
+                <Text
+                  style={[
+                    styles.locationStatusMsgText,
+                    {
+                      color:
+                        locationStatus === "granted" ? "#1B5E20" : "#B71C1C",
+                    },
+                  ]}
+                >
+                  {locationMessage}
+                </Text>
+              </View>
+            ) : null}
+
+            <View style={styles.locationTipsBox}>
+              <Text style={styles.locationTipItem}>
+                • <Text style={{ fontWeight: "700" }}>Browser:</Text> If
+                prompted, click 'Allow'. If blocked, click the lock/settings
+                icon next to the URL bar and enable Location.
+              </Text>
+              <Text style={styles.locationTipItem}>
+                • <Text style={{ fontWeight: "700" }}>Device:</Text> Ensure your
+                phone's GPS / Location switch is turned ON.
+              </Text>
+            </View>
+          </View>
+        </View>
+      ),
+    },
+    {
+      stepNumber: 2,
+      title: "2. Take Clear, Landscape Photos",
+      subtitle: "Wide horizontal shots give crucial environmental context",
+      image: require("../assets/images/guide/step_landscape.jpg"),
+      badge: "Photo Quality",
+      badgeColor: "#0284C7",
+      badgeBg: "#E0F2FE",
+      content: (
+        <View style={styles.guideStepContent}>
+          <Text style={styles.guideParagraph}>
+            Clear environmental photos help LGU responders evaluate waste
+            volume, severity, and needed equipment:
+          </Text>
+
+          <View style={styles.guidelineCard}>
+            <View style={styles.guidelineItem}>
+              <Ionicons
+                name="phone-landscape-outline"
+                size={20}
+                color="#0284C7"
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.guidelineTitle}>
+                  Hold Phone in Landscape
+                </Text>
+                <Text style={styles.guidelineDesc}>
+                  Always shoot horizontally (landscape orientation). Wide photos
+                  capture landmarks (roads, trees, waterways) to help teams
+                  navigate directly to the site.
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.guidelineItem}>
+              <Ionicons name="sunny-outline" size={20} color="#0284C7" />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.guidelineTitle}>Clear & Good Lighting</Text>
+                <Text style={styles.guidelineDesc}>
+                  Take photos in good daytime lighting. Avoid blurry, shaky, or
+                  dark pictures where waste cannot be identified.
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.guidelineItem}>
+              <Ionicons name="scan-outline" size={20} color="#0284C7" />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.guidelineTitle}>
+                  Capture the Entire Pile
+                </Text>
+                <Text style={styles.guidelineDesc}>
+                  Stand at a safe distance to frame the entire pile or site
+                  rather than extreme close-ups of single items.
+                </Text>
+              </View>
+            </View>
+          </View>
+        </View>
+      ),
+    },
+    {
+      stepNumber: 3,
+      title: "3. Avoid Selfies, Unrelated & NSFW Pictures",
+      subtitle: "Strict rules to prevent automatic Gemini AI rejection",
+      image: require("../assets/images/guide/step_avoid.jpg"),
+      badge: "Strict AI Rules",
+      badgeColor: "#DC2626",
+      badgeBg: "#FEE2E2",
+      content: (
+        <View style={styles.guideStepContent}>
+          <Text style={styles.guideParagraph}>
+            GreenTrace uses <Text style={{ fontWeight: "700" }}>Gemini AI</Text>{" "}
+            to automatically inspect every upload. Ineligible photos will be
+            flagged and rejected:
+          </Text>
+
+          <View style={styles.guidelineCard}>
+            <View style={styles.guidelineItem}>
+              <Ionicons
+                name="person-remove-outline"
+                size={20}
+                color="#DC2626"
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.guidelineTitle, { color: "#DC2626" }]}>
+                  Avoid Selfies & People
+                </Text>
+                <Text style={styles.guidelineDesc}>
+                  Do NOT take selfies or photos containing people. The camera
+                  must focus strictly on the waste or environmental concern.
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.guidelineItem}>
+              <Ionicons name="images-outline" size={20} color="#DC2626" />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.guidelineTitle, { color: "#DC2626" }]}>
+                  No Unrelated Photos
+                </Text>
+                <Text style={styles.guidelineDesc}>
+                  Memes, pets, screenshots, personal items, food, or random
+                  indoor items will be flagged by Gemini AI as unrelated.
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.guidelineItem}>
+              <Ionicons name="ban" size={20} color="#DC2626" />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.guidelineTitle, { color: "#DC2626" }]}>
+                  Zero Tolerance for NSFW
+                </Text>
+                <Text style={styles.guidelineDesc}>
+                  Uploading inappropriate, graphic, or adult content triggers
+                  account warnings and immediate permanent banning.
+                </Text>
+              </View>
+            </View>
+          </View>
+        </View>
+      ),
+    },
+    {
+      stepNumber: 4,
+      title: "4. Provide Accurate Details",
+      subtitle: "Helpful titles and descriptions ensure quick action",
+      image: require("../assets/images/guide/step_details.jpg"),
+      badge: "Best Practices",
+      badgeColor: "#059669",
+      badgeBg: "#D1FAE5",
+      content: (
+        <View style={styles.guideStepContent}>
+          <Text style={styles.guideParagraph}>
+            Accurate reports help Gemini AI categorize waste types and enable
+            fast dispatch of community volunteer drives:
+          </Text>
+
+          <View style={styles.guidelineCard}>
+            <View style={styles.guidelineItem}>
+              <Ionicons name="text-outline" size={20} color="#059669" />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.guidelineTitle}>Descriptive Title</Text>
+                <Text style={styles.guidelineDesc}>
+                  Provide a concise title, e.g., 'Illegal plastic dump along
+                  creek' or 'Trash pile behind public market'.
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.guidelineItem}>
+              <Ionicons name="map-outline" size={20} color="#059669" />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.guidelineTitle}>
+                  Verify Barangay & Purok
+                </Text>
+                <Text style={styles.guidelineDesc}>
+                  Confirm that the Barangay and Street / Purok are accurate. You
+                  can adjust the pin on the map if needed.
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.guidelineItem}>
+              <Ionicons name="sparkles-outline" size={20} color="#059669" />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.guidelineTitle}>
+                  Mention Specific Materials
+                </Text>
+                <Text style={styles.guidelineDesc}>
+                  Describing the waste (e.g. plastics, metal cans, broken glass,
+                  biodegradable) aids Gemini AI in automated categorization.
+                </Text>
+              </View>
+            </View>
+          </View>
+        </View>
+      ),
+    },
+  ];
+
+  const currentGuideStep = guideSteps[guideStep];
+
   return (
     <SafeAreaView style={styles.wrapper}>
       <View style={styles.container}>
@@ -299,14 +913,30 @@ export default function CreateReport() {
           {/* HEADER */}
           <View style={styles.topSection}>
             <View style={styles.headerRow}>
-              <TouchableOpacity onPress={() => router.back()}>
-                <Image
-                  source={require("../assets/images/close.png")}
-                  style={styles.closeIcon}
-                />
-              </TouchableOpacity>
+              <View style={styles.headerLeft}>
+                <TouchableOpacity onPress={() => router.back()}>
+                  <Image
+                    source={require("../assets/images/close.png")}
+                    style={styles.closeIcon}
+                  />
+                </TouchableOpacity>
 
-              <Text style={styles.headerTitle}>Create Post</Text>
+                <Text style={styles.headerTitle}>Create Post</Text>
+              </View>
+
+              {/* SMALL CIRCLE EXCLAMATION MARK INSTRUCTION BUTTON */}
+              <TouchableOpacity
+                style={styles.circleExclamationBtn}
+                onPress={() => {
+                  setGuideStep(0);
+                  setGuideModalVisible(true);
+                }}
+                accessibilityLabel="How to post a report instructions"
+              >
+                <View style={styles.circleExclamation}>
+                  <Text style={styles.circleExclamationText}>!</Text>
+                </View>
+              </TouchableOpacity>
             </View>
           </View>
 
@@ -393,7 +1023,7 @@ export default function CreateReport() {
                   />
                   <TouchableOpacity
                     style={styles.changePhotoButton}
-                    onPress={pickImage}
+                    onPress={() => setImageSourceModalVisible(true)}
                   >
                     <Text style={styles.changePhotoText}>Change photo</Text>
                   </TouchableOpacity>
@@ -401,7 +1031,7 @@ export default function CreateReport() {
               ) : (
                 <TouchableOpacity
                   style={styles.imagePlaceholderContent}
-                  onPress={pickImage}
+                  onPress={() => setImageSourceModalVisible(true)}
                 >
                   <Image
                     source={require("../assets/images/image.png")}
@@ -442,7 +1072,7 @@ export default function CreateReport() {
                 style={styles.modalButton}
                 onPress={() => {
                   setLocationChoiceModal(false);
-                  setGpsModalVisible(true);
+                  detectGpsLocation();
                 }}
               >
                 <Text style={styles.modalButtonText}>Use GPS Tracking</Text>
@@ -570,6 +1200,8 @@ export default function CreateReport() {
             </View>
           </View>
         </Modal>
+
+        {/* GPS TRACKING MODAL */}
         <Modal
           visible={gpsModalVisible}
           transparent
@@ -579,32 +1211,137 @@ export default function CreateReport() {
           <View style={styles.modalBackground}>
             <View style={[styles.modalBox, styles.gpsModalBox]}>
               <Text style={styles.modalTitle}>GPS Tracking</Text>
-              <View style={styles.gpsPlaceholder} />
+
+              {/* INTERACTIVE LEAFLET / OPENSTREETMAP */}
+              <View style={styles.gpsPlaceholder}>
+                {gpsLoading ? (
+                  <View style={styles.gpsLoadingCenter}>
+                    <ActivityIndicator size="large" color="#5F9C76" />
+                    <Text style={styles.gpsLoadingText}>
+                      Acquiring GPS location...
+                    </Text>
+                  </View>
+                ) : Platform.OS === "web" ? (
+                  <iframe
+                    key={`gps-map-${mapSessionId}`}
+                    srcDoc={leafletHtml}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      border: "none",
+                      borderRadius: 8,
+                    }}
+                    title="GPS Location Map"
+                  />
+                ) : (
+                  <View style={styles.gpsLoadingCenter}>
+                    <Text style={{ color: "#24352A", fontWeight: "600" }}>
+                      📍 Pin: {coords.latitude}, {coords.longitude}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <Text style={styles.gpsInstruction}>
+                📍 Drag the pin or tap on the map to adjust location if
+                inaccurate.
+              </Text>
+
               <View style={styles.gpsDetails}>
                 <View style={styles.gpsCoordinateRow}>
                   <View style={styles.gpsDetailItem}>
                     <Text style={styles.gpsDetailLabel}>Latitude</Text>
-                    <Text style={styles.gpsDetailValue}>--</Text>
+                    <Text style={styles.gpsDetailValue}>
+                      {coords.latitude ? coords.latitude.toFixed(6) : "--"}
+                    </Text>
                   </View>
                   <View style={styles.gpsDetailItem}>
                     <Text style={styles.gpsDetailLabel}>Longitude</Text>
-                    <Text style={styles.gpsDetailValue}>--</Text>
+                    <Text style={styles.gpsDetailValue}>
+                      {coords.longitude ? coords.longitude.toFixed(6) : "--"}
+                    </Text>
                   </View>
                 </View>
+
+                {/* CHANGED: Barangay / Purok -> Barangay */}
                 <View style={styles.gpsAddressRow}>
-                  <Text style={styles.gpsDetailLabel}>Barangay / Purok</Text>
-                  <Text style={styles.gpsDetailValue}>--</Text>
+                  <View style={styles.gpsLabelRow}>
+                    <Text style={styles.gpsDetailLabel}>Barangay</Text>
+                    {gpsReverseLoading && (
+                      <ActivityIndicator size="small" color="#5F9C76" />
+                    )}
+                  </View>
+                  <TextInput
+                    style={styles.gpsInput}
+                    value={gpsBarangay}
+                    onChangeText={setGpsBarangay}
+                    placeholder="Barangay"
+                    placeholderTextColor="#999"
+                  />
                 </View>
+
+                {/* CHANGED: Street -> Street / Purok */}
                 <View style={styles.gpsAddressRow}>
-                  <Text style={styles.gpsDetailLabel}>Street</Text>
-                  <Text style={styles.gpsDetailValue}>--</Text>
+                  <Text style={styles.gpsDetailLabel}>Street / Purok</Text>
+                  <TextInput
+                    style={styles.gpsInput}
+                    value={gpsStreet}
+                    onChangeText={setGpsStreet}
+                    placeholder="e.g. Toledo Rd / Pk. 2"
+                    placeholderTextColor="#999"
+                  />
                 </View>
               </View>
+
+              <TouchableOpacity
+                style={styles.confirmLocationBtn}
+                onPress={handleConfirmGpsLocation}
+              >
+                <Text style={styles.confirmLocationText}>Confirm Location</Text>
+              </TouchableOpacity>
+
               <TouchableOpacity
                 style={styles.modalCancel}
                 onPress={() => setGpsModalVisible(false)}
               >
                 <Text style={styles.modalCancelText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        {/* IMAGE SOURCE MODAL: Use Camera or Upload */}
+        <Modal
+          visible={imageSourceModalVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setImageSourceModalVisible(false)}
+        >
+          <View style={styles.modalBackground}>
+            <View style={styles.modalBox}>
+              <Text style={styles.modalTitle}>Add Waste Photo</Text>
+              <Text style={styles.imageSourceSubtitle}>
+                Select how you would like to add a photo:
+              </Text>
+
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={handleUseCamera}
+              >
+                <Text style={styles.modalButtonText}>📷 Use Camera</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalButton, { backgroundColor: "#4A7C59" }]}
+                onPress={handleUploadGallery}
+              >
+                <Text style={styles.modalButtonText}>📁 Upload</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.modalCancel}
+                onPress={() => setImageSourceModalVisible(false)}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -619,6 +1356,140 @@ export default function CreateReport() {
           onClose={() => setWarningModalVisible(false)}
           onSignOut={handleSignOut}
         />
+
+        {/* HOW TO POST REPORT - STEP BY STEP GUIDE MODAL */}
+        <Modal
+          visible={guideModalVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setGuideModalVisible(false)}
+        >
+          <View style={styles.guideModalBackdrop}>
+            <View style={styles.guideModalContainer}>
+              {/* MODAL HEADER */}
+              <View style={styles.guideHeader}>
+                <View style={styles.guideHeaderLeft}>
+                  <View
+                    style={[
+                      styles.guideBadge,
+                      { backgroundColor: currentGuideStep.badgeBg },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.guideBadgeText,
+                        { color: currentGuideStep.badgeColor },
+                      ]}
+                    >
+                      {currentGuideStep.badge}
+                    </Text>
+                  </View>
+                  <Text style={styles.guideStepCounter}>
+                    Step {guideStep + 1} of {guideSteps.length}
+                  </Text>
+                </View>
+
+                <TouchableOpacity
+                  onPress={() => setGuideModalVisible(false)}
+                  style={styles.guideCloseBtn}
+                  accessibilityLabel="Close guide"
+                >
+                  <Ionicons name="close" size={22} color="#555" />
+                </TouchableOpacity>
+              </View>
+
+              {/* SCROLLABLE BODY */}
+              <ScrollView
+                style={styles.guideBodyScroll}
+                contentContainerStyle={styles.guideBodyContent}
+                showsVerticalScrollIndicator={false}
+              >
+                {/* CORPORATE MEMPHIS ILLUSTRATION */}
+                <View style={styles.guideImageContainer}>
+                  <Image
+                    source={currentGuideStep.image}
+                    style={styles.guideImage}
+                    resizeMode="cover"
+                  />
+                </View>
+
+                {/* STEP TITLE & SUBTITLE */}
+                <Text style={styles.guideStepTitle}>
+                  {currentGuideStep.title}
+                </Text>
+                <Text style={styles.guideStepSubtitle}>
+                  {currentGuideStep.subtitle}
+                </Text>
+
+                {/* STEP CONTENT */}
+                {currentGuideStep.content}
+              </ScrollView>
+
+              {/* MODAL FOOTER */}
+              <View style={styles.guideFooter}>
+                {guideStep > 0 ? (
+                  <TouchableOpacity
+                    style={styles.guideBackBtn}
+                    onPress={() =>
+                      setGuideStep((prev) => Math.max(0, prev - 1))
+                    }
+                  >
+                    <Ionicons name="chevron-back" size={18} color="#276344" />
+                    <Text style={styles.guideBackText}>Back</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.guideSkipBtn}
+                    onPress={() => setGuideModalVisible(false)}
+                  >
+                    <Text style={styles.guideSkipText}>Skip</Text>
+                  </TouchableOpacity>
+                )}
+
+                {/* STEP DOTS */}
+                <View style={styles.guideDotsRow}>
+                  {guideSteps.map((_, idx) => (
+                    <TouchableOpacity
+                      key={idx}
+                      style={[
+                        styles.guideDot,
+                        idx === guideStep && styles.guideDotActive,
+                      ]}
+                      onPress={() => setGuideStep(idx)}
+                    />
+                  ))}
+                </View>
+
+                {guideStep < guideSteps.length - 1 ? (
+                  <TouchableOpacity
+                    style={styles.guideNextBtn}
+                    onPress={() =>
+                      setGuideStep((prev) =>
+                        Math.min(guideSteps.length - 1, prev + 1),
+                      )
+                    }
+                  >
+                    <Text style={styles.guideNextText}>Next</Text>
+                    <Ionicons
+                      name="chevron-forward"
+                      size={18}
+                      color="#FFFFFF"
+                    />
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.guideFinishBtn}
+                    onPress={() => setGuideModalVisible(false)}
+                  >
+                    <Text style={styles.guideFinishText}>
+                      Got it, Let's Post!
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          </View>
+        </Modal>
 
         <View style={styles.navbarContainer}>
           <Navbar />
@@ -660,6 +1531,35 @@ const styles = StyleSheet.create({
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
+  },
+
+  headerLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+
+  circleExclamationBtn: {
+    top: 10,
+    padding: 4,
+    cursor: "pointer",
+  },
+  circleExclamation: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
+    backgroundColor: "rgba(255, 255, 255, 0.22)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  circleExclamationText: {
+    color: "#FFFFFF",
+    fontSize: 18,
+    fontWeight: "800",
+    lineHeight: 20,
+    textAlign: "center",
   },
 
   closeIcon: {
@@ -871,10 +1771,33 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E2E8E4",
     backgroundColor: "#FAFCFB",
+    overflow: "hidden",
+  },
+
+  gpsLoadingCenter: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 20,
+  },
+
+  gpsLoadingText: {
+    color: "#52675A",
+    fontSize: 13,
+    fontWeight: "600",
+    marginTop: 10,
+  },
+
+  gpsInstruction: {
+    fontSize: 12,
+    color: "#52675A",
+    marginTop: 8,
+    textAlign: "center",
+    fontStyle: "italic",
   },
 
   gpsDetails: {
-    marginTop: 16,
+    marginTop: 12,
     gap: 10,
   },
 
@@ -896,6 +1819,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#F4F8F5",
   },
 
+  gpsLabelRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+
   gpsDetailLabel: {
     color: "#52675A",
     fontSize: 12,
@@ -906,6 +1835,37 @@ const styles = StyleSheet.create({
     color: "#24352A",
     fontSize: 14,
     marginTop: 4,
+    fontWeight: "600",
+  },
+
+  gpsInput: {
+    color: "#24352A",
+    fontSize: 14,
+    marginTop: 4,
+    paddingVertical: 2,
+    paddingHorizontal: 0,
+    fontWeight: "500",
+  },
+
+  confirmLocationBtn: {
+    backgroundColor: "#5F9C76",
+    padding: 14,
+    borderRadius: 8,
+    marginTop: 16,
+    alignItems: "center",
+  },
+
+  confirmLocationText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+
+  imageSourceSubtitle: {
+    fontSize: 13,
+    color: "#666",
+    textAlign: "center",
+    marginBottom: 16,
   },
 
   modalButton: {
@@ -919,7 +1879,7 @@ const styles = StyleSheet.create({
   modalCancel: {
     padding: 12,
     alignItems: "center",
-    marginTop: 10,
+    marginTop: 6,
   },
 
   manualInput: {
@@ -990,5 +1950,275 @@ const styles = StyleSheet.create({
   purokTextInput: {
     flex: 1,
     padding: 10,
+  },
+
+  /* GUIDE MODAL STYLES */
+  guideModalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.55)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 16,
+  },
+  guideModalContainer: {
+    width: "100%",
+    maxWidth: 480,
+    maxHeight: "88%",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  guideHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EDF2EE",
+    backgroundColor: "#FFFFFF",
+  },
+  guideHeaderLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  guideBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  guideBadgeText: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  guideStepCounter: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#6B7E72",
+  },
+  guideCloseBtn: {
+    padding: 4,
+    cursor: "pointer",
+  },
+  guideBodyScroll: {
+    flex: 1,
+  },
+  guideBodyContent: {
+    padding: 18,
+    paddingBottom: 24,
+  },
+  guideImageContainer: {
+    width: "100%",
+    height: 190,
+    borderRadius: 12,
+    overflow: "hidden",
+    backgroundColor: "#F3F7F4",
+    marginBottom: 14,
+  },
+  guideImage: {
+    width: "100%",
+    height: "100%",
+  },
+  guideStepTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#1B3B28",
+    marginBottom: 4,
+  },
+  guideStepSubtitle: {
+    fontSize: 12,
+    color: "#5C7364",
+    marginBottom: 14,
+    lineHeight: 16,
+  },
+  guideStepContent: {
+    gap: 10,
+  },
+  guideParagraph: {
+    fontSize: 13,
+    color: "#334D3C",
+    lineHeight: 18,
+  },
+  guidelineCard: {
+    backgroundColor: "#F9FBFA",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E3ECE6",
+    padding: 12,
+    gap: 12,
+    marginTop: 6,
+  },
+  guidelineItem: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+  guidelineTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#1E382B",
+    marginBottom: 2,
+  },
+  guidelineDesc: {
+    fontSize: 12,
+    color: "#546E60",
+    lineHeight: 16,
+  },
+  locationHelpBox: {
+    backgroundColor: "#F2F8F4",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#C6DFD0",
+    padding: 12,
+    marginTop: 8,
+    gap: 8,
+  },
+  locationHelpHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  locationHelpTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#1E3B29",
+  },
+  locationHelpDesc: {
+    fontSize: 12,
+    color: "#50695B",
+    lineHeight: 16,
+  },
+  locationCheckBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: "#276344",
+    borderRadius: 8,
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    cursor: "pointer",
+  },
+  locationCheckBtnText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  locationStatusMsgBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 4,
+  },
+  locationStatusGranted: {
+    backgroundColor: "#E8F5E9",
+    borderWidth: 1,
+    borderColor: "#A5D6A7",
+  },
+  locationStatusDenied: {
+    backgroundColor: "#FFEBEE",
+    borderWidth: 1,
+    borderColor: "#FFCDD2",
+  },
+  locationStatusMsgText: {
+    fontSize: 12,
+    flex: 1,
+    lineHeight: 16,
+  },
+  locationTipsBox: {
+    marginTop: 4,
+    gap: 4,
+  },
+  locationTipItem: {
+    fontSize: 11,
+    color: "#576F61",
+    lineHeight: 15,
+  },
+  guideFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#EDF2EE",
+    backgroundColor: "#FFFFFF",
+  },
+  guideBackBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    gap: 4,
+    cursor: "pointer",
+  },
+  guideBackText: {
+    color: "#276344",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  guideSkipBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    cursor: "pointer",
+  },
+  guideSkipText: {
+    color: "#7E9386",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  guideDotsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  guideDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#D0DCD5",
+    cursor: "pointer",
+  },
+  guideDotActive: {
+    width: 20,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#276344",
+  },
+  guideNextBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#276344",
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 8,
+    gap: 4,
+    cursor: "pointer",
+  },
+  guideNextText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  guideFinishBtn: {
+    backgroundColor: "#276344",
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 8,
+    cursor: "pointer",
+  },
+  guideFinishText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "700",
   },
 });

@@ -1,21 +1,22 @@
+import { Ionicons } from "@expo/vector-icons";
 import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
 import {
-  Image,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  useWindowDimensions,
-  View,
+    Image,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    useWindowDimensions,
+    View,
 } from "react-native";
 import {
-  formatLocationWithPurok,
-  normalizePurok,
+    formatLocationWithPurok,
+    normalizePurok,
 } from "../../../constants/locationFormat";
 import {
-  formatWasteLabel,
-  getWasteCategoryColor,
+    formatWasteLabel,
+    getWasteCategoryColor,
 } from "../../../constants/wasteCategories";
 import { db } from "../../../firebaseConfig";
 import { hideBadWords } from "../../../utils/hideBadWords";
@@ -99,6 +100,7 @@ export default function AssessmentList({
   const [posts, setPosts] = useState([]);
   const [authorPoints, setAuthorPoints] = useState({});
   const [now, setNow] = useState(() => Date.now());
+  const [volunteerPostMap, setVolunteerPostMap] = useState({});
 
   useEffect(() => {
     const postsQuery = query(
@@ -124,11 +126,26 @@ export default function AssessmentList({
       });
       setAuthorPoints(pointsByUserId);
     });
+    const unsubscribeVolunteerPosts = onSnapshot(
+      collection(db, "volunteer_posts"),
+      (snapshot) => {
+        const map = {};
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          if (data.postId) {
+            map[data.postId] = doc.id;
+          }
+        });
+        setVolunteerPostMap(map);
+      },
+      (error) => console.log("Unable to load volunteer posts map:", error),
+    );
     const timer = setInterval(() => setNow(Date.now()), 30 * 1000);
 
     return () => {
       unsubscribePosts();
       unsubscribeUsers();
+      unsubscribeVolunteerPosts();
       clearInterval(timer);
     };
   }, []);
@@ -221,6 +238,18 @@ export default function AssessmentList({
                             pts
                           </Text>
                         </Text>
+                        {Boolean(volunteerPostMap[post.id]) && (
+                          <View style={styles.activityIndicatorBadge}>
+                            <Ionicons
+                              name="calendar-outline"
+                              size={11}
+                              color="#205A38"
+                            />
+                            <Text style={styles.activityIndicatorText}>
+                              Activity Exists
+                            </Text>
+                          </View>
+                        )}
                         <Text style={styles.postedAt}>
                           {formatRelativeTime(post.createdAt, now)}
                         </Text>
@@ -388,7 +417,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   pointsText: { color: "#2E7D32", fontWeight: "600", fontSize: 12 },
-  postedAt: { color: "#888888", fontSize: 10 },
+  postedAt: { color: "#888888", fontSize: 10, flexShrink: 0 },
+  activityIndicatorBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#EAF5EF",
+    borderWidth: 1,
+    borderColor: "#A9D5BA",
+    borderRadius: 20,
+    paddingHorizontal: 8,
+    paddingVertical: 2.5,
+    gap: 4,
+    flexShrink: 0,
+  },
+  activityIndicatorText: {
+    color: "#205A38",
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.2,
+  },
   locationRow: { flexDirection: "row", alignItems: "center", marginTop: 3 },
   locationIcon: {
     width: 12,

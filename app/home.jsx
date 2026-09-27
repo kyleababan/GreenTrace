@@ -10,6 +10,7 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
+    useWindowDimensions,
     View,
 } from "react-native";
 import BadgeWithDetails from "../components/BadgeWithDetails";
@@ -81,6 +82,8 @@ const HOME_CAROUSEL_INTERVAL = 5000;
 
 export default function Home() {
   const router = useRouter();
+  const { width } = useWindowDimensions();
+  const isSmallScreen = width < 400;
 
   const [posts, setPosts] = useState([]);
   const [search, setSearch] = useState("");
@@ -816,35 +819,49 @@ export default function Home() {
                   <View style={styles.userDetails}>
                     <Text style={styles.reportedByLabel}>Reported by</Text>
                     <View style={styles.userHeader}>
-                      <Text style={styles.username}>
-                        {post.firstName} {post.lastName}
-                        <Text style={styles.points}>
-                          {" "}
-                          • {authorPoints[post.userId] ?? post.points ?? 0} pts
+                      <View style={styles.userHeaderLeft}>
+                        <Text
+                          style={styles.username}
+                          numberOfLines={1}
+                          ellipsizeMode="tail"
+                        >
+                          {post.firstName} {post.lastName}
                         </Text>
-                      </Text>
-
-                      <View style={styles.authorBadgeRow}>
-                        {(authorBadges[post.userId] || [])
-                          .slice(0, 3)
-                          .map((badge) => (
-                            <BadgeWithDetails
-                              key={badge.id}
-                              badge={badge}
-                              size={20}
-                              tooltipPlacement="above"
-                            />
-                          ))}
-                        {(authorBadges[post.userId]?.length || 0) > 3 && (
-                          <View style={styles.authorBadge}>
-                            <Text style={styles.authorBadgeMore}>
-                              +{authorBadges[post.userId].length - 3}
-                            </Text>
-                          </View>
-                        )}
+                        <Text style={styles.points} numberOfLines={1}>
+                          {` • ${authorPoints[post.userId] ?? post.points ?? 0}\u00A0pts`}
+                        </Text>
                       </View>
 
-                      <Text style={styles.relativeTime}>
+                      {(() => {
+                        const badges = authorBadges[post.userId] || [];
+                        const maxBadges = isSmallScreen ? 1 : 3;
+                        const visibleBadges = badges.slice(0, maxBadges);
+                        const remainingCount = badges.length - maxBadges;
+
+                        if (badges.length === 0) return null;
+
+                        return (
+                          <View style={styles.authorBadgeRow}>
+                            {visibleBadges.map((badge) => (
+                              <BadgeWithDetails
+                                key={badge.id}
+                                badge={badge}
+                                size={20}
+                                tooltipPlacement="above"
+                              />
+                            ))}
+                            {remainingCount > 0 && (
+                              <View style={styles.authorBadge}>
+                                <Text style={styles.authorBadgeMore}>
+                                  +{remainingCount}
+                                </Text>
+                              </View>
+                            )}
+                          </View>
+                        );
+                      })()}
+
+                      <Text style={styles.relativeTime} numberOfLines={1}>
                         {formatRelativeTime(post.createdAt, now)}
                       </Text>
                     </View>
@@ -1265,6 +1282,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
+  userHeaderLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexShrink: 1,
+    minWidth: 0,
+  },
   username: {
     fontSize: 14,
     fontWeight: "700",
@@ -1275,6 +1298,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
     color: "#2E7D32",
+    flexShrink: 0,
   },
   authorBadgeRow: {
     flexDirection: "row",
@@ -1282,6 +1306,7 @@ const styles = StyleSheet.create({
     gap: 3,
     marginLeft: 5,
     marginRight: "auto",
+    flexShrink: 0,
   },
   authorBadge: {
     width: 20,
@@ -1305,6 +1330,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: "#888",
     marginLeft: 6,
+    flexShrink: 0,
   },
   locationRow: {
     flexDirection: "row",

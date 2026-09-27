@@ -4,26 +4,27 @@ import { signOut } from "firebase/auth";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Image,
-  Modal,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Image,
+    Modal,
+    SafeAreaView,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { deleteFromCloudinary, uploadToCloudinary } from "../cloudinary";
 import Navbar from "../components/navbar";
 import NsfwWarningModal from "../components/nsfw-warning-modal";
 import { normalizePurok } from "../constants/locationFormat";
 import {
-  formatWasteLabel,
-  getWasteCategoryColor,
+    formatWasteLabel,
+    getWasteCategoryColor,
 } from "../constants/wasteCategories";
 import { auth, db } from "../firebaseConfig";
+import { deleteRelatedDocuments } from "../utils/deletePostHelper";
 import { hideBadWords } from "../utils/hideBadWords";
 
 const BARANGAYS = [
@@ -90,6 +91,8 @@ export default function EditPost() {
   const [locationName, setLocationName] = useState("");
   const [errors, setErrors] = useState({});
   const [wasteClassification, setWasteClassification] = useState(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletingPost, setDeletingPost] = useState(false);
 
   // NSFW Warning & Ban Modal States
   const [warningModalVisible, setWarningModalVisible] = useState(false);
@@ -515,6 +518,18 @@ export default function EditPost() {
                 </TouchableOpacity>
               )}
             </View>
+
+            {/* DELETE POST BUTTON */}
+            <TouchableOpacity
+              style={[
+                styles.deletePostButton,
+                (uploading || deletingPost) && { opacity: 0.5 },
+              ]}
+              disabled={uploading || deletingPost}
+              onPress={() => setShowDeleteModal(true)}
+            >
+              <Text style={styles.deletePostButtonText}>Delete Post</Text>
+            </TouchableOpacity>
           </ScrollView>
         </View>
 
@@ -672,6 +687,72 @@ export default function EditPost() {
           onClose={() => setWarningModalVisible(false)}
           onSignOut={handleSignOut}
         />
+
+        {/* DELETE CONFIRMATION MODAL */}
+        <Modal
+          animationType="fade"
+          transparent={true}
+          visible={showDeleteModal}
+          onRequestClose={() => !deletingPost && setShowDeleteModal(false)}
+        >
+          <View style={styles.modalBackground}>
+            <View style={styles.deleteModalBox}>
+              <Text style={styles.deleteTitle}>Delete Post</Text>
+
+              <Text style={styles.deleteMessage}>
+                Are you sure you want to delete this post? This action cannot be
+                undone.
+              </Text>
+
+              <TouchableOpacity
+                style={[
+                  styles.confirmDeleteBtn,
+                  deletingPost && { opacity: 0.6 },
+                ]}
+                disabled={deletingPost}
+                onPress={async () => {
+                  if (deletingPost) return;
+                  try {
+                    setDeletingPost(true);
+                    if (originalImageUrl) {
+                      await deleteFromCloudinary(originalImageUrl);
+                    }
+                    await deleteRelatedDocuments(id);
+                    setShowDeleteModal(false);
+                    router.replace("/home");
+                  } catch (error) {
+                    console.log(error);
+                    setDeletingPost(false);
+                  }
+                }}
+              >
+                {deletingPost ? (
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 8,
+                    }}
+                  >
+                    <ActivityIndicator size="small" color="#fff" />
+                    <Text style={styles.confirmDeleteText}>Deleting...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.confirmDeleteText}>Delete</Text>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalCancel, deletingPost && { opacity: 0.5 }]}
+                disabled={deletingPost}
+                onPress={() => setShowDeleteModal(false)}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
 
         <View style={styles.navbarContainer}>
           <Navbar />
@@ -1042,5 +1123,62 @@ const styles = StyleSheet.create({
     padding: 10,
     fontSize: 14,
     color: "#24352A",
+  },
+
+  deletePostButton: {
+    marginTop: 24,
+    marginBottom: 40,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#FF4D4D",
+    backgroundColor: "#FFF5F5",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  deletePostButtonText: {
+    color: "#FF4D4D",
+    fontSize: 15,
+    fontWeight: "bold",
+  },
+
+  deleteModalBox: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 24,
+    width: "85%",
+    maxWidth: 360,
+    alignItems: "center",
+  },
+
+  deleteTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#222",
+    marginBottom: 10,
+  },
+
+  deleteMessage: {
+    fontSize: 14,
+    color: "#666",
+    textAlign: "center",
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+
+  confirmDeleteBtn: {
+    width: "100%",
+    backgroundColor: "#FF5B5B",
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: "center",
+    marginBottom: 10,
+  },
+
+  confirmDeleteText: {
+    color: "#fff",
+    fontWeight: "bold",
+    fontSize: 15,
   },
 });

@@ -1,29 +1,29 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
-    addDoc,
-    collection,
-    doc,
-    getDoc,
-    getDocs,
-    query,
-    serverTimestamp,
-    updateDoc,
-    where,
+  addDoc,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  serverTimestamp,
+  updateDoc,
+  where,
 } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
-    useWindowDimensions,
+  ActivityIndicator,
+  Alert,
+  Image,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+  useWindowDimensions,
 } from "react-native";
 
 import { db } from "../../../../firebaseConfig";
@@ -71,9 +71,10 @@ export default function VolunteerPostCreate({
   post: suppliedPost,
   setSelectedPost,
 }) {
-  const { volunteerId } = useLocalSearchParams();
+  const { volunteerId, postId } = useLocalSearchParams();
   const router = useRouter();
   const isEditing = Boolean(volunteerId);
+  const isFromPostId = Boolean(!isEditing && postId && !suppliedPost);
   const { width } = useWindowDimensions();
   const isMobile = width < 600;
 
@@ -85,7 +86,9 @@ export default function VolunteerPostCreate({
   const [requirements, setRequirements] = useState(
     suppliedPost?.requirements?.length ? suppliedPost.requirements : [""],
   );
-  const [meetingLocation, setMeetingLocation] = useState("");
+  const [meetingLocation, setMeetingLocation] = useState(
+    suppliedPost?.locationName || "",
+  );
   const [meetingDate, setMeetingDate] = useState(null);
   const [meetingTime, setMeetingTime] = useState("");
   const [showCalendar, setShowCalendar] = useState(false);
@@ -98,7 +101,7 @@ export default function VolunteerPostCreate({
   const [maxVolunteers, setMaxVolunteers] = useState(
     suppliedPost?.maxVolunteers ? String(suppliedPost.maxVolunteers) : "",
   );
-  const [loading, setLoading] = useState(isEditing);
+  const [loading, setLoading] = useState(isEditing || isFromPostId);
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState({});
 
@@ -112,42 +115,69 @@ export default function VolunteerPostCreate({
   };
 
   useEffect(() => {
-    if (!isEditing) return;
+    if (isEditing) {
+      const loadVolunteerPost = async () => {
+        try {
+          const snapshot = await getDoc(
+            doc(db, "volunteer_posts", volunteerId),
+          );
 
-    const loadVolunteerPost = async () => {
-      try {
-        const snapshot = await getDoc(doc(db, "volunteer_posts", volunteerId));
+          if (!snapshot.exists()) {
+            Alert.alert("This volunteer activity is no longer available.");
+            router.back();
+            return;
+          }
 
-        if (!snapshot.exists()) {
-          Alert.alert("This volunteer activity is no longer available.");
-          router.back();
-          return;
+          const data = { id: snapshot.id, ...snapshot.data() };
+          setVolunteerPost(data);
+          setTitle(data.title || "Need Volunteers");
+          setDesc(data.description || "");
+          setRequirements(data.requirements?.length ? data.requirements : [""]);
+          const savedMeetingDate = parseDateKey(data.meetingDate);
+          setMeetingLocation(data.meetingLocation || data.locationName || "");
+          setMeetingDate(savedMeetingDate);
+          setMeetingTime(data.meetingTime || "");
+          if (savedMeetingDate) setVisibleMonth(savedMeetingDate);
+          setMaxVolunteers(
+            data.maxVolunteers ? String(data.maxVolunteers) : "",
+          );
+        } catch (error) {
+          console.error("Unable to load volunteer activity:", error);
+          Alert.alert("Unable to load this volunteer activity.");
+        } finally {
+          setLoading(false);
         }
+      };
 
-        const data = { id: snapshot.id, ...snapshot.data() };
-        setVolunteerPost(data);
-        setTitle(data.title || "Need Volunteers");
-        setDesc(data.description || "");
-        setRequirements(data.requirements?.length ? data.requirements : [""]);
-        const savedMeetingDate = parseDateKey(data.meetingDate);
-        setMeetingLocation(data.meetingLocation || data.locationName || "");
-        setMeetingDate(savedMeetingDate);
-        setMeetingTime(data.meetingTime || "");
-        if (savedMeetingDate) setVisibleMonth(savedMeetingDate);
-        setMaxVolunteers(data.maxVolunteers ? String(data.maxVolunteers) : "");
-      } catch (error) {
-        console.error("Unable to load volunteer activity:", error);
-        Alert.alert("Unable to load this volunteer activity.");
-      } finally {
-        setLoading(false);
-      }
-    };
+      loadVolunteerPost();
+    } else if (isFromPostId) {
+      const loadSourcePost = async () => {
+        try {
+          const snapshot = await getDoc(doc(db, "posts", postId));
+          if (!snapshot.exists()) {
+            Alert.alert("Post not found", "This post is no longer available.");
+            router.back();
+            return;
+          }
+          const data = { id: snapshot.id, ...snapshot.data() };
+          setVolunteerPost(data);
+          setTitle(data.title || "Need Volunteers");
+          setDesc(data.caption || data.description || "");
+          setMeetingLocation(data.locationName || "");
+        } catch (error) {
+          console.error("Unable to load source post:", error);
+          Alert.alert("Unable to load post details.");
+        } finally {
+          setLoading(false);
+        }
+      };
 
-    loadVolunteerPost();
-  }, [isEditing, router, volunteerId]);
+      loadSourcePost();
+    }
+  }, [isEditing, isFromPostId, router, volunteerId, postId]);
 
   const goBack = () => {
-    if (isEditing) {
+    if (isEditing || postId) {
       router.back();
       return;
     }
@@ -204,10 +234,16 @@ export default function VolunteerPostCreate({
         return;
       }
 
+      const targetPost = suppliedPost || volunteerPost;
+      if (!targetPost) {
+        Alert.alert("Error", "No post selected for this volunteer activity.");
+        return;
+      }
+
       const existingSnapshot = await getDocs(
         query(
           collection(db, "volunteer_posts"),
-          where("postId", "==", suppliedPost.id),
+          where("postId", "==", targetPost.id),
           where("status", "==", "open"),
         ),
       );
@@ -218,16 +254,16 @@ export default function VolunteerPostCreate({
       }
 
       await addDoc(collection(db, "volunteer_posts"), {
-        postId: suppliedPost.id,
+        postId: targetPost.id,
         title: hideBadWords(title.trim()),
         description: hideBadWords(desc.trim()),
         requirements: cleanedRequirements.map((item) => hideBadWords(item)),
-        imageUrl: suppliedPost.imageUrl || "",
-        firstName: suppliedPost.firstName || "",
-        lastName: suppliedPost.lastName || "",
+        imageUrl: targetPost.imageUrl || "",
+        firstName: targetPost.firstName || "",
+        lastName: targetPost.lastName || "",
         meetingLocation: meetingLocation.trim(),
         locationName: meetingLocation.trim(),
-        postLocationName: suppliedPost.locationName || "",
+        postLocationName: targetPost.locationName || "",
         meetingDate: formatDateKey(meetingDate),
         meetingTime: meetingTime.trim(),
         maxVolunteers: Number(maxVolunteers),
@@ -237,7 +273,7 @@ export default function VolunteerPostCreate({
         createdAt: serverTimestamp(),
       });
 
-      await updateDoc(doc(db, "posts", suppliedPost.id), { status: "ongoing" });
+      await updateDoc(doc(db, "posts", targetPost.id), { status: "ongoing" });
 
       Alert.alert("Volunteer activity created!");
       router.replace("/admin/VolunteerList");
