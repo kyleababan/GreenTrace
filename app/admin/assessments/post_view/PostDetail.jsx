@@ -30,6 +30,7 @@ import {
 } from "firebase/firestore";
 
 import { uploadToCloudinary } from "../../../../cloudinary";
+import PostLocationModal from "../../../../components/PostLocationModal";
 import {
     BADGES,
     getUserContributionStats,
@@ -104,6 +105,7 @@ export default function PostDetail({
   const [residentBadges, setResidentBadges] = useState([]);
   const [updating, setUpdating] = useState(false);
   const [showReasonModal, setShowReasonModal] = useState(false);
+  const [locationModalVisible, setLocationModalVisible] = useState(false);
 
   const [showOtherModal, setShowOtherModal] = useState(false);
 
@@ -729,7 +731,12 @@ export default function PostDetail({
                     </Text>
                   </View>
 
-                  <View style={styles.locationRow}>
+                  <TouchableOpacity
+                    style={styles.locationRow}
+                    onPress={() => setLocationModalVisible(true)}
+                    activeOpacity={0.7}
+                    hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                  >
                     <Image
                       source={require("../../../../assets/images/location.png")}
                       style={styles.locationIcon}
@@ -737,7 +744,7 @@ export default function PostDetail({
                     <Text style={styles.locationText} numberOfLines={1}>
                       {formatLocationWithPurok(post.locationName, post.purok)}
                     </Text>
-                  </View>
+                  </TouchableOpacity>
 
                   {/* Report Status & Waste Category Tags */}
                   <View style={styles.tagsRow}>
@@ -1333,6 +1340,13 @@ export default function PostDetail({
           </View>
         </View>
       </Modal>
+
+      {/* POST LOCATION MINI MAP MODAL */}
+      <PostLocationModal
+        post={post}
+        visible={locationModalVisible}
+        onClose={() => setLocationModalVisible(false)}
+      />
     </View>
   );
 }
@@ -1621,8 +1635,14 @@ const styles = StyleSheet.create({
   badgeIcon: { fontSize: 14 },
   badgeMore: { color: "#5F9C76", fontSize: 10, fontWeight: "800" },
   postedDate: { color: "#7B8580", fontSize: 11 },
-  locationRow: { flexDirection: "row", alignItems: "center", marginTop: 5 },
-  locationIcon: { width: 14, height: 14, marginRight: 5, tintColor: "#666666" },
+  locationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 5,
+    alignSelf: "flex-start",
+    cursor: "pointer",
+  },
+  locationIcon: { width: 14, height: 14, marginRight: 5 },
   tagsRow: {
     flexDirection: "row",
     alignItems: "center",

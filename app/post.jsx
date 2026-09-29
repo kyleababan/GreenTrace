@@ -35,6 +35,7 @@ import {
 } from "firebase/firestore";
 import FormError from "../components/form-error";
 import Navbar from "../components/navbar";
+import PostLocationModal from "../components/PostLocationModal";
 import {
     formatWasteLabel,
     getWasteCategoryColor,
@@ -90,6 +91,7 @@ export default function Post() {
   const [hasMoreComments, setHasMoreComments] = useState(true);
   const [loadingMoreComments, setLoadingMoreComments] = useState(false);
   const [commentError, setCommentError] = useState("");
+  const [locationModalVisible, setLocationModalVisible] = useState(false);
   const lastCommentDocRef = useRef(null);
   const loadingCommentsRef = useRef(false);
 
@@ -488,7 +490,12 @@ export default function Post() {
                   </View>
 
                   {/* LOCATION & TIME */}
-                  <View style={styles.locationRow}>
+                  <TouchableOpacity
+                    style={styles.locationRow}
+                    onPress={() => setLocationModalVisible(true)}
+                    activeOpacity={0.7}
+                    hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                  >
                     <Image
                       source={require("../assets/images/location.png")}
                       style={styles.locationIcon}
@@ -496,7 +503,7 @@ export default function Post() {
                     <Text style={styles.locationText}>
                       {post.locationName || "Unknown location"}
                     </Text>
-                  </View>
+                  </TouchableOpacity>
 
                   {/* Report Status & Waste Category Tags */}
                   <View style={styles.tagsRow}>
@@ -838,6 +845,13 @@ export default function Post() {
           </Modal>
         </View>
       </View>
+
+      {/* POST LOCATION MINI MAP MODAL */}
+      <PostLocationModal
+        post={post}
+        visible={locationModalVisible}
+        onClose={() => setLocationModalVisible(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -979,17 +993,19 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     marginTop: 2,
+    alignSelf: "flex-start",
+    cursor: "pointer",
   },
   locationIcon: {
     width: 12,
     height: 12,
     marginRight: 4,
     resizeMode: "contain",
-    tintColor: "#666",
   },
   locationText: {
     fontSize: 12,
-    color: "#666",
+    color: "#4B6B58",
+    fontWeight: "500",
   },
   postedAt: {
     marginTop: 2,

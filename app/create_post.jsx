@@ -5,17 +5,17 @@ import { useRouter } from "expo-router";
 import { signOut } from "firebase/auth";
 import { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Image,
-  Modal,
-  Platform,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Image,
+    Modal,
+    Platform,
+    SafeAreaView,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { uploadToCloudinary } from "../cloudinary";
 import Navbar from "../components/navbar";
@@ -25,12 +25,12 @@ import { auth, db } from "../firebaseConfig";
 import { hideBadWords } from "../utils/hideBadWords";
 
 import {
-  addDoc,
-  collection,
-  doc,
-  getDoc,
-  serverTimestamp,
-  updateDoc,
+    addDoc,
+    collection,
+    doc,
+    getDoc,
+    serverTimestamp,
+    updateDoc,
 } from "firebase/firestore";
 
 const BARANGAYS = [
@@ -73,11 +73,9 @@ export default function CreateReport() {
 
   const [manualBarangay, setManualBarangay] = useState("");
   const [manualPurok, setManualPurok] = useState("");
-  const [locationChoiceModal, setLocationChoiceModal] = useState(false);
-  const [manualLocationModal, setManualLocationModal] = useState(false);
   const [gpsModalVisible, setGpsModalVisible] = useState(false);
-  const [barangayDropdownOpen, setBarangayDropdownOpen] = useState(false);
   const [errors, setErrors] = useState({});
+  const [gpsErrors, setGpsErrors] = useState({});
   const [locationName, setLocationName] = useState("");
 
   // NSFW Warning & Ban Modal States
@@ -87,8 +85,8 @@ export default function CreateReport() {
   const [warningReason, setWarningReason] = useState("");
 
   const validateLocation = () => ({
-    ...(!manualBarangay ? { barangay: "Select a barangay." } : {}),
-    ...(!normalizePurok(manualPurok) ? { purok: "Purok is required." } : {}),
+    ...(!manualBarangay ? { barangay: "Barangay is required." } : {}),
+    ...(!manualPurok ? { purok: "Street / Purok is required." } : {}),
   });
 
   useEffect(() => {
@@ -289,6 +287,7 @@ export default function CreateReport() {
   };
 
   const detectGpsLocation = async () => {
+    setGpsErrors({});
     setGpsLoading(true);
     let lat = 10.2705; // Pinamungajan center default
     let lng = 123.5855;
@@ -399,21 +398,33 @@ export default function CreateReport() {
   };
 
   const handleConfirmGpsLocation = () => {
-    const barangay = gpsBarangay.trim() || manualBarangay || "Poblacion";
+    const barangay = gpsBarangay.trim();
     const street = gpsStreet.trim();
 
-    let purokVal = manualPurok;
+    const newGpsErrors = {};
+    if (!barangay) {
+      newGpsErrors.barangay = "Barangay is required.";
+    }
+    if (!street) {
+      newGpsErrors.street = "Street / Purok is required.";
+    }
+
+    if (Object.keys(newGpsErrors).length > 0) {
+      setGpsErrors(newGpsErrors);
+      return;
+    }
+
+    setGpsErrors({});
+
+    let purokVal = street;
     const purokMatch = street.match(/(?:pk\.?|purok)\s*(\d+|[a-zA-Z0-9]+)/i);
     if (purokMatch) {
       purokVal = purokMatch[1];
-      setManualPurok(purokVal);
-    } else if (!manualPurok) {
-      purokVal = "1";
-      setManualPurok("1");
     }
 
     setManualBarangay(barangay);
-    setLocationName(`${barangay}, ${street ? street : `Pk. ${purokVal}`}`);
+    setManualPurok(purokVal);
+    setLocationName(`${barangay}, ${street}`);
     setPostCoordinates({
       latitude: coords.latitude,
       longitude: coords.longitude,
@@ -482,14 +493,14 @@ export default function CreateReport() {
     const nextErrors = {
       ...locationErrors,
       ...(Object.keys(locationErrors).length
-        ? { location: "Set a barangay and Pk. before posting." }
+        ? { location: "Please set your location using GPS map before posting." }
         : {}),
       ...(!image ? { image: "Please select an image." } : {}),
     };
     setErrors(nextErrors);
 
     if (Object.values(nextErrors).some(Boolean)) {
-      if (Object.keys(locationErrors).length) setManualLocationModal(true);
+      if (Object.keys(locationErrors).length) detectGpsLocation();
       return;
     }
 
@@ -974,7 +985,7 @@ export default function CreateReport() {
                 styles.locationRow,
                 errors.location && styles.errorBorder,
               ]}
-              onPress={() => setLocationChoiceModal(true)}
+              onPress={() => detectGpsLocation()}
             >
               <Image
                 source={require("../assets/images/location.png")}
@@ -1047,160 +1058,6 @@ export default function CreateReport() {
           </ScrollView>
         </View>
 
-        {/* NAVBAR (ALWAYS AT BOTTOM) */}
-        <Modal
-          visible={locationChoiceModal}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setLocationChoiceModal(false)}
-        >
-          <View style={styles.modalBackground}>
-            <View style={styles.modalBox}>
-              <Text style={styles.modalTitle}>Choose Location Method</Text>
-
-              <TouchableOpacity
-                style={styles.modalButton}
-                onPress={() => {
-                  setLocationChoiceModal(false);
-                  setManualLocationModal(true);
-                }}
-              >
-                <Text style={styles.modalButtonText}>Add Manually</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.modalButton}
-                onPress={() => {
-                  setLocationChoiceModal(false);
-                  detectGpsLocation();
-                }}
-              >
-                <Text style={styles.modalButtonText}>Use GPS Tracking</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.modalCancel}
-                onPress={() => setLocationChoiceModal(false)}
-              >
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
-
-        <Modal
-          visible={manualLocationModal}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setManualLocationModal(false)}
-        >
-          <View style={styles.modalBackground}>
-            <View style={styles.modalBox}>
-              <Text style={styles.modalTitle}>Enter Location</Text>
-
-              <TouchableOpacity
-                style={[styles.dropdown, errors.barangay && styles.inputError]}
-                onPress={() => setBarangayDropdownOpen((open) => !open)}
-              >
-                <Text
-                  style={
-                    manualBarangay
-                      ? styles.dropdownText
-                      : styles.placeholderText
-                  }
-                >
-                  {manualBarangay || "Select Barangay"}
-                </Text>
-                <Text style={styles.dropdownArrow}>
-                  {barangayDropdownOpen ? "^" : "v"}
-                </Text>
-              </TouchableOpacity>
-              {barangayDropdownOpen && (
-                <ScrollView style={styles.dropdownList} nestedScrollEnabled>
-                  {BARANGAYS.map((barangay) => (
-                    <TouchableOpacity
-                      key={barangay}
-                      style={styles.dropdownOption}
-                      onPress={() => {
-                        setManualBarangay(barangay);
-                        setBarangayDropdownOpen(false);
-                        setErrors((previous) => {
-                          const next = { ...previous };
-                          delete next.barangay;
-                          delete next.location;
-                          return next;
-                        });
-                      }}
-                    >
-                      <Text>{barangay}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              )}
-              {!!errors.barangay && (
-                <Text style={styles.fieldError}>{errors.barangay}</Text>
-              )}
-
-              <View style={styles.purokInputRow}>
-                <Text style={styles.purokPrefix}>Pk.</Text>
-                <TextInput
-                  placeholder="Example: 3"
-                  value={manualPurok}
-                  onChangeText={(value) => {
-                    setManualPurok(value);
-                    setErrors((previous) => {
-                      const next = { ...previous };
-                      if (normalizePurok(value)) {
-                        delete next.purok;
-                      } else {
-                        next.purok = "Purok is required.";
-                      }
-                      delete next.location;
-                      return next;
-                    });
-                  }}
-                  style={[
-                    styles.purokTextInput,
-                    errors.purok && styles.inputError,
-                  ]}
-                />
-              </View>
-              {!!errors.purok && (
-                <Text style={styles.fieldError}>{errors.purok}</Text>
-              )}
-
-              <TouchableOpacity
-                style={styles.modalButton}
-                onPress={() => {
-                  const nextErrors = validateLocation();
-                  setErrors(nextErrors);
-                  if (Object.values(nextErrors).some(Boolean)) return;
-
-                  const purok = normalizePurok(manualPurok);
-
-                  setManualPurok(purok);
-                  setLocationName(`${manualBarangay}, Pk. ${purok}`);
-                  setErrors((previous) => {
-                    const next = { ...previous };
-                    delete next.location;
-                    return next;
-                  });
-                  setManualLocationModal(false);
-                }}
-              >
-                <Text>Save</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.modalCancel}
-                onPress={() => setManualLocationModal(false)}
-              >
-                <Text>Cancel</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
-
         {/* GPS TRACKING MODAL */}
         <Modal
           visible={gpsModalVisible}
@@ -1265,30 +1122,64 @@ export default function CreateReport() {
                 {/* CHANGED: Barangay / Purok -> Barangay */}
                 <View style={styles.gpsAddressRow}>
                   <View style={styles.gpsLabelRow}>
-                    <Text style={styles.gpsDetailLabel}>Barangay</Text>
+                    <Text style={styles.gpsDetailLabel}>
+                      Barangay <Text style={{ color: "#D93025" }}>*</Text>
+                    </Text>
                     {gpsReverseLoading && (
                       <ActivityIndicator size="small" color="#5F9C76" />
                     )}
                   </View>
                   <TextInput
-                    style={styles.gpsInput}
+                    style={[
+                      styles.gpsInput,
+                      gpsErrors.barangay && styles.inputError,
+                    ]}
                     value={gpsBarangay}
-                    onChangeText={setGpsBarangay}
+                    onChangeText={(text) => {
+                      setGpsBarangay(text);
+                      if (gpsErrors.barangay) {
+                        setGpsErrors((prev) => {
+                          const next = { ...prev };
+                          delete next.barangay;
+                          return next;
+                        });
+                      }
+                    }}
                     placeholder="Barangay"
                     placeholderTextColor="#999"
                   />
+                  {!!gpsErrors.barangay && (
+                    <Text style={styles.fieldError}>{gpsErrors.barangay}</Text>
+                  )}
                 </View>
 
                 {/* CHANGED: Street -> Street / Purok */}
                 <View style={styles.gpsAddressRow}>
-                  <Text style={styles.gpsDetailLabel}>Street / Purok</Text>
+                  <Text style={styles.gpsDetailLabel}>
+                    Street / Purok <Text style={{ color: "#D93025" }}>*</Text>
+                  </Text>
                   <TextInput
-                    style={styles.gpsInput}
+                    style={[
+                      styles.gpsInput,
+                      gpsErrors.street && styles.inputError,
+                    ]}
                     value={gpsStreet}
-                    onChangeText={setGpsStreet}
-                    placeholder="e.g. Toledo Rd / Pk. 2"
+                    onChangeText={(text) => {
+                      setGpsStreet(text);
+                      if (gpsErrors.street) {
+                        setGpsErrors((prev) => {
+                          const next = { ...prev };
+                          delete next.street;
+                          return next;
+                        });
+                      }
+                    }}
+                    placeholder="e.g. Pinya / Pk. 2"
                     placeholderTextColor="#999"
                   />
+                  {!!gpsErrors.street && (
+                    <Text style={styles.fieldError}>{gpsErrors.street}</Text>
+                  )}
                 </View>
               </View>
 

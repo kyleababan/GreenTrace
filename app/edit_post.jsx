@@ -1,4 +1,5 @@
 import * as ImagePicker from "expo-image-picker";
+import * as Location from "expo-location";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { signOut } from "firebase/auth";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
@@ -7,6 +8,7 @@ import {
     ActivityIndicator,
     Image,
     Modal,
+    Platform,
     SafeAreaView,
     ScrollView,
     StyleSheet,
@@ -85,10 +87,20 @@ export default function EditPost() {
 
   const [manualBarangay, setManualBarangay] = useState("");
   const [manualPurok, setManualPurok] = useState("");
-  const [locationChoiceModal, setLocationChoiceModal] = useState(false);
-  const [manualLocationModal, setManualLocationModal] = useState(false);
-  const [barangayDropdownOpen, setBarangayDropdownOpen] = useState(false);
   const [locationName, setLocationName] = useState("");
+  const [gpsModalVisible, setGpsModalVisible] = useState(false);
+  const [coords, setCoords] = useState({
+    latitude: 10.2705,
+    longitude: 123.5855,
+  });
+  const [postCoordinates, setPostCoordinates] = useState(null);
+  const [gpsBarangay, setGpsBarangay] = useState("");
+  const [gpsStreet, setGpsStreet] = useState("");
+  const [gpsReverseLoading, setGpsReverseLoading] = useState(false);
+  const [gpsLoading, setGpsLoading] = useState(false);
+  const [gpsErrors, setGpsErrors] = useState({});
+  const [mapSessionId, setMapSessionId] = useState(0);
+  const [imageSourceModalVisible, setImageSourceModalVisible] = useState(false);
   const [errors, setErrors] = useState({});
   const [wasteClassification, setWasteClassification] = useState(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -156,6 +168,41 @@ export default function EditPost() {
       setStatus((data.status || "moderate").toLowerCase());
       setWasteClassification(data.wasteClassification || null);
 
+      if (data.barangay) {
+        setManualBarangay(data.barangay);
+        setGpsBarangay(data.barangay);
+      } else if (data.locationName) {
+        const parts = data.locationName
+          .split(",")
+          .map((p) => p.trim())
+          .filter(Boolean);
+        if (parts[0]) {
+          setManualBarangay(parts[0]);
+          setGpsBarangay(parts[0]);
+        }
+      }
+
+      if (data.purok) {
+        setManualPurok(data.purok);
+        setGpsStreet(data.purok);
+      } else if (data.locationName) {
+        const parts = data.locationName
+          .split(",")
+          .map((p) => p.trim())
+          .filter(Boolean);
+        if (parts.length > 1) {
+          setManualPurok(parts.slice(1).join(", "));
+          setGpsStreet(parts.slice(1).join(", "));
+        }
+      }
+
+      if (data.coordinates?.latitude && data.coordinates?.longitude) {
+        const lat = parseFloat(Number(data.coordinates.latitude).toFixed(6));
+        const lng = parseFloat(Number(data.coordinates.longitude).toFixed(6));
+        setCoords({ latitude: lat, longitude: lng });
+        setPostCoordinates({ latitude: lat, longitude: lng });
+      }
+
       setOriginalImageUrl(data.imageUrl || null);
       setImage({ uri: data.imageUrl, isNew: false });
     } catch (error) {
@@ -166,48 +213,290 @@ export default function EditPost() {
     }
   };
 
-  // -------------------------------------------------------------------------
-  // Image picker — mirrors create_post.jsx logic
-  // -------------------------------------------------------------------------
-  const pickImage = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      quality: 0.8,
-      allowsEditing: true,
-    });
+  useEffect(() => {
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      const handleWindowMessage = (event) => {
+        try {
+          const data =
+            typeof event.data === "string"
+              ? JSON.parse(event.data)
+              : event.data;
+          if (data && data.type === "GPS_PIN_MOVED") {
+            const nextLat = parseFloat(Number(data.lat).toFixed(6));
+            const nextLng = parseFloat(Number(data.lng).toFixed(6));
+            setCoords({ latitude: nextLat, longitude: nextLng });
+            reverseGeocodeCoordinates(nextLat, nextLng);
+          }
+        } catch {
+          // Ignore non-JSON postMessages
+        }
+      };
 
-    if (result.canceled) return;
+      window.addEventListener("message", handleWindowMessage);
+      return () => {
+        window.removeEventListener("message", handleWindowMessage);
+      };
+    }
+  }, []);
 
-    const asset = result.assets[0];
+  const reverseGeocodeCoordinates = async (lat, lng) => {
+    setGpsReverseLoading(true);
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&addressdetails=1`,
+        {
+          headers: {
+            Accept: "application/json",
+            "User-Agent": "GreenTraceApp/1.0",
+          },
+        },
+      );
+      if (!response.ok) return;
+      const data = await response.json();
+      if (data && data.address) {
+        const addr = data.address;
+        const candidateBarangay =
+          addr.suburb ||
+          addr.village ||
+          addr.quarter ||
+          addr.neighbourhood ||
+          addr.hamlet ||
+          "";
 
+        const matched = BARANGAYS.find(
+          (b) => b.toLowerCase() === candidateBarangay.toLowerCase().trim(),
+        );
+
+        const barangayVal =
+          matched || candidateBarangay || manualBarangay || "Poblacion";
+        const roadVal =
+          addr.road || addr.pedestrian || addr.street || addr.residential || "";
+
+        setGpsBarangay(barangayVal);
+        setGpsStreet(
+          roadVal ||
+            (addr.town || addr.city ? `${addr.town || addr.city}` : ""),
+        );
+      }
+    } catch (err) {
+      console.warn("Reverse geocode error:", err);
+    } finally {
+      setGpsReverseLoading(false);
+    }
+  };
+
+  const detectGpsLocation = async () => {
+    setGpsErrors({});
+    setGpsLoading(true);
+    let lat = coords?.latitude || 10.2705;
+    let lng = coords?.longitude || 123.5855;
+
+    if (!postCoordinates) {
+      try {
+        if (
+          Platform.OS === "web" &&
+          typeof navigator !== "undefined" &&
+          navigator.geolocation
+        ) {
+          const pos = await new Promise((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              enableHighAccuracy: true,
+              timeout: 8000,
+              maximumAge: 10000,
+            });
+          });
+          lat = parseFloat(pos.coords.latitude.toFixed(6));
+          lng = parseFloat(pos.coords.longitude.toFixed(6));
+        } else {
+          const { status } = await Location.requestForegroundPermissionsAsync();
+          if (status === "granted") {
+            const loc = await Location.getCurrentPositionAsync({
+              accuracy: Location.Accuracy.Balanced,
+            });
+            lat = parseFloat(loc.coords.latitude.toFixed(6));
+            lng = parseFloat(loc.coords.longitude.toFixed(6));
+          }
+        }
+      } catch (locErr) {
+        console.warn("Could not get GPS, using default:", locErr);
+      }
+    }
+
+    setCoords({ latitude: lat, longitude: lng });
+    setMapSessionId((prev) => prev + 1);
+    if (!gpsBarangay && !gpsStreet) {
+      await reverseGeocodeCoordinates(lat, lng);
+    }
+    setGpsLoading(false);
+    setGpsModalVisible(true);
+  };
+
+  const handleUseCamera = async () => {
+    setImageSourceModalVisible(false);
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        setErrors((prev) => ({
+          ...prev,
+          image: "Camera permission is required to take a photo.",
+        }));
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ["images"],
+        quality: 0.8,
+        allowsEditing: true,
+      });
+
+      if (result.canceled) return;
+      await processSelectedImage(result.assets[0]);
+    } catch (err) {
+      console.error("Camera error:", err);
+    }
+  };
+
+  const handleUploadGallery = async () => {
+    setImageSourceModalVisible(false);
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        quality: 0.8,
+        allowsEditing: true,
+      });
+
+      if (result.canceled) return;
+      await processSelectedImage(result.assets[0]);
+    } catch (err) {
+      console.error("Gallery error:", err);
+    }
+  };
+
+  const processSelectedImage = async (asset) => {
     if (asset.type === "video") {
-      setErrors((prev) => ({ ...prev, image: "Videos are not supported." }));
+      setErrors((previous) => ({
+        ...previous,
+        image: "Videos are not supported.",
+      }));
       return;
     }
 
-    // 2.5 MB limit
     if (asset.fileSize && asset.fileSize > 2.5 * 1024 * 1024) {
-      setErrors((prev) => ({
-        ...prev,
+      setErrors((previous) => ({
+        ...previous,
         image: "Image must be smaller than 2.5 MB.",
       }));
       return;
     }
 
     setImage({ ...asset, isNew: true });
-    setErrors((prev) => {
-      const next = { ...prev };
+    setErrors((previous) => {
+      const next = { ...previous };
       delete next.image;
       return next;
     });
+
+    // Automatically trigger GPS tracking detection & show map
+    await detectGpsLocation();
   };
+
+  const handleConfirmGpsLocation = () => {
+    const barangay = gpsBarangay.trim();
+    const street = gpsStreet.trim();
+
+    const newGpsErrors = {};
+    if (!barangay) {
+      newGpsErrors.barangay = "Barangay is required.";
+    }
+    if (!street) {
+      newGpsErrors.street = "Street / Purok is required.";
+    }
+
+    if (Object.keys(newGpsErrors).length > 0) {
+      setGpsErrors(newGpsErrors);
+      return;
+    }
+
+    setGpsErrors({});
+
+    let purokVal = street;
+    const purokMatch = street.match(/(?:pk\.?|purok)\s*(\d+|[a-zA-Z0-9]+)/i);
+    if (purokMatch) {
+      purokVal = purokMatch[1];
+    }
+
+    setManualBarangay(barangay);
+    setManualPurok(purokVal);
+    setLocationName(`${barangay}, ${street}`);
+    setPostCoordinates({
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+    });
+
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next.location;
+      delete next.barangay;
+      delete next.purok;
+      return next;
+    });
+
+    setGpsModalVisible(false);
+  };
+
+  const leafletHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    html, body, #map { height: 100%; margin: 0; padding: 0; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <script>
+    var lat = ${coords.latitude || 10.2705};
+    var lng = ${coords.longitude || 123.5855};
+    var map = L.map('map', {
+      center: [lat, lng],
+      zoom: 16,
+      zoomControl: true
+    });
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap',
+      maxZoom: 19,
+    }).addTo(map);
+
+    var marker = L.marker([lat, lng], { draggable: true }).addTo(map);
+
+    function notify(pos) {
+      window.parent.postMessage(JSON.stringify({ type: 'GPS_PIN_MOVED', lat: pos.lat, lng: pos.lng }), '*');
+    }
+
+    marker.on('dragend', function() {
+      notify(marker.getLatLng());
+    });
+
+    map.on('click', function(e) {
+      marker.setLatLng(e.latlng);
+      notify(e.latlng);
+    });
+  </script>
+</body>
+</html>
+`;
 
   // -------------------------------------------------------------------------
   // Location validation (barangay + purok required)
   // -------------------------------------------------------------------------
   const validateLocation = () => ({
-    ...(!manualBarangay ? { barangay: "Select a barangay." } : {}),
-    ...(!normalizePurok(manualPurok) ? { purok: "Purok is required." } : {}),
+    ...(!manualBarangay ? { barangay: "Barangay is required." } : {}),
+    ...(!manualPurok ? { purok: "Street / Purok is required." } : {}),
   });
 
   // -------------------------------------------------------------------------
@@ -216,11 +505,19 @@ export default function EditPost() {
   const updatePost = async () => {
     if (uploading) return;
 
+    const locationErrors = validateLocation();
     const nextErrors = {
       ...(!image ? { image: "Please select an image." } : {}),
+      ...locationErrors,
+      ...(Object.keys(locationErrors).length
+        ? { location: "Please set your location using GPS map before saving." }
+        : {}),
     };
     setErrors(nextErrors);
-    if (Object.values(nextErrors).some(Boolean)) return;
+    if (Object.values(nextErrors).some(Boolean)) {
+      if (Object.keys(locationErrors).length) detectGpsLocation();
+      return;
+    }
 
     try {
       setUploading(true);
@@ -249,8 +546,14 @@ export default function EditPost() {
         title: hideBadWords(title.trim()),
         caption: hideBadWords(caption.trim()),
         locationName,
+        barangay: manualBarangay || null,
+        purok: normalizePurok(manualPurok) || null,
         imageUrl,
       };
+
+      if (postCoordinates) {
+        updates.coordinates = postCoordinates;
+      }
 
       if (newClassification) {
         updates.wasteClassification = newClassification;
@@ -399,7 +702,7 @@ export default function EditPost() {
                 styles.locationRow,
                 errors.location && styles.errorBorder,
               ]}
-              onPress={() => setLocationChoiceModal(true)}
+              onPress={() => detectGpsLocation()}
             >
               <Image
                 source={require("../assets/images/location.png")}
@@ -411,6 +714,9 @@ export default function EditPost() {
             </TouchableOpacity>
             <Text style={styles.postedAt}>{formatPostedAt(createdAt)}</Text>
 
+            {!!errors.location && (
+              <Text style={styles.fieldError}>{errors.location}</Text>
+            )}
             {!!errors.image && (
               <Text style={styles.fieldError}>{errors.image}</Text>
             )}
@@ -497,7 +803,7 @@ export default function EditPost() {
                   />
                   <TouchableOpacity
                     style={styles.changePhotoButton}
-                    onPress={pickImage}
+                    onPress={() => setImageSourceModalVisible(true)}
                   >
                     <Text style={styles.changePhotoText}>Change photo</Text>
                   </TouchableOpacity>
@@ -505,7 +811,7 @@ export default function EditPost() {
               ) : (
                 <TouchableOpacity
                   style={styles.imagePlaceholderContent}
-                  onPress={pickImage}
+                  onPress={() => setImageSourceModalVisible(true)}
                 >
                   <Image
                     source={require("../assets/images/image.png")}
@@ -533,144 +839,179 @@ export default function EditPost() {
           </ScrollView>
         </View>
 
-        {/* LOCATION CHOICE MODAL */}
+        {/* GPS TRACKING MODAL */}
         <Modal
-          visible={locationChoiceModal}
+          visible={gpsModalVisible}
           transparent
           animationType="fade"
-          onRequestClose={() => setLocationChoiceModal(false)}
+          onRequestClose={() => setGpsModalVisible(false)}
         >
           <View style={styles.modalBackground}>
-            <View style={styles.modalBox}>
-              <Text style={styles.modalTitle}>Choose Location Method</Text>
+            <View style={[styles.modalBox, styles.gpsModalBox]}>
+              <Text style={styles.modalTitle}>GPS Tracking</Text>
+
+              {/* INTERACTIVE LEAFLET / OPENSTREETMAP */}
+              <View style={styles.gpsPlaceholder}>
+                {gpsLoading ? (
+                  <View style={styles.gpsLoadingCenter}>
+                    <ActivityIndicator size="large" color="#5F9C76" />
+                    <Text style={styles.gpsLoadingText}>
+                      Acquiring GPS location...
+                    </Text>
+                  </View>
+                ) : Platform.OS === "web" ? (
+                  <iframe
+                    key={`gps-map-${mapSessionId}`}
+                    srcDoc={leafletHtml}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      border: "none",
+                      borderRadius: 8,
+                    }}
+                    title="GPS Location Map"
+                  />
+                ) : (
+                  <View style={styles.gpsLoadingCenter}>
+                    <Text style={{ color: "#24352A", fontWeight: "600" }}>
+                      📍 Pin: {coords.latitude}, {coords.longitude}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <Text style={styles.gpsInstruction}>
+                📍 Drag the pin or tap on the map to adjust location if
+                inaccurate.
+              </Text>
+
+              <View style={styles.gpsDetails}>
+                <View style={styles.gpsCoordinateRow}>
+                  <View style={styles.gpsDetailItem}>
+                    <Text style={styles.gpsDetailLabel}>Latitude</Text>
+                    <Text style={styles.gpsDetailValue}>
+                      {coords.latitude ? coords.latitude.toFixed(6) : "--"}
+                    </Text>
+                  </View>
+                  <View style={styles.gpsDetailItem}>
+                    <Text style={styles.gpsDetailLabel}>Longitude</Text>
+                    <Text style={styles.gpsDetailValue}>
+                      {coords.longitude ? coords.longitude.toFixed(6) : "--"}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Barangay */}
+                <View style={styles.gpsAddressRow}>
+                  <View style={styles.gpsLabelRow}>
+                    <Text style={styles.gpsDetailLabel}>
+                      Barangay <Text style={{ color: "#D93025" }}>*</Text>
+                    </Text>
+                    {gpsReverseLoading && (
+                      <ActivityIndicator size="small" color="#5F9C76" />
+                    )}
+                  </View>
+                  <TextInput
+                    style={[
+                      styles.gpsInput,
+                      gpsErrors.barangay && styles.inputError,
+                    ]}
+                    value={gpsBarangay}
+                    onChangeText={(text) => {
+                      setGpsBarangay(text);
+                      if (gpsErrors.barangay) {
+                        setGpsErrors((prev) => {
+                          const next = { ...prev };
+                          delete next.barangay;
+                          return next;
+                        });
+                      }
+                    }}
+                    placeholder="Barangay"
+                    placeholderTextColor="#999"
+                  />
+                  {!!gpsErrors.barangay && (
+                    <Text style={styles.fieldError}>{gpsErrors.barangay}</Text>
+                  )}
+                </View>
+
+                {/* Street / Purok */}
+                <View style={styles.gpsAddressRow}>
+                  <Text style={styles.gpsDetailLabel}>
+                    Street / Purok <Text style={{ color: "#D93025" }}>*</Text>
+                  </Text>
+                  <TextInput
+                    style={[
+                      styles.gpsInput,
+                      gpsErrors.street && styles.inputError,
+                    ]}
+                    value={gpsStreet}
+                    onChangeText={(text) => {
+                      setGpsStreet(text);
+                      if (gpsErrors.street) {
+                        setGpsErrors((prev) => {
+                          const next = { ...prev };
+                          delete next.street;
+                          return next;
+                        });
+                      }
+                    }}
+                    placeholder="e.g. Pinya / Pk. 2"
+                    placeholderTextColor="#999"
+                  />
+                  {!!gpsErrors.street && (
+                    <Text style={styles.fieldError}>{gpsErrors.street}</Text>
+                  )}
+                </View>
+              </View>
 
               <TouchableOpacity
-                style={styles.modalButton}
-                onPress={() => {
-                  setLocationChoiceModal(false);
-                  setManualLocationModal(true);
-                }}
+                style={styles.confirmLocationBtn}
+                onPress={handleConfirmGpsLocation}
               >
-                <Text style={styles.modalButtonText}>Add Manually</Text>
+                <Text style={styles.confirmLocationText}>Confirm Location</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={styles.modalCancel}
-                onPress={() => setLocationChoiceModal(false)}
+                onPress={() => setGpsModalVisible(false)}
               >
-                <Text style={styles.modalCancelText}>Cancel</Text>
+                <Text style={styles.modalCancelText}>Close</Text>
               </TouchableOpacity>
             </View>
           </View>
         </Modal>
 
-        {/* MANUAL LOCATION MODAL — barangay + purok, same as create_post */}
+        {/* IMAGE SOURCE MODAL: Use Camera or Upload */}
         <Modal
-          visible={manualLocationModal}
+          visible={imageSourceModalVisible}
           transparent
           animationType="fade"
-          onRequestClose={() => setManualLocationModal(false)}
+          onRequestClose={() => setImageSourceModalVisible(false)}
         >
           <View style={styles.modalBackground}>
             <View style={styles.modalBox}>
-              <Text style={styles.modalTitle}>Enter Location</Text>
-
-              <TouchableOpacity
-                style={[styles.dropdown, errors.barangay && styles.inputError]}
-                onPress={() => setBarangayDropdownOpen((open) => !open)}
-              >
-                <Text
-                  style={
-                    manualBarangay
-                      ? styles.dropdownText
-                      : styles.placeholderText
-                  }
-                >
-                  {manualBarangay || "Select Barangay"}
-                </Text>
-                <Text style={styles.dropdownArrow}>
-                  {barangayDropdownOpen ? "^" : "v"}
-                </Text>
-              </TouchableOpacity>
-
-              {barangayDropdownOpen && (
-                <ScrollView style={styles.dropdownList} nestedScrollEnabled>
-                  {BARANGAYS.map((barangay) => (
-                    <TouchableOpacity
-                      key={barangay}
-                      style={styles.dropdownOption}
-                      onPress={() => {
-                        setManualBarangay(barangay);
-                        setBarangayDropdownOpen(false);
-                        setErrors((prev) => {
-                          const next = { ...prev };
-                          delete next.barangay;
-                          delete next.location;
-                          return next;
-                        });
-                      }}
-                    >
-                      <Text>{barangay}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              )}
-              {!!errors.barangay && (
-                <Text style={styles.fieldError}>{errors.barangay}</Text>
-              )}
-
-              <View style={styles.purokInputRow}>
-                <Text style={styles.purokPrefix}>Pk.</Text>
-                <TextInput
-                  placeholder="Example: 3"
-                  value={manualPurok}
-                  onChangeText={(value) => {
-                    setManualPurok(value);
-                    setErrors((prev) => {
-                      const next = { ...prev };
-                      if (normalizePurok(value)) {
-                        delete next.purok;
-                      } else {
-                        next.purok = "Purok is required.";
-                      }
-                      delete next.location;
-                      return next;
-                    });
-                  }}
-                  style={[
-                    styles.purokTextInput,
-                    errors.purok && styles.inputError,
-                  ]}
-                />
-              </View>
-              {!!errors.purok && (
-                <Text style={styles.fieldError}>{errors.purok}</Text>
-              )}
+              <Text style={styles.modalTitle}>Add Waste Photo</Text>
+              <Text style={styles.imageSourceSubtitle}>
+                Select how you would like to add a photo:
+              </Text>
 
               <TouchableOpacity
                 style={styles.modalButton}
-                onPress={() => {
-                  const nextErrors = validateLocation();
-                  setErrors(nextErrors);
-                  if (Object.values(nextErrors).some(Boolean)) return;
-
-                  const purok = normalizePurok(manualPurok);
-                  setManualPurok(purok);
-                  setLocationName(`${manualBarangay}, Pk. ${purok}`);
-                  setErrors((prev) => {
-                    const next = { ...prev };
-                    delete next.location;
-                    return next;
-                  });
-                  setManualLocationModal(false);
-                }}
+                onPress={handleUseCamera}
               >
-                <Text style={styles.modalButtonText}>Save</Text>
+                <Text style={styles.modalButtonText}>📷 Use Camera</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalButton, { backgroundColor: "#4A7C59" }]}
+                onPress={handleUploadGallery}
+              >
+                <Text style={styles.modalButtonText}>📁 Upload</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={styles.modalCancel}
-                onPress={() => setManualLocationModal(false)}
+                onPress={() => setImageSourceModalVisible(false)}
               >
                 <Text style={styles.modalCancelText}>Cancel</Text>
               </TouchableOpacity>
@@ -1062,67 +1403,113 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
 
-  dropdown: {
+  gpsModalBox: {
+    width: "92%",
+    maxWidth: 820,
+    padding: 24,
+  },
+
+  gpsPlaceholder: {
+    height: 240,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#E2E8E4",
+    backgroundColor: "#FAFCFB",
+    overflow: "hidden",
+  },
+
+  gpsLoadingCenter: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 20,
+  },
+
+  gpsLoadingText: {
+    color: "#52675A",
+    fontSize: 13,
+    fontWeight: "600",
+    marginTop: 10,
+  },
+
+  gpsInstruction: {
+    fontSize: 12,
+    color: "#52675A",
+    marginTop: 8,
+    textAlign: "center",
+    fontStyle: "italic",
+  },
+
+  gpsDetails: {
+    marginTop: 12,
+    gap: 10,
+  },
+
+  gpsCoordinateRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+
+  gpsDetailItem: {
+    flex: 1,
+    padding: 10,
+    borderRadius: 8,
+    backgroundColor: "#F4F8F5",
+  },
+
+  gpsAddressRow: {
+    padding: 10,
+    borderRadius: 8,
+    backgroundColor: "#F4F8F5",
+  },
+
+  gpsLabelRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 8,
-    padding: 10,
-    marginBottom: 4,
   },
 
-  dropdownText: {
-    color: "#24352A",
-    fontSize: 14,
-  },
-
-  placeholderText: {
-    color: "#999",
-    fontSize: 14,
-  },
-
-  dropdownArrow: {
-    color: "#405047",
+  gpsDetailLabel: {
+    color: "#52675A",
     fontSize: 12,
-  },
-
-  dropdownList: {
-    maxHeight: 160,
-    borderWidth: 1,
-    borderColor: "#ddd",
-    borderRadius: 8,
-    marginBottom: 4,
-  },
-
-  dropdownOption: {
-    padding: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "#f0f0f0",
-  },
-
-  purokInputRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 8,
-  },
-
-  purokPrefix: {
     fontWeight: "700",
-    color: "#24352A",
-    marginRight: 6,
-    fontSize: 14,
   },
 
-  purokTextInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 8,
-    padding: 10,
-    fontSize: 14,
+  gpsDetailValue: {
     color: "#24352A",
+    fontSize: 14,
+    marginTop: 4,
+    fontWeight: "600",
+  },
+
+  gpsInput: {
+    color: "#24352A",
+    fontSize: 14,
+    marginTop: 4,
+    paddingVertical: 2,
+    paddingHorizontal: 0,
+    fontWeight: "500",
+  },
+
+  confirmLocationBtn: {
+    backgroundColor: "#5F9C76",
+    padding: 14,
+    borderRadius: 8,
+    marginTop: 16,
+    alignItems: "center",
+  },
+
+  confirmLocationText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+
+  imageSourceSubtitle: {
+    fontSize: 13,
+    color: "#666",
+    textAlign: "center",
+    marginBottom: 16,
   },
 
   deletePostButton: {

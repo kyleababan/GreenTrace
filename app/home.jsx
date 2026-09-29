@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import BadgeWithDetails from "../components/BadgeWithDetails";
 import Navbar from "../components/navbar";
+import PostLocationModal from "../components/PostLocationModal";
 import {
     BADGES,
     getUserContributionStats,
@@ -88,6 +89,7 @@ export default function Home() {
   const [posts, setPosts] = useState([]);
   const [search, setSearch] = useState("");
   const [filteredPosts, setFilteredPosts] = useState([]);
+  const [selectedLocationPost, setSelectedLocationPost] = useState(null);
   const [userReactions, setUserReactions] = useState({});
   const [animations, setAnimations] = useState({});
   const [currentUserData, setCurrentUserData] = useState(null);
@@ -866,7 +868,12 @@ export default function Home() {
                       </Text>
                     </View>
 
-                    <View style={styles.locationRow}>
+                    <TouchableOpacity
+                      style={styles.locationRow}
+                      onPress={() => setSelectedLocationPost(post)}
+                      activeOpacity={0.7}
+                      hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                    >
                       <Image
                         source={require("../assets/images/location.png")}
                         style={styles.locationIcon}
@@ -874,7 +881,7 @@ export default function Home() {
                       <Text style={styles.locationText}>
                         {formatLocationWithPurok(post.locationName, post.purok)}
                       </Text>
-                    </View>
+                    </TouchableOpacity>
 
                     {/* Report Status & Waste Category Tags */}
                     <View style={styles.tagsRow}>
@@ -1081,6 +1088,13 @@ export default function Home() {
           </View>
         </View>
       </View>
+
+      {/* POST LOCATION MINI MAP MODAL */}
+      <PostLocationModal
+        post={selectedLocationPost}
+        visible={Boolean(selectedLocationPost)}
+        onClose={() => setSelectedLocationPost(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -1336,17 +1350,19 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     marginTop: 2,
+    alignSelf: "flex-start",
+    cursor: "pointer",
   },
   locationIcon: {
     width: 12,
     height: 12,
     marginRight: 4,
     resizeMode: "contain",
-    tintColor: "#666",
   },
   locationText: {
     fontSize: 12,
-    color: "#666",
+    color: "#4B6B58",
+    fontWeight: "500",
   },
 
   /* Post Content */

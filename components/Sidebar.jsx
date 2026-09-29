@@ -1,17 +1,17 @@
 // components/Sidebar.jsx
 
-import {
-  Image,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-  useWindowDimensions,
-} from "react-native";
-
+import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { doc, getDoc } from "firebase/firestore";
 import { useEffect, useState } from "react";
+import {
+    Image,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+    useWindowDimensions,
+} from "react-native";
 import { auth, db } from "../firebaseConfig";
 
 const getInitials = (name) =>
@@ -23,13 +23,22 @@ const getInitials = (name) =>
     .join("")
     .toUpperCase() || "A";
 
-export default function Sidebar() {
+export default function Sidebar({ onClose, isDrawer = false }) {
   const router = useRouter();
   const [admin, setAdmin] = useState(null);
 
   const { width } = useWindowDimensions();
 
-  const sidebarWidth = width >= 1024 ? 300 : Math.max(200, width * 0.25);
+  const sidebarWidth = isDrawer
+    ? "100%"
+    : width >= 1024
+      ? 300
+      : Math.max(200, width * 0.25);
+
+  const handleNavigate = (path) => {
+    if (onClose) onClose();
+    router.push(path);
+  };
 
   useEffect(() => {
     const loadAdmin = async () => {
@@ -54,19 +63,36 @@ export default function Sidebar() {
   const adminInitials = getInitials(adminName);
 
   return (
-    <View style={[styles.sidebar, { width: sidebarWidth }]}>
-      {/* ADMIN TOOL LABEL */}
-      <Image
-        source={require("../assets/images/GT-admintool-label.png")}
-        style={styles.logo}
-        resizeMode="contain"
-      />
+    <View
+      style={[
+        styles.sidebar,
+        { width: sidebarWidth },
+        isDrawer && { height: "100%", flex: 1 },
+      ]}
+    >
+      {/* ADMIN TOOL LABEL & CLOSE BUTTON */}
+      <View style={styles.topLogoRow}>
+        <Image
+          source={require("../assets/images/GT-admintool-label.png")}
+          style={[styles.logo, Boolean(onClose) && { maxWidth: "78%" }]}
+          resizeMode="contain"
+        />
+        {Boolean(onClose) && (
+          <TouchableOpacity
+            style={styles.closeDrawerBtn}
+            onPress={onClose}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons name="close" size={22} color="#FFFFFF" />
+          </TouchableOpacity>
+        )}
+      </View>
 
       {/* ADMIN PROFILE */}
 
       <TouchableOpacity
         style={styles.divider}
-        onPress={() => router.push("/admin/profile")}
+        onPress={() => handleNavigate("/admin/profile")}
       >
         <View style={styles.Aprofile}>
           <Text style={styles.avatarText}>{adminInitials}</Text>
@@ -84,7 +110,7 @@ export default function Sidebar() {
       <View style={styles.menu}>
         <TouchableOpacity
           style={styles.item}
-          onPress={() => router.push("/admin/dashboard")}
+          onPress={() => handleNavigate("/admin/dashboard")}
         >
           <Image
             source={require("../assets/images/Dashboard Logo.png")}
@@ -96,7 +122,7 @@ export default function Sidebar() {
 
         <TouchableOpacity
           style={styles.item}
-          onPress={() => router.push("/admin/situtation_assessment")}
+          onPress={() => handleNavigate("/admin/situtation_assessment")}
         >
           <Image
             source={require("../assets/images/Situation Assessment Logo.png")}
@@ -108,7 +134,7 @@ export default function Sidebar() {
 
         <TouchableOpacity
           style={styles.item}
-          onPress={() => router.push("/admin/VolunteerList")}
+          onPress={() => handleNavigate("/admin/VolunteerList")}
         >
           <Image
             source={require("../assets/images/vlist.png")}
@@ -120,7 +146,7 @@ export default function Sidebar() {
 
         <TouchableOpacity
           style={styles.item}
-          onPress={() => router.push("/admin/UserList")}
+          onPress={() => handleNavigate("/admin/UserList")}
         >
           <Image
             source={require("../assets/images/acc.png")}
@@ -132,7 +158,7 @@ export default function Sidebar() {
 
         <TouchableOpacity
           style={styles.item}
-          onPress={() => router.push("/admin/pickup_schedule")}
+          onPress={() => handleNavigate("/admin/pickup_schedule")}
         >
           <Image
             source={require("../assets/images/Notification.png")}
@@ -140,12 +166,22 @@ export default function Sidebar() {
           />
           <Text style={styles.itemText}>Scheduled Date</Text>
         </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.item}
+          onPress={() => handleNavigate("/admin/map")}
+        >
+          <View style={styles.iconWrapper}>
+            <Ionicons name="location" size={22} color="#599A74" />
+          </View>
+          <Text style={styles.itemText}>Map</Text>
+        </TouchableOpacity>
       </View>
 
       {/* BOTTOM */}
 
       <View style={styles.bottom}>
-        <TouchableOpacity onPress={() => router.push("/admin/settings")}>
+        <TouchableOpacity onPress={() => handleNavigate("/admin/settings")}>
           <Image
             source={require("../assets/images/settings.png")}
             style={styles.settings}
@@ -154,7 +190,10 @@ export default function Sidebar() {
 
         <TouchableOpacity
           style={styles.logoutContainer}
-          onPress={() => router.replace("/signin")}
+          onPress={() => {
+            if (onClose) onClose();
+            router.replace("/signin");
+          }}
         >
           <Text style={styles.logout}>Logout</Text>
         </TouchableOpacity>
@@ -170,10 +209,22 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
 
+  topLogoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 14,
+  },
+
+  closeDrawerBtn: {
+    padding: 6,
+    borderRadius: 8,
+    backgroundColor: "rgba(0, 0, 0, 0.15)",
+  },
+
   logo: {
     width: "85%",
     height: 56,
-    marginBottom: 14,
     alignSelf: "flex-start",
   },
 
@@ -235,6 +286,13 @@ const styles = StyleSheet.create({
   icon: {
     width: 24,
     height: 24,
+  },
+
+  iconWrapper: {
+    width: 24,
+    height: 24,
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   itemText: {
