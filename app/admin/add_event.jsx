@@ -2,20 +2,21 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Image,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
-    useWindowDimensions,
+  ActivityIndicator,
+  Image,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+  useWindowDimensions,
 } from "react-native";
 import { uploadToCloudinary } from "../../cloudinary";
+import PostLocationModal from "../../components/PostLocationModal";
 import { auth, db } from "../../firebaseConfig";
 import { hideBadWords } from "../../utils/hideBadWords";
 
@@ -81,11 +82,12 @@ const getCalendarDays = (month) => {
 export default function AddEvent() {
   const router = useRouter();
   const { width } = useWindowDimensions();
-  const isNarrow = width < 600;
+  const isNarrow = width < 760;
   const [title, setTitle] = useState("Community Cleanup Event");
   const [description, setDescription] = useState("");
   const [requirements, setRequirements] = useState(INITIAL_REQUIREMENTS);
   const [location, setLocation] = useState("");
+  const [coordinates, setCoordinates] = useState(null);
   const [manualBarangay, setManualBarangay] = useState("");
   const [manualPurok, setManualPurok] = useState("");
   const [date, setDate] = useState("");
@@ -94,13 +96,21 @@ export default function AddEvent() {
   const [image, setImage] = useState(null);
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
-  const [locationChoiceVisible, setLocationChoiceVisible] = useState(false);
   const [manualLocationVisible, setManualLocationVisible] = useState(false);
   const [gpsVisible, setGpsVisible] = useState(false);
   const [barangayDropdownOpen, setBarangayDropdownOpen] = useState(false);
   const [calendarVisible, setCalendarVisible] = useState(false);
   const [timeVisible, setTimeVisible] = useState(false);
   const [visibleMonth, setVisibleMonth] = useState(() => new Date());
+  const requirementsScrollRef = useRef(null);
+  const previousRequirementsLengthRef = useRef(requirements.length);
+
+  useEffect(() => {
+    if (requirements.length > previousRequirementsLengthRef.current) {
+      requirementsScrollRef.current?.scrollToEnd({ animated: true });
+    }
+    previousRequirementsLengthRef.current = requirements.length;
+  }, [requirements.length]);
 
   const updateRequirement = (value, index) => {
     setRequirements((current) =>
@@ -121,6 +131,7 @@ export default function AddEvent() {
   const selectLocation = () => {
     if (!manualBarangay || !manualPurok) return;
     setLocation(`${manualBarangay}, Pk. ${manualPurok}`);
+    setCoordinates(null);
     setErrors((current) => ({ ...current, location: "" }));
     setManualLocationVisible(false);
   };
@@ -228,6 +239,16 @@ export default function AddEvent() {
         imageUrl,
         meetingLocation: location.trim(),
         locationName: location.trim(),
+        ...(coordinates?.latitude != null && coordinates?.longitude != null
+          ? {
+              coordinates: {
+                latitude: Number(coordinates.latitude),
+                longitude: Number(coordinates.longitude),
+              },
+              latitude: Number(coordinates.latitude),
+              longitude: Number(coordinates.longitude),
+            }
+          : {}),
         meetingDate: date.trim(),
         meetingTime: time.trim(),
         maxVolunteers: Number(maxVolunteers),
@@ -264,11 +285,16 @@ export default function AddEvent() {
         </TouchableOpacity>
 
         <View style={styles.header}>
-          <Text style={styles.eyebrow}>NATURE AND WASTE RESPONSE</Text>
-          <Text style={styles.heading}>Add Event</Text>
-          <Text style={styles.subheading}>
-            Create a cleanup or environmental activity for volunteers.
-          </Text>
+          <View style={styles.headerIcon}>
+            <Ionicons name="leaf" size={22} color="#EAF5EE" />
+          </View>
+          <View style={styles.headerCopy}>
+            <Text style={styles.eyebrow}>NATURE AND WASTE RESPONSE</Text>
+            <Text style={styles.heading}>Add Event</Text>
+            <Text style={styles.subheading}>
+              Create a cleanup or environmental activity for volunteers.
+            </Text>
+          </View>
         </View>
       </View>
       <ScrollView
@@ -278,141 +304,243 @@ export default function AddEvent() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.formCard}>
-          <Text style={styles.label}>Event title</Text>
-          <TextInput
-            value={title}
-            onChangeText={setTitle}
-            placeholder="Community Cleanup Event"
-            placeholderTextColor="#91A198"
-            style={styles.input}
-          />
-          {errors.title && <Text style={styles.error}>{errors.title}</Text>}
-
-          <Text style={styles.label}>Description</Text>
-          <TextInput
-            value={description}
-            onChangeText={setDescription}
-            placeholder="Describe the environmental activity"
-            placeholderTextColor="#91A198"
-            multiline
-            style={[styles.input, styles.multilineInput]}
-          />
-          {errors.description && (
-            <Text style={styles.error}>{errors.description}</Text>
-          )}
-
-          <Text style={styles.label}>Event image</Text>
-          <TouchableOpacity style={styles.imagePicker} onPress={pickImage}>
-            {image ? (
-              <Image
-                source={{ uri: image.uri }}
-                style={styles.previewImage}
-                resizeMode="contain"
-              />
-            ) : (
-              <>
-                <Text style={styles.imagePickerTitle}>Choose image</Text>
-                <Text style={styles.imagePickerHint}>
-                  Add a clear photo of the nature or waste activity
-                </Text>
-              </>
-            )}
-          </TouchableOpacity>
-          {errors.image && <Text style={styles.error}>{errors.image}</Text>}
-
-          <Text style={styles.label}>Volunteer requirements</Text>
-          {requirements.map((requirement, index) => (
-            <View style={styles.requirementRow} key={`requirement-${index}`}>
-              <TextInput
-                value={requirement}
-                onChangeText={(value) => updateRequirement(value, index)}
-                placeholder="Example: Bring gloves"
-                placeholderTextColor="#91A198"
-                style={[styles.input, styles.requirementInput]}
-              />
-              <TouchableOpacity
-                style={styles.removeButton}
-                onPress={() => removeRequirement(index)}
-                accessibilityLabel="Remove requirement"
-              >
-                <Text style={styles.removeText}>-</Text>
-              </TouchableOpacity>
-            </View>
-          ))}
-          <TouchableOpacity
-            style={styles.addRequirement}
-            onPress={addRequirement}
-          >
-            <Text style={styles.addRequirementText}>+ Add requirement</Text>
-          </TouchableOpacity>
-          {errors.requirements && (
-            <Text style={styles.error}>{errors.requirements}</Text>
-          )}
-
-          <Text style={styles.label}>Location</Text>
-          <TouchableOpacity
-            style={[styles.locationRow, errors.location && styles.inputError]}
-            onPress={() => setLocationChoiceVisible(true)}
-          >
-            <Ionicons name="location-outline" size={20} color="#FFFFFF" />
-            <Text style={styles.locationText}>
-              {location || "Set Location..."}
+          <View style={styles.formIntro}>
+            <Text style={styles.formIntroTitle}>Event details</Text>
+            <Text style={styles.formIntroHint}>
+              Add the key information volunteers need to join.
             </Text>
-          </TouchableOpacity>
-          {errors.location && (
-            <Text style={styles.error}>{errors.location}</Text>
-          )}
+          </View>
 
           <View
             style={[
-              styles.twoColumnRow,
-              isNarrow && styles.twoColumnRowStacked,
+              styles.formColumns,
+              isNarrow && styles.formColumnsStacked,
             ]}
           >
-            <View style={styles.column}>
-              <Text style={styles.label}>Date</Text>
+            <View style={styles.formColumn}>
+              <Text style={styles.label}>Event image</Text>
               <TouchableOpacity
-                style={[styles.pickerInput, errors.date && styles.inputError]}
-                onPress={() => setCalendarVisible(true)}
+                style={styles.imagePicker}
+                onPress={pickImage}
+                accessibilityRole="button"
+                accessibilityLabel={image ? "Change event image" : "Upload event image"}
               >
-                <Ionicons name="calendar-outline" size={19} color="#397A51" />
-                <Text
-                  style={date ? styles.pickerText : styles.pickerPlaceholder}
-                >
-                  {date || "Choose date"}
+                {image ? (
+                  <Image
+                    source={{ uri: image.uri }}
+                    style={styles.previewImage}
+                    resizeMode="contain"
+                  />
+                ) : (
+                  <>
+                    <Ionicons
+                      name="image-outline"
+                      size={42}
+                      color="#5F9C76"
+                    />
+                    <Text style={styles.imagePickerTitle}>Upload image</Text>
+                    <Text style={styles.imagePickerHint}>
+                      Add a clear photo of the nature or waste activity
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+              {errors.image && <Text style={styles.error}>{errors.image}</Text>}
+
+              <View
+                style={[
+                  styles.twoColumnRow,
+                  isNarrow && styles.twoColumnRowStacked,
+                ]}
+              >
+                <View style={styles.column}>
+                  <Text style={styles.label}>Date</Text>
+                  <TouchableOpacity
+                    style={[
+                      styles.pickerInput,
+                      errors.date && styles.inputError,
+                    ]}
+                    onPress={() => setCalendarVisible(true)}
+                  >
+                    <Ionicons
+                      name="calendar-outline"
+                      size={19}
+                      color="#397A51"
+                    />
+                    <Text
+                      style={
+                        date ? styles.pickerText : styles.pickerPlaceholder
+                      }
+                      numberOfLines={1}
+                    >
+                      {date || "Choose date"}
+                    </Text>
+                  </TouchableOpacity>
+                  {errors.date && (
+                    <Text style={styles.error}>{errors.date}</Text>
+                  )}
+                </View>
+                <View style={styles.column}>
+                  <Text style={styles.label}>Time</Text>
+                  <TouchableOpacity
+                    style={[
+                      styles.pickerInput,
+                      errors.time && styles.inputError,
+                    ]}
+                    onPress={() => setTimeVisible(true)}
+                  >
+                    <Ionicons name="time-outline" size={19} color="#397A51" />
+                    <Text
+                      style={
+                        time ? styles.pickerText : styles.pickerPlaceholder
+                      }
+                      numberOfLines={1}
+                    >
+                      {time || "Choose time"}
+                    </Text>
+                  </TouchableOpacity>
+                  {errors.time && (
+                    <Text style={styles.error}>{errors.time}</Text>
+                  )}
+                </View>
+              </View>
+
+              <Text style={styles.label}>Meet up area</Text>
+              <TouchableOpacity
+                style={[
+                  styles.locationRow,
+                  errors.location && styles.inputError,
+                ]}
+                onPress={() => setGpsVisible(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Set meetup area using GPS"
+                activeOpacity={0.85}
+              >
+                <Ionicons name="location-outline" size={20} color="#FFFFFF" />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.locationText}>
+                    {location || "Set meetup area"}
+                  </Text>
+                  {coordinates?.latitude != null &&
+                    coordinates?.longitude != null && (
+                      <Text style={styles.locationCoordsText}>
+                        GPS: {Number(coordinates.latitude).toFixed(6)},{" "}
+                        {Number(coordinates.longitude).toFixed(6)}
+                      </Text>
+                    )}
+                </View>
+                <Ionicons
+                  name="chevron-forward"
+                  size={16}
+                  color="rgba(255,255,255,0.7)"
+                />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.manualLocationLink}
+                onPress={() => setManualLocationVisible(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Enter meetup area manually"
+              >
+                <Text style={styles.manualLocationLinkText}>
+                  Enter location manually
                 </Text>
               </TouchableOpacity>
-              {errors.date && <Text style={styles.error}>{errors.date}</Text>}
+              {errors.location && (
+                <Text style={styles.error}>{errors.location}</Text>
+              )}
             </View>
-            <View style={styles.column}>
-              <Text style={styles.label}>Time</Text>
-              <TouchableOpacity
-                style={[styles.pickerInput, errors.time && styles.inputError]}
-                onPress={() => setTimeVisible(true)}
-              >
-                <Ionicons name="time-outline" size={19} color="#397A51" />
-                <Text
-                  style={time ? styles.pickerText : styles.pickerPlaceholder}
-                >
-                  {time || "Choose time"}
+
+            <View style={styles.formColumn}>
+              <Text style={styles.label}>Event title</Text>
+              <TextInput
+                value={title}
+                onChangeText={setTitle}
+                placeholder="Community Cleanup Event"
+                placeholderTextColor="#91A198"
+                style={styles.input}
+              />
+              {errors.title && (
+                <Text style={styles.error}>{errors.title}</Text>
+              )}
+
+              <Text style={styles.label}>Description</Text>
+              <TextInput
+                value={description}
+                onChangeText={setDescription}
+                placeholder="Describe the environmental activity"
+                placeholderTextColor="#91A198"
+                multiline
+                style={[styles.input, styles.multilineInput]}
+              />
+              {errors.description && (
+                <Text style={styles.error}>{errors.description}</Text>
+              )}
+
+              <View style={styles.requirementsPanel}>
+                <Text style={styles.requirementsTitle}>
+                  Volunteer requirements
                 </Text>
-              </TouchableOpacity>
-              {errors.time && <Text style={styles.error}>{errors.time}</Text>}
+                <ScrollView
+                  ref={requirementsScrollRef}
+                  style={styles.requirementsList}
+                  contentContainerStyle={styles.requirementsListContent}
+                  nestedScrollEnabled
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator
+                >
+                  {requirements.map((requirement, index) => (
+                    <View
+                      style={styles.requirementRow}
+                      key={`requirement-${index}`}
+                    >
+                      <TextInput
+                        value={requirement}
+                        onChangeText={(value) =>
+                          updateRequirement(value, index)
+                        }
+                        placeholder="Example: Bring gloves"
+                        placeholderTextColor="#91A198"
+                        style={[styles.input, styles.requirementInput]}
+                      />
+                      <TouchableOpacity
+                        style={styles.removeButton}
+                        onPress={() => removeRequirement(index)}
+                        accessibilityLabel="Remove requirement"
+                      >
+                        <Text style={styles.removeText}>-</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </ScrollView>
+                <TouchableOpacity
+                  style={styles.addRequirement}
+                  onPress={addRequirement}
+                >
+                  <Text style={styles.addRequirementText}>
+                    + Add requirement
+                  </Text>
+                </TouchableOpacity>
+                {errors.requirements && (
+                  <Text style={styles.error}>{errors.requirements}</Text>
+                )}
+              </View>
+
+              <Text style={styles.label}>Volunteer capacity</Text>
+              <TextInput
+                value={maxVolunteers}
+                onChangeText={(value) =>
+                  setMaxVolunteers(value.replace(/\D/g, ""))
+                }
+                placeholder="Number of volunteers"
+                placeholderTextColor="#91A198"
+                keyboardType="number-pad"
+                style={styles.input}
+              />
+              {errors.maxVolunteers && (
+                <Text style={styles.error}>{errors.maxVolunteers}</Text>
+              )}
             </View>
           </View>
-
-          <Text style={styles.label}>Volunteer capacity</Text>
-          <TextInput
-            value={maxVolunteers}
-            onChangeText={(value) => setMaxVolunteers(value.replace(/\D/g, ""))}
-            placeholder="Number of volunteers"
-            placeholderTextColor="#91A198"
-            keyboardType="number-pad"
-            style={styles.input}
-          />
-          {errors.maxVolunteers && (
-            <Text style={styles.error}>{errors.maxVolunteers}</Text>
-          )}
           {errors.form && <Text style={styles.error}>{errors.form}</Text>}
 
           <TouchableOpacity
@@ -430,43 +558,6 @@ export default function AddEvent() {
       </ScrollView>
 
       <Modal
-        visible={locationChoiceVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setLocationChoiceVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Choose Location</Text>
-            <TouchableOpacity
-              style={styles.modalButton}
-              onPress={() => {
-                setLocationChoiceVisible(false);
-                setManualLocationVisible(true);
-              }}
-            >
-              <Text style={styles.modalButtonText}>Add Manually</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.modalButton}
-              onPress={() => {
-                setLocationChoiceVisible(false);
-                setGpsVisible(true);
-              }}
-            >
-              <Text style={styles.modalButtonText}>Use GPS Tracking</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.modalCancel}
-              onPress={() => setLocationChoiceVisible(false)}
-            >
-              <Text style={styles.modalCancelText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
         visible={manualLocationVisible}
         transparent
         animationType="fade"
@@ -474,7 +565,7 @@ export default function AddEvent() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Enter Location</Text>
+            <Text style={styles.modalTitle}>Meet up area</Text>
             <TouchableOpacity
               style={styles.dropdown}
               onPress={() => setBarangayDropdownOpen((current) => !current)}
@@ -525,7 +616,7 @@ export default function AddEvent() {
               style={styles.modalButton}
               onPress={selectLocation}
             >
-              <Text style={styles.modalButtonText}>Save Location</Text>
+              <Text style={styles.modalButtonText}>Save meetup area</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.modalCancel}
@@ -537,28 +628,19 @@ export default function AddEvent() {
         </View>
       </Modal>
 
-      <Modal
+      <PostLocationModal
+        key={gpsVisible ? "gps-open" : "gps-closed"}
         visible={gpsVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setGpsVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>GPS Tracking</Text>
-            <View style={styles.gpsPlaceholder} />
-            <Text style={styles.gpsHint}>
-              GPS location will be available soon.
-            </Text>
-            <TouchableOpacity
-              style={styles.modalCancel}
-              onPress={() => setGpsVisible(false)}
-            >
-              <Text style={styles.modalCancelText}>Close</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+        onClose={() => setGpsVisible(false)}
+        initialLocation={location}
+        initialCoords={coordinates}
+        onSelectLocation={(selected) => {
+          setLocation(selected.locationName);
+          setCoordinates(selected.coordinates);
+          setErrors((current) => ({ ...current, location: "" }));
+          setGpsVisible(false);
+        }}
+      />
 
       <Modal
         visible={calendarVisible}
@@ -681,95 +763,195 @@ export default function AddEvent() {
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: "#F5F6FA" },
+  page: { flex: 1, backgroundColor: "#F2F6F3" },
   fixedHeader: {
     paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 10,
-    backgroundColor: "#F5F6FA",
-    borderBottomWidth: 1,
-    borderBottomColor: "#E3EBE6",
+    paddingTop: 14,
+    paddingBottom: 12,
+    backgroundColor: "#F2F6F3",
   },
   formScroll: { flex: 1 },
   content: {
-    padding: 16,
-    paddingTop: 12,
-    paddingBottom: 28,
+    paddingHorizontal: 16,
+    paddingTop: 18,
+    paddingBottom: 36,
     alignItems: "center",
   },
   backButton: {
-    width: 40,
-    height: 40,
+    width: 38,
+    height: 38,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 10,
+    marginBottom: 12,
+    borderRadius: 12,
+    backgroundColor: "#E5EFE8",
   },
-  backIcon: { width: 32, height: 32 },
-  header: { marginBottom: 12 },
+  backIcon: { width: 28, height: 28, tintColor: "#397A51" },
+  header: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+    marginBottom: 2,
+  },
+  headerIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#E5EFE8",
+  },
+  headerCopy: { flex: 1 },
   eyebrow: {
     color: "#5F9C76",
     fontSize: 11,
     fontWeight: "800",
     letterSpacing: 0.5,
   },
-  heading: { color: "#234B33", fontSize: 24, fontWeight: "800", marginTop: 3 },
-  subheading: { color: "#63756A", fontSize: 13, marginTop: 4 },
+  heading: {
+    color: "#234B33",
+    fontSize: 25,
+    fontWeight: "800",
+    marginTop: 3,
+  },
+  subheading: {
+    color: "#63756A",
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 5,
+    maxWidth: 520,
+  },
   formCard: {
-    maxWidth: 900,
+    maxWidth: 1100,
     width: "100%",
     backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 22,
+    borderWidth: 1,
+    borderColor: "#E2EBE5",
+    boxShadow: "0 8px 24px rgba(35, 75, 51, 0.08)",
+  },
+  formColumns: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 24,
+  },
+  formColumnsStacked: {
+    flexDirection: "column",
+    gap: 8,
+  },
+  formColumn: {
+    flex: 1,
+    minWidth: 0,
+  },
+  requirementsPanel: {
+    height: 300,
+    padding: 14,
+    marginTop: 18,
     borderRadius: 12,
-    padding: 16,
+    borderWidth: 1,
+    borderColor: "#E2EBE5",
+    backgroundColor: "#F8FBF9",
+  },
+  requirementsList: {
+    height: 180,
+    flexGrow: 0,
+  },
+  requirementsListContent: {
+    paddingBottom: 4,
+  },
+  requirementsTitle: {
+    color: "#284E36",
+    fontSize: 13,
+    fontWeight: "700",
+    marginBottom: 12,
+  },
+  formIntro: {
+    paddingBottom: 16,
+    marginBottom: 2,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EAF0EC",
+  },
+  formIntroTitle: {
+    color: "#234B33",
+    fontSize: 17,
+    fontWeight: "800",
+  },
+  formIntroHint: {
+    color: "#718078",
+    fontSize: 12,
+    marginTop: 4,
   },
   label: {
     color: "#284E36",
     fontSize: 13,
     fontWeight: "700",
-    marginTop: 10,
-    marginBottom: 6,
+    marginTop: 18,
+    marginBottom: 7,
   },
   input: {
-    minHeight: 44,
+    minHeight: 46,
     borderWidth: 1,
-    borderColor: "#D8E3DC",
-    borderRadius: 8,
+    borderColor: "#DCE6DF",
+    borderRadius: 10,
     paddingHorizontal: 12,
     color: "#24352A",
-    backgroundColor: "#FAFCFB",
+    backgroundColor: "#FBFDFC",
     fontSize: 14,
     outlineStyle: "none",
   },
-  multilineInput: { minHeight: 80, paddingTop: 10, textAlignVertical: "top" },
+  multilineInput: {
+    minHeight: 100,
+    paddingTop: 12,
+    textAlignVertical: "top",
+    lineHeight: 20,
+  },
   locationRow: {
-    minHeight: 44,
+    minHeight: 48,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     paddingHorizontal: 12,
+    paddingVertical: 8,
     borderRadius: 8,
     backgroundColor: "#5F9C76",
   },
   locationText: { flex: 1, color: "#FFFFFF", fontSize: 14, fontWeight: "600" },
+  locationCoordsText: {
+    color: "#E8F5E9",
+    fontSize: 11,
+    fontWeight: "600",
+    marginTop: 2,
+  },
+  manualLocationLink: {
+    alignSelf: "flex-start",
+    paddingVertical: 7,
+  },
+  manualLocationLinkText: {
+    color: "#397A51",
+    fontSize: 12,
+    fontWeight: "700",
+  },
   pickerInput: {
-    minHeight: 44,
+    minHeight: 46,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     paddingHorizontal: 12,
     borderWidth: 1,
-    borderColor: "#D8E3DC",
-    borderRadius: 8,
-    backgroundColor: "#FAFCFB",
+    borderColor: "#DCE6DF",
+    borderRadius: 10,
+    backgroundColor: "#FBFDFC",
   },
   pickerText: { color: "#24352A", fontSize: 14 },
   pickerPlaceholder: { color: "#91A198", fontSize: 14 },
   imagePicker: {
     width: "100%",
-    aspectRatio: 4 / 3,
-    borderRadius: 8,
+    aspectRatio: 1.28,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#D8E3DC",
-    backgroundColor: "#F4F8F5",
+    borderColor: "#DCE6DF",
+    backgroundColor: "#F5F9F6",
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
@@ -810,12 +992,13 @@ const styles = StyleSheet.create({
   twoColumnRowStacked: { flexDirection: "column", gap: 0 },
   column: { flex: 1, minWidth: 0 },
   saveButton: {
-    minHeight: 48,
-    borderRadius: 8,
-    backgroundColor: "#5F9C76",
+    minHeight: 52,
+    borderRadius: 11,
+    backgroundColor: "#397A51",
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 16,
+    marginTop: 22,
+    boxShadow: "0 5px 12px rgba(57, 122, 81, 0.2)",
   },
   disabledButton: { opacity: 0.65 },
   saveText: { color: "#FFFFFF", fontSize: 15, fontWeight: "800" },

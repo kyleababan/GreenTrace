@@ -15,6 +15,7 @@ import {
 } from "react-native";
 
 import Navbar from "../components/navbar";
+import PostLocationModal from "../components/PostLocationModal";
 import { auth, db } from "../firebaseConfig";
 
 const getMemberId = (member) =>
@@ -66,6 +67,7 @@ export default function Volunteering() {
   );
   const [imageAspectRatio, setImageAspectRatio] = useState(null);
   const [showLockedModal, setShowLockedModal] = useState(false);
+  const [locationModalVisible, setLocationModalVisible] = useState(false);
 
   useEffect(() => {
     const loadActivity = async () => {
@@ -82,7 +84,47 @@ export default function Volunteering() {
           return;
         }
 
-        setActivity({ id: activitySnapshot.id, ...activitySnapshot.data() });
+        const activityData = {
+          id: activitySnapshot.id,
+          ...activitySnapshot.data(),
+        };
+
+        if (activityData.postId) {
+          try {
+            const postSnapshot = await getDoc(
+              doc(db, "posts", activityData.postId),
+            );
+            if (postSnapshot.exists()) {
+              const postData = postSnapshot.data();
+              if (!activityData.coordinates && postData.coordinates) {
+                activityData.coordinates = postData.coordinates;
+              }
+              if (
+                !activityData.coordinates &&
+                postData.latitude &&
+                postData.longitude
+              ) {
+                activityData.coordinates = {
+                  latitude: postData.latitude,
+                  longitude: postData.longitude,
+                };
+              }
+              if (!activityData.purok && postData.purok) {
+                activityData.purok = postData.purok;
+              }
+              if (
+                !activityData.wasteClassification &&
+                postData.wasteClassification
+              ) {
+                activityData.wasteClassification = postData.wasteClassification;
+              }
+            }
+          } catch (postErr) {
+            console.error("Unable to load linked post coordinates:", postErr);
+          }
+        }
+
+        setActivity(activityData);
 
         if (signedInUser) {
           const userSnapshot = await getDoc(doc(db, "users", signedInUser.uid));
@@ -274,9 +316,9 @@ export default function Volunteering() {
               source={{ uri: activity.imageUrl }}
               style={[
                 styles.mainImage,
-                imageAspectRatio && { aspectRatio: imageAspectRatio },
+                { aspectRatio: imageAspectRatio || 16 / 9 },
               ]}
-              resizeMode="cover"
+              resizeMode="contain"
               onLoad={({ nativeEvent }) => {
                 const { width, height } = nativeEvent?.source || {};
                 if (width && height) setImageAspectRatio(width / height);
@@ -290,14 +332,21 @@ export default function Volunteering() {
           )}
 
           {/* LOCATION */}
-          <View style={styles.locationRow}>
-            <Ionicons name="location-outline" size={16} color="#5F9C76" />
-            <Text style={styles.locationText}>
-              {activity.meetingLocation ||
-                activity.locationName ||
-                "Location not specified"}
-            </Text>
-          </View>
+          <TouchableOpacity
+            style={styles.locationRow}
+            onPress={() => setLocationModalVisible(true)}
+            activeOpacity={0.7}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+          >
+            <View style={styles.locationLeft}>
+              <Ionicons name="location-outline" size={18} color="#2E7D32" />
+              <Text style={styles.locationText} numberOfLines={2}>
+                {activity.meetingLocation ||
+                  activity.locationName ||
+                  "Location not specified"}
+              </Text>
+            </View>
+          </TouchableOpacity>
 
           <View style={styles.meetingRow}>
             <View style={styles.meetingItem}>
@@ -362,7 +411,12 @@ export default function Volunteering() {
           {/* REQUIREMENTS CARD */}
           <View style={styles.infoCard}>
             <Text style={styles.cardLabel}>Requirements</Text>
-            <View style={styles.reqList}>
+            <ScrollView
+              style={styles.reqScroll}
+              contentContainerStyle={styles.reqList}
+              nestedScrollEnabled
+              showsVerticalScrollIndicator
+            >
               {activity.requirements?.length ? (
                 activity.requirements.map((requirement, index) => (
                   <View
@@ -376,7 +430,7 @@ export default function Volunteering() {
               ) : (
                 <Text style={styles.emptyText}>No requirements listed.</Text>
               )}
-            </View>
+            </ScrollView>
           </View>
 
           {/* JOIN / LEAVE BUTTON */}
@@ -409,7 +463,9 @@ export default function Volunteering() {
                     ? "Activity locked"
                     : isFull
                       ? "Activity full"
-                      : "Volunteer Now"}
+                      : activity.eventType
+                        ? "Join Event"
+                        : "Volunteer Now"}
             </Text>
           </TouchableOpacity>
         </ScrollView>
@@ -446,6 +502,13 @@ export default function Volunteering() {
           </View>
         </View>
       </Modal>
+
+      {/* POST LOCATION MINI MAP MODAL */}
+      <PostLocationModal
+        post={activity}
+        visible={locationModalVisible}
+        onClose={() => setLocationModalVisible(false)}
+      />
     </View>
   );
 }
@@ -529,7 +592,7 @@ const styles = StyleSheet.create({
   /* MEDIA & LOCATION */
   mainImage: {
     width: "100%",
-    minHeight: 180,
+    minHeight: 220,
     borderRadius: 16,
     backgroundColor: "#E2E8F0",
   },
@@ -551,19 +614,42 @@ const styles = StyleSheet.create({
   locationRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    justifyContent: "space-between",
     backgroundColor: "#FFFFFF",
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 12,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: "#E2E8F0",
+    gap: 10,
+  },
+  locationLeft: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   locationText: {
     flex: 1,
     fontSize: 13,
     fontWeight: "500",
     color: "#0F172A",
+  },
+  viewMapBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#EAF9EE",
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#D1E7D8",
+  },
+  viewMapBadgeText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#2E7D32",
   },
   meetingRow: {
     flexDirection: "row",
@@ -661,6 +747,10 @@ const styles = StyleSheet.create({
   },
   reqList: {
     gap: 8,
+  },
+  reqScroll: {
+    maxHeight: 250,
+    flexGrow: 0,
   },
   reqItemRow: {
     flexDirection: "row",

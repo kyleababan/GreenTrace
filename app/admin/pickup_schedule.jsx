@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import {
   addDoc,
   collection,
@@ -152,6 +153,8 @@ export default function PickupSchedule() {
   const [editingOperationId, setEditingOperationId] = useState(null);
   const [operationPendingDelete, setOperationPendingDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [showAllAnnouncements, setShowAllAnnouncements] = useState(false);
+  const [visibleAllCount, setVisibleAllCount] = useState(5);
   const calendarDays = getCalendarDays(visibleMonth);
   const selectedDateOperations = selectedDate
     ? operations.filter((operation) =>
@@ -424,14 +427,14 @@ export default function PickupSchedule() {
               onPress={() => changeMonth(-1)}
               accessibilityLabel="Previous month"
             >
-              <Text style={styles.arrowText}>‹</Text>
+              <Ionicons name="chevron-back" size={20} color="#FFFFFF" />
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.arrowButton}
               onPress={() => changeMonth(1)}
               accessibilityLabel="Next month"
             >
-              <Text style={styles.arrowText}>›</Text>
+              <Ionicons name="chevron-forward" size={20} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
         </View>
@@ -529,6 +532,173 @@ export default function PickupSchedule() {
         </View>
       </View>
 
+      {/* All Announcements Panel */}
+      <View style={styles.allAnnouncementsSection}>
+        <View style={styles.allAnnouncementsHeader}>
+          <View>
+            <Text style={styles.allAnnouncementsTitle}>All Announcements</Text>
+            <Text style={styles.allAnnouncementsSubtitle}>
+              {operations.length} announcement
+              {operations.length !== 1 ? "s" : ""} total
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={styles.toggleAllButton}
+            onPress={() => {
+              setShowAllAnnouncements((v) => {
+                if (v) setVisibleAllCount(5); // reset batch on close
+                return !v;
+              });
+            }}
+          >
+            <Text style={styles.toggleAllButtonText}>
+              {showAllAnnouncements ? "Hide" : "View All"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {showAllAnnouncements && (
+          <ScrollView
+            style={styles.allAnnouncementsList}
+            nestedScrollEnabled
+            showsVerticalScrollIndicator
+            keyboardShouldPersistTaps="handled"
+          >
+            {operations.length === 0 ? (
+              <Text style={styles.noAnnouncementsText}>
+                No announcements found.
+              </Text>
+            ) : (
+              <>
+                {operations.slice(0, visibleAllCount).map((operation) => {
+                  const todayKey = formatDateKey(new Date());
+                  const hasPastOnly =
+                    Array.isArray(operation.scheduledDateKeys) &&
+                    operation.scheduledDateKeys.length > 0 &&
+                    operation.scheduledDateKeys.every((k) => k < todayKey);
+                  const isActive =
+                    Array.isArray(operation.scheduledDateKeys) &&
+                    operation.scheduledDateKeys.some((k) => k >= todayKey);
+
+                  return (
+                    <View
+                      key={operation.id}
+                      style={[
+                        styles.allAnnouncementCard,
+                        hasPastOnly && styles.allAnnouncementCardPast,
+                      ]}
+                    >
+                      <View style={styles.allAnnouncementTopRow}>
+                        <View style={styles.allAnnouncementTitleRow}>
+                          <Text
+                            style={[
+                              styles.allAnnouncementItemTitle,
+                              hasPastOnly &&
+                                styles.allAnnouncementItemTitlePast,
+                            ]}
+                          >
+                            {operation.title || "Waste Collection"}
+                          </Text>
+                          <View
+                            style={[
+                              styles.statusBadge,
+                              isActive
+                                ? styles.statusBadgeActive
+                                : styles.statusBadgePast,
+                            ]}
+                          >
+                            <Text style={styles.statusBadgeText}>
+                              {isActive ? "Active" : "Past"}
+                            </Text>
+                          </View>
+                        </View>
+
+                        <View style={styles.allAnnouncementActions}>
+                          <TouchableOpacity
+                            style={styles.editButton}
+                            onPress={() => openEditModal(operation)}
+                          >
+                            <Text style={styles.editButtonText}>Edit</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.deleteButton}
+                            onPress={() => setOperationPendingDelete(operation)}
+                          >
+                            <Text style={styles.deleteButtonText}>Delete</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+
+                      <Text style={styles.allAnnouncementArea}>
+                        {operation.area ||
+                          `${operation.barangay || ""}, Pk. ${operation.purok || "-"}`}
+                      </Text>
+                      <Text style={styles.allAnnouncementSchedule}>
+                        {operation.schedule}
+                        {operation.time &&
+                        !operation.schedule?.includes(operation.time)
+                          ? ` · ${operation.time}`
+                          : ""}
+                      </Text>
+                      {Boolean(operation.message) && (
+                        <Text style={styles.allAnnouncementMessage}>
+                          {operation.message}
+                        </Text>
+                      )}
+                      {Array.isArray(operation.scheduledDateKeys) && (
+                        <Text style={styles.allAnnouncementDates}>
+                          Dates:{" "}
+                          {operation.scheduledDateKeys
+                            .sort()
+                            .slice(0, 5)
+                            .join(", ")}
+                          {operation.scheduledDateKeys.length > 5
+                            ? ` +${operation.scheduledDateKeys.length - 5} more`
+                            : ""}
+                        </Text>
+                      )}
+                    </View>
+                  );
+                })}
+
+                {/* Batch load-more / load-from-Firestore */}
+                {visibleAllCount < operations.length ? (
+                  <TouchableOpacity
+                    style={styles.loadMoreButton}
+                    onPress={() =>
+                      setVisibleAllCount((n) =>
+                        Math.min(n + 5, operations.length),
+                      )
+                    }
+                  >
+                    <Text style={styles.loadMoreText}>
+                      Show {Math.min(5, operations.length - visibleAllCount)}{" "}
+                      more
+                    </Text>
+                  </TouchableOpacity>
+                ) : hasMoreOperations && !loadingMoreOperations ? (
+                  <TouchableOpacity
+                    style={styles.loadMoreButton}
+                    onPress={() => loadOperations(false)}
+                  >
+                    <Text style={styles.loadMoreText}>
+                      Load more from server
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+
+                {loadingMoreOperations && (
+                  <ActivityIndicator
+                    color="#5F9C76"
+                    style={styles.loadMoreIndicator}
+                  />
+                )}
+              </>
+            )}
+          </ScrollView>
+        )}
+      </View>
+
       {selectedDate ? (
         <View style={styles.selectedSection}>
           <View style={styles.selectedDateCard}>
@@ -558,7 +728,7 @@ export default function PickupSchedule() {
               onPress={openAddModal}
               accessibilityLabel="Add scheduled operation"
             >
-              <Text style={styles.addScheduleIcon}>+</Text>
+              <Ionicons name="add" size={28} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
 
@@ -662,7 +832,7 @@ export default function PickupSchedule() {
                   style={styles.closeButton}
                   onPress={() => setShowScheduleModal(false)}
                 >
-                  <Text style={styles.closeButtonText}>×</Text>
+                  <Ionicons name="close" size={20} color="#52675A" />
                 </TouchableOpacity>
               </View>
 
@@ -937,9 +1107,11 @@ const styles = StyleSheet.create({
   },
   arrowText: {
     color: "#FFFFFF",
-    fontSize: 25,
-    lineHeight: 27,
+    fontSize: 16,
+    lineHeight: 16,
+    textAlign: "center",
     fontWeight: "700",
+    includeFontPadding: false,
   },
   weekRow: {
     flexDirection: "row",
@@ -986,6 +1158,7 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     alignItems: "center",
     justifyContent: "center",
+    alignSelf: "center",
   },
   todayCircle: {
     borderWidth: 1,
@@ -998,7 +1171,9 @@ const styles = StyleSheet.create({
   dayNumber: {
     color: "#334155",
     fontSize: 13,
+    lineHeight: 13,
     fontWeight: "700",
+    includeFontPadding: false,
   },
   outsideMonthText: {
     color: "#B0BBB4",
@@ -1103,9 +1278,11 @@ const styles = StyleSheet.create({
   },
   addScheduleIcon: {
     color: "#FFFFFF",
-    fontSize: 28,
-    lineHeight: 30,
-    fontWeight: "500",
+    fontSize: 26,
+    lineHeight: 26,
+    textAlign: "center",
+    includeFontPadding: false,
+    fontWeight: "400",
   },
   savedScheduleCard: {
     flexDirection: "row",
@@ -1156,14 +1333,18 @@ const styles = StyleSheet.create({
   },
   savedScheduleActions: {
     flexDirection: "row",
+    alignItems: "center",
     gap: 8,
     marginLeft: 16,
+    flexShrink: 0,
   },
   editButton: {
     borderRadius: 7,
     paddingHorizontal: 14,
     paddingVertical: 8,
     backgroundColor: "#EDF7F0",
+    alignItems: "center",
+    justifyContent: "center",
   },
   editButtonText: {
     color: "#397A51",
@@ -1175,6 +1356,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 8,
     backgroundColor: "#FEF2F2",
+    alignItems: "center",
+    justifyContent: "center",
   },
   deleteButtonText: {
     color: "#C24141",
@@ -1257,8 +1440,10 @@ const styles = StyleSheet.create({
   },
   closeButtonText: {
     color: "#52675A",
-    fontSize: 23,
-    lineHeight: 25,
+    fontSize: 18,
+    lineHeight: 18,
+    textAlign: "center",
+    includeFontPadding: false,
   },
   fieldLabel: {
     color: "#334155",
@@ -1462,5 +1647,128 @@ const styles = StyleSheet.create({
   confirmDeleteText: {
     color: "#FFFFFF",
     fontWeight: "800",
+  },
+
+  /* All Announcements Panel */
+  allAnnouncementsSection: {
+    marginTop: 20,
+    marginBottom: 4,
+  },
+  allAnnouncementsHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  allAnnouncementsTitle: {
+    color: "#234B33",
+    fontSize: 20,
+    fontWeight: "800",
+  },
+  allAnnouncementsSubtitle: {
+    color: "#7A8A80",
+    fontSize: 12,
+    marginTop: 2,
+  },
+  toggleAllButton: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: "#599A74",
+  },
+  toggleAllButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 13,
+  },
+  allAnnouncementsList: {
+    height: 340,
+    borderWidth: 1,
+    borderColor: "#E3EBE6",
+    borderRadius: 12,
+    backgroundColor: "#FAFCFB",
+    padding: 10,
+  },
+  noAnnouncementsText: {
+    color: "#7A8A80",
+    fontSize: 14,
+    textAlign: "center",
+    paddingVertical: 12,
+  },
+  allAnnouncementCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#D8E6DC",
+    gap: 4,
+    marginBottom: 10,
+  },
+  allAnnouncementCardPast: {
+    backgroundColor: "#F8F8F8",
+    borderColor: "#E0E0E0",
+    opacity: 0.8,
+  },
+  allAnnouncementTopRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 8,
+    marginBottom: 4,
+  },
+  allAnnouncementTitleRow: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  allAnnouncementItemTitle: {
+    color: "#234B33",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  allAnnouncementItemTitlePast: {
+    color: "#9E9E9E",
+  },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 5,
+  },
+  statusBadgeActive: {
+    backgroundColor: "#E7F1EA",
+  },
+  statusBadgePast: {
+    backgroundColor: "#F0F0F0",
+  },
+  statusBadgeText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#52675A",
+  },
+  allAnnouncementActions: {
+    flexDirection: "row",
+    gap: 6,
+    flexShrink: 0,
+  },
+  allAnnouncementArea: {
+    color: "#397A51",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  allAnnouncementSchedule: {
+    color: "#4A5568",
+    fontSize: 12,
+  },
+  allAnnouncementMessage: {
+    color: "#7A8A80",
+    fontSize: 12,
+    fontStyle: "italic",
+  },
+  allAnnouncementDates: {
+    color: "#9E9E9E",
+    fontSize: 11,
+    marginTop: 2,
   },
 });

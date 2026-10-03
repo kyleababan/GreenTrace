@@ -2,51 +2,53 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 
 import {
-    ActivityIndicator,
-    Animated,
-    Image,
-    Modal,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Image,
+  Modal,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 
 import {
-    addDoc,
-    arrayUnion,
-    collection,
-    deleteDoc,
-    doc,
-    getDoc,
-    getDocs,
-    increment,
-    limit,
-    onSnapshot,
-    orderBy,
-    query,
-    serverTimestamp,
-    startAfter,
-    updateDoc,
-    where,
+  addDoc,
+  arrayUnion,
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  increment,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  startAfter,
+  updateDoc,
+  where,
 } from "firebase/firestore";
 import FormError from "../components/form-error";
 import Navbar from "../components/navbar";
 import PostLocationModal from "../components/PostLocationModal";
 import {
-    formatWasteLabel,
-    getWasteCategoryColor,
+  formatWasteLabel,
+  getWasteCategoryColor,
 } from "../constants/wasteCategories";
 import { auth, db } from "../firebaseConfig";
 import { deleteRelatedDocuments } from "../utils/deletePostHelper";
+import { getNameInitials } from "../utils/getNameInitials";
 import { hideBadWords } from "../utils/hideBadWords";
 import {
-    COMMENTS_PER_PAGE,
-    getUserPointsMap,
-    mergeUniqueById,
+  COMMENTS_PER_PAGE,
+  getUserPointsMap,
+  mergeUniqueById,
 } from "../utils/pagination";
 
 const formatPostedAt = (timestamp) => {
@@ -69,10 +71,15 @@ const formatPostedAt = (timestamp) => {
   })}`;
 };
 
+const isPostEditLocked = (status) =>
+  ["ongoing", "on-going", "cleaned"].includes(
+    String(status || "").trim().toLowerCase(),
+  );
+
 export default function Post() {
   const { id } = useLocalSearchParams();
 
-  const [showImage, setShowImage] = useState(false);
+  const [fullImageUrl, setFullImageUrl] = useState(null);
   const router = useRouter();
 
   const [post, setPost] = useState(null);
@@ -434,10 +441,13 @@ export default function Post() {
             <View style={styles.card}>
               {/* USER INFO */}
               <View style={styles.userRow}>
-                <Image
-                  source={require("../assets/images/profile2.png")}
-                  style={styles.avatar}
-                />
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>
+                    {getNameInitials(
+                      `${post.firstName || ""} ${post.lastName || ""}`,
+                    )}
+                  </Text>
+                </View>
 
                 <View style={{ flex: 1 }}>
                   <View style={styles.userTopRow}>
@@ -475,7 +485,8 @@ export default function Post() {
                         {post.reactionCount || 0}
                       </Text>
 
-                      {currentUser?.uid === post.userId && (
+                      {currentUser?.uid === post.userId &&
+                        !isPostEditLocked(post.status) && (
                         <TouchableOpacity
                           style={styles.settingsButtonTrigger}
                           onPress={() => setShowSettings(true)}
@@ -592,7 +603,7 @@ export default function Post() {
                 <TouchableOpacity
                   activeOpacity={0.9}
                   style={styles.imageContainer}
-                  onPress={() => setShowImage(true)}
+                  onPress={() => setFullImageUrl(post.imageUrl)}
                 >
                   <Image
                     source={{ uri: post.imageUrl }}
@@ -612,19 +623,33 @@ export default function Post() {
                   <View style={styles.beforeAfterRow}>
                     <View style={styles.beforeAfterColumn}>
                       <Text style={styles.beforeAfterLabel}>Before</Text>
-                      <Image
-                        source={{ uri: post.imageUrl }}
-                        style={styles.beforeAfterImage}
-                        resizeMode="cover"
-                      />
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityLabel="View before cleanup image full screen"
+                        activeOpacity={0.9}
+                        onPress={() => setFullImageUrl(post.imageUrl)}
+                      >
+                        <Image
+                          source={{ uri: post.imageUrl }}
+                          style={styles.beforeAfterImage}
+                          resizeMode="cover"
+                        />
+                      </TouchableOpacity>
                     </View>
                     <View style={styles.beforeAfterColumn}>
                       <Text style={styles.beforeAfterLabel}>After</Text>
-                      <Image
-                        source={{ uri: post.afterImageUrl }}
-                        style={styles.beforeAfterImage}
-                        resizeMode="cover"
-                      />
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityLabel="View after cleanup image full screen"
+                        activeOpacity={0.9}
+                        onPress={() => setFullImageUrl(post.afterImageUrl)}
+                      >
+                        <Image
+                          source={{ uri: post.afterImageUrl }}
+                          style={styles.beforeAfterImage}
+                          resizeMode="cover"
+                        />
+                      </TouchableOpacity>
                     </View>
                   </View>
                 </View>
@@ -672,10 +697,13 @@ export default function Post() {
             {/* PAGINATED COMMENTS LIST */}
             {comments.map((item) => (
               <View key={item.id} style={styles.commentCard}>
-                <Image
-                  source={require("../assets/images/profile2.png")}
-                  style={styles.commentAvatar}
-                />
+                <View style={styles.commentAvatar}>
+                  <Text style={styles.commentAvatarText}>
+                    {getNameInitials(
+                      `${item.firstName || ""} ${item.lastName || ""}`,
+                    )}
+                  </Text>
+                </View>
 
                 <View style={styles.commentBody}>
                   <View style={styles.commentUserHeader}>
@@ -716,22 +744,22 @@ export default function Post() {
           {/* FULL IMAGE MODAL */}
           <Modal
             animationType="fade"
-            onRequestClose={() => setShowImage(false)}
+            onRequestClose={() => setFullImageUrl(null)}
             transparent={true}
-            visible={showImage}
+            visible={Boolean(fullImageUrl)}
           >
             <View style={styles.modalContainer}>
               <TouchableOpacity
                 accessibilityLabel="Close full image"
                 style={styles.closeButton}
-                onPress={() => setShowImage(false)}
+                onPress={() => setFullImageUrl(null)}
               >
                 <Text style={styles.closeText}>×</Text>
               </TouchableOpacity>
 
               <Image
                 resizeMode="contain"
-                source={{ uri: post.imageUrl }}
+                source={{ uri: fullImageUrl || post.imageUrl }}
                 style={styles.fullImage}
               />
             </View>
@@ -804,11 +832,26 @@ export default function Post() {
                     if (deletingPost) return;
                     try {
                       setDeletingPost(true);
+                      const latestPost = await getDoc(
+                        doc(db, "posts", post.id),
+                      );
+                      if (
+                        latestPost.exists() &&
+                        isPostEditLocked(latestPost.data().status)
+                      ) {
+                        Alert.alert(
+                          "Post cannot be changed",
+                          "Reports marked On-going or Cleaned cannot be edited or deleted.",
+                        );
+                        setShowDeleteModal(false);
+                        setDeletingPost(false);
+                        return;
+                      }
                       await deleteRelatedDocuments(post.id);
                       setShowDeleteModal(false);
                       router.replace("/home");
                     } catch (error) {
-                      console.log(error);
+                      console.error("Unable to delete report:", error);
                       setDeletingPost(false);
                     }
                   }}
@@ -945,6 +988,14 @@ const styles = StyleSheet.create({
     height: 42,
     borderRadius: 21,
     marginRight: 10,
+    backgroundColor: "#5F9C76",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 14,
   },
   userTopRow: {
     flexDirection: "row",
@@ -1189,6 +1240,14 @@ const styles = StyleSheet.create({
     height: 34,
     borderRadius: 17,
     marginRight: 10,
+    backgroundColor: "#5F9C76",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  commentAvatarText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "700",
   },
   commentBody: {
     flex: 1,

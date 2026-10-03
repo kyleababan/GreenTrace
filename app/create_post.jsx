@@ -22,6 +22,7 @@ import Navbar from "../components/navbar";
 import NsfwWarningModal from "../components/nsfw-warning-modal";
 import { normalizePurok } from "../constants/locationFormat";
 import { auth, db } from "../firebaseConfig";
+import { getNameInitials } from "../utils/getNameInitials";
 import { hideBadWords } from "../utils/hideBadWords";
 
 import {
@@ -961,10 +962,11 @@ export default function CreateReport() {
             {/* USER + POST BUTTON */}
             <View style={styles.userRow}>
               <View style={styles.userInfo}>
-                <Image
-                  source={require("../assets/images/profile2.png")}
-                  style={styles.avatar}
-                />
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>
+                    {getNameInitials(userName)}
+                  </Text>
+                </View>
                 <Text style={styles.username}>{userName}</Text>
               </View>
 
@@ -1492,6 +1494,14 @@ const styles = StyleSheet.create({
     height: 36,
     borderRadius: 18,
     marginRight: 10,
+    backgroundColor: "#5F9C76",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 12,
   },
 
   username: {

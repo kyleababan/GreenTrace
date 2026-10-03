@@ -99,7 +99,17 @@ export default function VolunteerList({ setActivePage }) {
 
       const activePosts = await Promise.all(
         data.map(async (volunteerPost) => {
-          if (volunteerPost.status === "cleaned") return null;
+          const isStandaloneEvent =
+            !volunteerPost.postId && Boolean(volunteerPost.eventType);
+          const volunteerPostStatus = String(
+            volunteerPost.status || "",
+          ).toLowerCase();
+          if (
+            volunteerPostStatus === "cleaned" ||
+            (isStandaloneEvent && volunteerPostStatus === "completed")
+          ) {
+            return null;
+          }
 
           if (!volunteerPost.postId) {
             return volunteerPost;
@@ -164,15 +174,22 @@ export default function VolunteerList({ setActivePage }) {
   );
 
   const filteredPosts = useMemo(() => {
-    const keyword = search.toLowerCase();
+    const keyword = search.trim().toLowerCase();
 
-    return posts.filter(
-      (post) =>
-        (post.status !== "cleaned" && !keyword) ||
+    return posts.filter((post) => {
+      const postStatus = String(post.status || "").toLowerCase();
+      const isCompletedEvent =
+        Boolean(post.eventType) &&
+        ["completed", "cleaned"].includes(postStatus);
+      if (postStatus === "cleaned" || isCompletedEvent) return false;
+
+      return (
+        !keyword ||
         post.title?.toLowerCase().includes(keyword) ||
         post.description?.toLowerCase().includes(keyword) ||
-        post.locationName?.toLowerCase().includes(keyword),
-    );
+        post.locationName?.toLowerCase().includes(keyword)
+      );
+    });
   }, [posts, search]);
 
   const filteredAssessments = useMemo(() => {
@@ -244,6 +261,20 @@ export default function VolunteerList({ setActivePage }) {
             <View key={post.id} style={styles.card}>
               {/* LEFT */}
               <View style={styles.cardLeft}>
+                {post.eventType ? (
+                  <View style={styles.badgesRow}>
+                    <View style={styles.eventBadge}>
+                      <Text style={styles.eventBadgeText}>Event</Text>
+                    </View>
+                    {["completed", "cleaned"].includes(
+                      String(post.status || "").toLowerCase(),
+                    ) ? (
+                      <View style={styles.completedBadge}>
+                        <Text style={styles.completedBadgeText}>Completed</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                ) : null}
                 <Text style={styles.title}>{hideBadWords(post.title)}</Text>
 
                 <Text style={styles.desc} numberOfLines={3}>
@@ -793,6 +824,36 @@ const styles = StyleSheet.create({
   cardLeft: {
     flex: 1,
     paddingRight: 10,
+  },
+  badgesRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 5,
+    marginBottom: 5,
+  },
+  eventBadge: {
+    alignSelf: "flex-start",
+    backgroundColor: "#EAF4ED",
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  eventBadgeText: {
+    color: "#205A38",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  completedBadge: {
+    alignSelf: "flex-start",
+    backgroundColor: "#34C759",
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  completedBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "700",
   },
 
   title: {

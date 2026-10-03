@@ -1,7 +1,8 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { signOut } from "firebase/auth";
 import { collection, doc, getDoc, getDocs } from "firebase/firestore";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -22,13 +23,14 @@ import {
   isBadgeEarned,
 } from "../constants/badges";
 import { auth, db } from "../firebaseConfig";
+import { getNameInitials } from "../utils/getNameInitials";
 
 export default function ProfileScreen() {
   const [userData, setUserData] = useState(null);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [showEcoLabel, setShowEcoLabel] = useState(false);
   const [badgeStats, setBadgeStats] = useState(null);
-  const ecoLabelAnimation = useRef(new Animated.Value(0)).current;
+  const [ecoLabelAnimation] = useState(() => new Animated.Value(0));
 
   const router = useRouter();
 
@@ -41,10 +43,6 @@ export default function ProfileScreen() {
 
     setShowEcoLabel((isVisible) => !isVisible);
   };
-
-  useEffect(() => {
-    loadUser();
-  }, []);
 
   const loadUser = async () => {
     const currentUser = auth.currentUser;
@@ -72,6 +70,11 @@ export default function ProfileScreen() {
     }
   };
 
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadUser();
+  }, []);
+
   const handleLogout = async () => {
     try {
       await signOut(auth);
@@ -85,13 +88,21 @@ export default function ProfileScreen() {
 
   if (!userData) {
     return (
-      <SafeAreaView style={styles.wrapper}>
-        <View style={styles.container}>
-          <View style={styles.stateContainer}>
-            <ActivityIndicator size="small" color="#5F9C76" />
-          </View>
-          <View style={styles.navbarContainer}>
-            <Navbar />
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.wrapper}>
+          <View style={styles.container}>
+            <View style={styles.topSection}>
+              <Text style={styles.headerTitle}>Profile</Text>
+              <Text style={styles.headerSubtitle}>
+                Manage your GreenTrace account
+              </Text>
+            </View>
+            <View style={styles.stateContainer}>
+              <ActivityIndicator size="small" color="#5F9C76" />
+            </View>
+            <View style={styles.navbarContainer}>
+              <Navbar />
+            </View>
           </View>
         </View>
       </SafeAreaView>
@@ -109,185 +120,218 @@ export default function ProfileScreen() {
   const remainingBadgeCount = Math.max(0, displayedBadges.length - 3);
 
   return (
-    <SafeAreaView style={styles.wrapper}>
-      <View style={styles.container}>
-        {/* HEADER SECTION */}
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.wrapper}>
+        <View style={styles.container}>
+          {/* HEADER SECTION */}
+          <View style={styles.topSection}>
+            <Text style={styles.headerTitle}>Profile</Text>
+            <Text style={styles.headerSubtitle}>
+              Manage your GreenTrace account
+            </Text>
+          </View>
 
-        <View style={styles.header}>
-          <Text style={styles.headerText}>Profile</Text>
-          <View style={styles.userInfoContainer}>
-            <Image
-              source={require("../assets/images/profile.png")}
-              style={styles.profileAvatar}
-            />
-            <View style={styles.userTextDetails}>
-              <Text style={styles.userName}>
-                {userData.firstName} {userData.lastName}
-              </Text>
-
-              <View style={styles.badgeSlots}>
-                {visibleBadges.map((badge) => (
-                  <BadgeWithDetails
-                    key={badge.id}
-                    badge={badge}
-                    size={28}
-                    tooltipPlacement="below"
-                  />
-                ))}
-                {remainingBadgeCount > 0 && (
-                  <View style={styles.badgeSlot}>
-                    <Text style={styles.badgeOverflowText}>
-                      +{remainingBadgeCount}
-                    </Text>
-                  </View>
-                )}
-              </View>
-
-              <View style={styles.pointsRow}>
-                <TouchableOpacity
-                  onPress={toggleEcoLabel}
-                  activeOpacity={0.7}
-                  hitSlop={8}
-                  style={styles.pointsPill}
-                >
-                  <Image
-                    source={require("../assets/images/ecopts.png")}
-                    style={styles.ecoIcon}
-                  />
-                  <Animated.View
-                    style={[
-                      styles.ecoLabelContainer,
-                      {
-                        width: ecoLabelAnimation.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [0, 75],
-                        }),
-                        opacity: ecoLabelAnimation,
-                      },
-                    ]}
-                  >
-                    <Text style={styles.ecoPointsLabel} numberOfLines={1}>
-                      Eco Points
-                    </Text>
-                  </Animated.View>
-                  <Text style={styles.pointsValue}>
-                    {userData.points ?? 0} pts
+          {/* MAIN SCROLLABLE CONTENT */}
+          <ScrollView
+            style={styles.content}
+            contentContainerStyle={styles.contentContainer}
+            showsVerticalScrollIndicator={false}
+          >
+            {/* USER INFO CARD */}
+            <View style={styles.profileCard}>
+              <View style={styles.userInfoRow}>
+                <View style={styles.profileAvatar}>
+                  <Text style={styles.profileAvatarText}>
+                    {getNameInitials(
+                      `${userData.firstName || ""} ${userData.lastName || ""}`,
+                    )}
                   </Text>
-                </TouchableOpacity>
+                </View>
+                <View style={styles.userTextDetails}>
+                  <Text style={styles.userName} numberOfLines={1}>
+                    {userData.firstName} {userData.lastName}
+                  </Text>
+
+                  {userData.cellNumber ? (
+                    <Text style={styles.phoneText}>#{userData.cellNumber}</Text>
+                  ) : null}
+
+                  <View style={styles.pointsRow}>
+                    <TouchableOpacity
+                      onPress={toggleEcoLabel}
+                      activeOpacity={0.7}
+                      hitSlop={8}
+                      style={styles.pointsPill}
+                    >
+                      <Image
+                        source={require("../assets/images/ecopts.png")}
+                        style={styles.ecoIcon}
+                      />
+                      <Animated.View
+                        style={[
+                          styles.ecoLabelContainer,
+                          {
+                            width: ecoLabelAnimation.interpolate({
+                              inputRange: [0, 1],
+                              outputRange: [0, 72],
+                            }),
+                            opacity: ecoLabelAnimation,
+                          },
+                        ]}
+                      >
+                        <Text style={styles.ecoPointsLabel} numberOfLines={1}>
+                          Eco Points
+                        </Text>
+                      </Animated.View>
+                      <Text style={styles.pointsValue}>
+                        {userData.points ?? 0} pts
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
               </View>
 
-              {userData.cellNumber && (
-                <Text style={styles.phoneText}>#{userData.cellNumber}</Text>
+              {displayedBadges.length > 0 && (
+                <View style={styles.badgeShowcase}>
+                  <Text style={styles.badgeShowcaseLabel}>Earned Badges</Text>
+                  <View style={styles.badgeSlots}>
+                    {visibleBadges.map((badge) => (
+                      <BadgeWithDetails
+                        key={badge.id}
+                        badge={badge}
+                        size={26}
+                        tooltipPlacement="below"
+                      />
+                    ))}
+                    {remainingBadgeCount > 0 && (
+                      <View style={styles.badgeSlot}>
+                        <Text style={styles.badgeOverflowText}>
+                          +{remainingBadgeCount}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
               )}
             </View>
+
+            {/* SECTION LABEL */}
+            <Text style={styles.sectionLabel}>Account Settings</Text>
+
+            {/* MENU LIST CARD */}
+            <View style={styles.menuList}>
+              {/* Edit Profile */}
+              <TouchableOpacity
+                style={styles.menuRow}
+                activeOpacity={0.7}
+                onPress={() => router.push("/edit_profile")}
+              >
+                <View style={styles.menuRowLeft}>
+                  <View style={styles.iconCircle}>
+                    <Ionicons name="person-outline" size={18} color="#397A51" />
+                  </View>
+                  <Text style={styles.menuText}>Edit Profile</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="#94A3B8" />
+              </TouchableOpacity>
+
+              {/* Report Posts */}
+              <TouchableOpacity
+                style={styles.menuRow}
+                activeOpacity={0.7}
+                onPress={() => router.push("/report_post")}
+              >
+                <View style={styles.menuRowLeft}>
+                  <View style={styles.iconCircle}>
+                    <Ionicons
+                      name="document-text-outline"
+                      size={18}
+                      color="#397A51"
+                    />
+                  </View>
+                  <Text style={styles.menuText}>My Reports</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="#94A3B8" />
+              </TouchableOpacity>
+
+              {/* Badges */}
+              <TouchableOpacity
+                style={styles.menuRow}
+                activeOpacity={0.7}
+                onPress={() => router.push("/badges")}
+              >
+                <View style={styles.menuRowLeft}>
+                  <View style={styles.iconCircle}>
+                    <Ionicons name="ribbon-outline" size={18} color="#397A51" />
+                  </View>
+                  <Text style={styles.menuText}>Badge List</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="#94A3B8" />
+              </TouchableOpacity>
+
+              {/* Security */}
+              <TouchableOpacity
+                style={styles.menuRow}
+                activeOpacity={0.7}
+                onPress={() => router.push("/security")}
+              >
+                <View style={styles.menuRowLeft}>
+                  <View style={styles.iconCircle}>
+                    <Ionicons
+                      name="shield-checkmark-outline"
+                      size={18}
+                      color="#397A51"
+                    />
+                  </View>
+                  <Text style={styles.menuText}>Security</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="#94A3B8" />
+              </TouchableOpacity>
+
+              {/* FAQ */}
+              <TouchableOpacity
+                style={[styles.menuRow, styles.lastMenuRow]}
+                activeOpacity={0.7}
+                onPress={() => router.push("/faq")}
+              >
+                <View style={styles.menuRowLeft}>
+                  <View style={styles.iconCircle}>
+                    <Ionicons
+                      name="help-circle-outline"
+                      size={18}
+                      color="#397A51"
+                    />
+                  </View>
+                  <Text style={styles.menuText}>FAQ</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="#94A3B8" />
+              </TouchableOpacity>
+            </View>
+
+            {/* LOGOUT BUTTON */}
+            <TouchableOpacity
+              style={styles.logoutButton}
+              activeOpacity={0.8}
+              onPress={() => setShowLogoutModal(true)}
+            >
+              <View style={styles.logoutIconCircle}>
+                <Ionicons name="log-out-outline" size={18} color="#EF4444" />
+              </View>
+              <Text style={styles.logoutText}>Log Out</Text>
+            </TouchableOpacity>
+          </ScrollView>
+
+          {/* BOTTOM NAVBAR & MODAL */}
+          <View style={styles.navbarContainer}>
+            <Navbar />
           </View>
-        </View>
-
-        {/* MENU LIST SECTION */}
-        <ScrollView
-          style={styles.content}
-          contentContainerStyle={styles.contentContainer}
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.menuList}>
-            {/* Edit Profile */}
-            <TouchableOpacity
-              style={styles.menuRow}
-              activeOpacity={0.6}
-              onPress={() => router.push("/edit_profile")}
-            >
-              <View style={styles.menuRowLeft}>
-                <Image
-                  source={require("../assets/images/EditProfile.png")}
-                  style={styles.menuIcon}
-                  resizeMode="contain"
-                />
-                <Text style={styles.menuText}>Edit Profile</Text>
-              </View>
-              <Text style={styles.chevron}>›</Text>
-            </TouchableOpacity>
-
-            {/* Report Posts */}
-            <TouchableOpacity
-              style={styles.menuRow}
-              activeOpacity={0.6}
-              onPress={() => router.push("/report_post")}
-            >
-              <View style={styles.menuRowLeft}>
-                <Image
-                  source={require("../assets/images/post.png")}
-                  style={styles.menuIcon}
-                  resizeMode="contain"
-                />
-                <Text style={styles.menuText}>Report Posts</Text>
-              </View>
-              <Text style={styles.chevron}>›</Text>
-            </TouchableOpacity>
-
-            {/* Security */}
-            <TouchableOpacity
-              style={styles.menuRow}
-              activeOpacity={0.6}
-              onPress={() => router.push("/badges")}
-            >
-              <View style={styles.menuRowLeft}>
-                <Text style={styles.badgeMenuIcon}>🏅</Text>
-                <Text style={styles.menuText}>Badge List</Text>
-              </View>
-              <Text style={styles.chevron}>›</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.menuRow}
-              activeOpacity={0.6}
-              onPress={() => router.push("/security")}
-            >
-              <View style={styles.menuRowLeft}>
-                <Image
-                  source={require("../assets/images/Securitiy.png")}
-                  style={styles.menuIcon}
-                  resizeMode="contain"
-                />
-                <Text style={styles.menuText}>Security</Text>
-              </View>
-              <Text style={styles.chevron}>›</Text>
-            </TouchableOpacity>
-
-            {/* FAQ */}
-            <TouchableOpacity
-              style={[styles.menuRow, styles.lastMenuRow]}
-              activeOpacity={0.6}
-              onPress={() => router.push("/faq")}
-            >
-              <View style={styles.menuRowLeft}>
-                <Image
-                  source={require("../assets/images/faq.png")}
-                  style={styles.menuIcon}
-                  resizeMode="contain"
-                />
-                <Text style={styles.menuText}>FAQ</Text>
-              </View>
-              <Text style={styles.chevron}>›</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* LOGOUT BUTTON */}
-          <TouchableOpacity
-            style={styles.logoutButton}
-            activeOpacity={0.7}
-            onPress={() => setShowLogoutModal(true)}
-          >
-            <Text style={styles.logoutText}>Log Out</Text>
-          </TouchableOpacity>
-        </ScrollView>
-
-        {/* BOTTOM NAVBAR & MODAL */}
-        <View style={styles.navbarContainer}>
-          <Navbar />
 
           <Modal visible={showLogoutModal} transparent animationType="fade">
             <View style={styles.modalOverlay}>
               <View style={styles.logoutModal}>
+                <View style={styles.modalIconCircle}>
+                  <Ionicons name="log-out-outline" size={28} color="#EF4444" />
+                </View>
                 <Text style={styles.logoutTitle}>Log Out</Text>
                 <Text style={styles.logoutMessage}>
                   Are you sure you want to log out of your account?
@@ -303,7 +347,7 @@ export default function ProfileScreen() {
 
                 <TouchableOpacity
                   style={styles.cancelButton}
-                  activeOpacity={0.6}
+                  activeOpacity={0.7}
                   onPress={() => setShowLogoutModal(false)}
                 >
                   <Text style={styles.cancelLogoutText}>Cancel</Text>
@@ -318,59 +362,100 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: "#5F9C76",
+  },
   wrapper: {
     flex: 1,
-    backgroundColor: "#FAFAFA",
+    backgroundColor: "#F5F5F5",
     alignItems: "center",
   },
-
-  headerText: {
-    fontSize: 24,
-    fontWeight: "700",
-    color: "#f9f9f9",
-    marginBottom: 16,
-  },
-
   container: {
     width: "100%",
     maxWidth: 500,
     flex: 1,
-    backgroundColor: "#FAFAFA",
+    backgroundColor: "#F5F5F5",
+  },
+  topSection: {
+    backgroundColor: "#5F9C76",
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 20,
+    elevation: 3,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+  },
+  headerTitle: {
+    fontSize: 23,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+  headerSubtitle: {
+    color: "#E8F3EC",
+    fontSize: 12,
+    marginTop: 2,
   },
   stateContainer: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
   },
-
-  /* HEADER STYLES */
-  header: {
-    backgroundColor: "#5F9C76",
-    paddingHorizontal: 24,
-    paddingTop: 32,
-    paddingBottom: 24,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F1F5F9",
+  content: {
+    flex: 1,
   },
-  userInfoContainer: {
+  contentContainer: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 24,
+  },
+
+  /* PROFILE CARD */
+  profileCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+  },
+  userInfoRow: {
     flexDirection: "row",
     alignItems: "center",
   },
   profileAvatar: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     backgroundColor: "#5F9C76",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  profileAvatarText: {
+    color: "#FFFFFF",
+    fontSize: 22,
+    fontWeight: "700",
   },
   userTextDetails: {
-    marginLeft: 16,
+    marginLeft: 14,
     flex: 1,
   },
   userName: {
-    fontSize: 22,
-    fontWeight: "700",
-    color: "#f9f9f9",
-    letterSpacing: -0.3,
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#1F3326",
+    letterSpacing: -0.2,
+  },
+  phoneText: {
+    color: "#64748B",
+    fontSize: 12,
+    marginTop: 2,
+    fontWeight: "500",
   },
   pointsRow: {
     flexDirection: "row",
@@ -390,67 +475,89 @@ const styles = StyleSheet.create({
   ecoIcon: {
     width: 14,
     height: 14,
-    tintColor: "#5F9C76",
+    tintColor: "#397A51",
     marginRight: 4,
   },
   ecoLabelContainer: {
     overflow: "hidden",
   },
   ecoPointsLabel: {
-    color: "#5F9C76",
+    color: "#397A51",
     fontSize: 12,
     fontWeight: "600",
     marginRight: 4,
   },
   pointsValue: {
-    color: "#5F9C76",
+    color: "#2E7D32",
     fontWeight: "700",
-    fontSize: 13,
+    fontSize: 12,
   },
-  phoneText: {
-    color: "#f9f9f9",
-    fontSize: 13,
-    marginTop: 4,
-    fontWeight: "500",
+  badgeShowcase: {
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#F1F5F9",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
-  badgeSlots: { flexDirection: "row", marginTop: 8, gap: 7 },
+  badgeShowcaseLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#64748B",
+  },
+  badgeSlots: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
   badgeSlot: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#F0FDF4",
     borderWidth: 1,
     borderColor: "#DCFCE7",
   },
-  badgeSlotIcon: { fontSize: 15, color: "#5F9C76", fontWeight: "700" },
-  badgeOverflowText: { fontSize: 11, color: "#5F9C76", fontWeight: "800" },
+  badgeOverflowText: {
+    fontSize: 10,
+    color: "#397A51",
+    fontWeight: "800",
+  },
 
-  /* CONTENT & LIST STYLES */
-  content: {
-    flex: 1,
+  /* SECTION LABEL */
+  sectionLabel: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#64748B",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    marginBottom: 8,
+    marginLeft: 4,
   },
-  contentContainer: {
-    paddingHorizontal: 20,
-    paddingTop: 24,
-    paddingBottom: 24,
-  },
+
+  /* MENU LIST */
   menuList: {
     backgroundColor: "#FFFFFF",
     borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "#F1F5F9",
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
     overflow: "hidden",
+    marginBottom: 16,
   },
   menuRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingVertical: 16,
+    paddingVertical: 13,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
-    borderBottomColor: "#F8FAFC",
+    borderBottomColor: "#F1F5F9",
   },
   lastMenuRow: {
     borderBottomWidth: 0,
@@ -458,53 +565,60 @@ const styles = StyleSheet.create({
   menuRowLeft: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 12,
   },
-  menuIcon: {
-    width: 20,
-    height: 20,
-    tintColor: "#5F9C76",
-    marginRight: 14,
-  },
-  badgeMenuIcon: {
-    width: 20,
-    marginRight: 14,
-    fontSize: 18,
-    textAlign: "center",
+  iconCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#E4F1E8",
+    alignItems: "center",
+    justifyContent: "center",
   },
   menuText: {
     fontSize: 15,
-    fontWeight: "500",
-    color: "#334155",
-  },
-  chevron: {
-    fontSize: 18,
-    color: "#CBD5E1",
-    fontWeight: "400",
+    fontWeight: "600",
+    color: "#234B33",
   },
 
   /* LOGOUT BUTTON */
   logoutButton: {
-    marginTop: 20,
-    backgroundColor: "#FFFFFF",
-    paddingVertical: 15,
-    borderRadius: 16,
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+    paddingVertical: 13,
+    borderRadius: 16,
+    gap: 8,
+    elevation: 1,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 2,
     borderWidth: 1,
     borderColor: "#FEE2E2",
   },
+  logoutIconCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#FEE2E2",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   logoutText: {
     color: "#EF4444",
-    fontWeight: "600",
-    fontSize: 15,
+    fontWeight: "700",
+    fontSize: 14,
   },
 
-  /* MODAL STYLES */
+  /* MODAL */
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(15, 23, 42, 0.4)",
+    backgroundColor: "rgba(15, 23, 42, 0.45)",
     justifyContent: "center",
     alignItems: "center",
-    paddingHorizontal: 20,
+    paddingHorizontal: 24,
   },
   logoutModal: {
     width: "100%",
@@ -513,18 +627,32 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 24,
     alignItems: "center",
+    elevation: 6,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+  },
+  modalIconCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "#FEE2E2",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
   },
   logoutTitle: {
     fontSize: 18,
-    fontWeight: "700",
+    fontWeight: "800",
     color: "#0F172A",
-    marginBottom: 8,
+    marginBottom: 6,
   },
   logoutMessage: {
     textAlign: "center",
     color: "#64748B",
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 13,
+    lineHeight: 19,
     marginBottom: 20,
   },
   confirmLogoutButton: {
@@ -536,23 +664,24 @@ const styles = StyleSheet.create({
   },
   confirmLogoutText: {
     color: "#FFFFFF",
-    fontWeight: "600",
-    fontSize: 15,
+    fontWeight: "700",
+    fontSize: 14,
   },
   cancelButton: {
-    marginTop: 12,
+    marginTop: 10,
     paddingVertical: 8,
+    paddingHorizontal: 16,
   },
   cancelLogoutText: {
     color: "#64748B",
     fontSize: 14,
-    fontWeight: "500",
+    fontWeight: "600",
   },
 
-  /* NAVBAR */
+  /* NAVBAR CONTAINER */
   navbarContainer: {
     borderTopWidth: 1,
-    borderColor: "#F1F5F9",
+    borderColor: "#EBEBEB",
     backgroundColor: "#FFFFFF",
   },
 });

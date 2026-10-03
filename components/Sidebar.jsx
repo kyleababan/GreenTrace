@@ -5,12 +5,12 @@ import { useRouter } from "expo-router";
 import { doc, getDoc } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
-    Image,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
-    useWindowDimensions,
+  Image,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  useWindowDimensions,
 } from "react-native";
 import { auth, db } from "../firebaseConfig";
 
@@ -90,10 +90,7 @@ export default function Sidebar({ onClose, isDrawer = false }) {
 
       {/* ADMIN PROFILE */}
 
-      <TouchableOpacity
-        style={styles.divider}
-        onPress={() => handleNavigate("/admin/profile")}
-      >
+      <View style={styles.divider}>
         <View style={styles.Aprofile}>
           <Text style={styles.avatarText}>{adminInitials}</Text>
         </View>
@@ -103,7 +100,7 @@ export default function Sidebar({ onClose, isDrawer = false }) {
 
           <Text style={styles.adminRole}>{adminRole}</Text>
         </View>
-      </TouchableOpacity>
+      </View>
 
       {/* MENU */}
 
