@@ -67,12 +67,18 @@ const formatPostedAt = (timestamp) => {
   return `Posted ${date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
 };
 
+const isPostEditLocked = (postStatus) =>
+  ["ongoing", "on-going", "cleaned"].includes(
+    String(postStatus || "").trim().toLowerCase(),
+  );
+
 export default function EditPost() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
 
   const [uploading, setUploading] = useState(false);
   const [loadingPost, setLoadingPost] = useState(true);
+  const [postLocked, setPostLocked] = useState(false);
 
   const [userName, setUserName] = useState("");
   const [status, setStatus] = useState("moderate");
@@ -160,6 +166,10 @@ export default function EditPost() {
       }
 
       const data = snapshot.data();
+      if (isPostEditLocked(data.status)) {
+        setPostLocked(true);
+        return;
+      }
 
       setTitle(data.title || "");
       setCaption(data.caption || "");
@@ -504,6 +514,7 @@ export default function EditPost() {
   // -------------------------------------------------------------------------
   const updatePost = async () => {
     if (uploading) return;
+    if (postLocked) return;
 
     const locationErrors = validateLocation();
     const nextErrors = {
@@ -522,8 +533,14 @@ export default function EditPost() {
     try {
       setUploading(true);
 
-      const statusIsLocked =
-        status === "ongoing" || status === "on-going" || status === "cleaned";
+      const latestPost = await getDoc(doc(db, "posts", id));
+      if (!latestPost.exists()) {
+        throw new Error("This report is no longer available.");
+      }
+      if (isPostEditLocked(latestPost.data().status)) {
+        setPostLocked(true);
+        return;
+      }
 
       let imageUrl = originalImageUrl;
 
@@ -560,9 +577,7 @@ export default function EditPost() {
         setWasteClassification(newClassification);
       }
 
-      if (!statusIsLocked) {
-        updates.status = status;
-      }
+      updates.status = status;
 
       await updateDoc(doc(db, "posts", id), updates);
 
@@ -642,6 +657,38 @@ export default function EditPost() {
       <SafeAreaView style={styles.wrapper}>
         <View style={styles.loadingState}>
           <ActivityIndicator size="large" color="#5F9C76" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (postLocked) {
+    return (
+      <SafeAreaView style={styles.wrapper}>
+        <View style={styles.container}>
+          <View style={styles.topSection}>
+            <View style={styles.headerRow}>
+              <TouchableOpacity onPress={() => router.back()}>
+                <Image
+                  source={require("../assets/images/close.png")}
+                  style={styles.closeIcon}
+                />
+              </TouchableOpacity>
+              <Text style={styles.headerTitle}>Post Locked</Text>
+            </View>
+          </View>
+          <View style={styles.lockedPostState}>
+            <Text style={styles.lockedPostTitle}>This report can’t be changed</Text>
+            <Text style={styles.lockedPostMessage}>
+              Reports marked On-going or Cleaned can’t be edited or deleted.
+            </Text>
+            <TouchableOpacity
+              style={styles.lockedPostButton}
+              onPress={() => router.back()}
+            >
+              <Text style={styles.lockedPostButtonText}>Go back</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </SafeAreaView>
     );
@@ -1055,6 +1102,15 @@ export default function EditPost() {
                   if (deletingPost) return;
                   try {
                     setDeletingPost(true);
+                    const latestPost = await getDoc(doc(db, "posts", id));
+                    if (
+                      latestPost.exists() &&
+                      isPostEditLocked(latestPost.data().status)
+                    ) {
+                      setPostLocked(true);
+                      setShowDeleteModal(false);
+                      return;
+                    }
                     if (originalImageUrl) {
                       await deleteFromCloudinary(originalImageUrl);
                     }
@@ -1108,6 +1164,37 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
+  },
+  lockedPostState: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+    gap: 12,
+  },
+  lockedPostTitle: {
+    color: "#24352A",
+    fontSize: 18,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  lockedPostMessage: {
+    color: "#64748B",
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: "center",
+  },
+  lockedPostButton: {
+    marginTop: 6,
+    backgroundColor: "#5F9C76",
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  lockedPostButtonText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "700",
   },
 
   contentWrapper: {

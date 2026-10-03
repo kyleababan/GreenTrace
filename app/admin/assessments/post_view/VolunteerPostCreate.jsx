@@ -11,7 +11,7 @@ import {
   updateDoc,
   where,
 } from "firebase/firestore";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -26,6 +26,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 
+import PostLocationModal from "../../../../components/PostLocationModal";
 import { db } from "../../../../firebaseConfig";
 import { hideBadWords } from "../../../../utils/hideBadWords";
 
@@ -66,6 +67,18 @@ const getCalendarDays = (month) => {
   );
 };
 
+const getCoordinates = (post) => {
+  if (post?.meetingCoordinates) return post.meetingCoordinates;
+  if (post?.coordinates) return post.coordinates;
+  if (post?.latitude != null && post?.longitude != null) {
+    return {
+      latitude: Number(post.latitude),
+      longitude: Number(post.longitude),
+    };
+  }
+  return null;
+};
+
 export default function VolunteerPostCreate({
   setSelectedVolunteerPost,
   post: suppliedPost,
@@ -76,18 +89,25 @@ export default function VolunteerPostCreate({
   const isEditing = Boolean(volunteerId);
   const isFromPostId = Boolean(!isEditing && postId && !suppliedPost);
   const { width } = useWindowDimensions();
-  const isMobile = width < 600;
+  const isMobile = width < 768;
 
   const [volunteerPost, setVolunteerPost] = useState(
     isEditing ? null : suppliedPost || null,
   );
   const [title, setTitle] = useState(suppliedPost?.title || "Need Volunteers");
-  const [desc, setDesc] = useState(suppliedPost?.description || "");
+  const [desc, setDesc] = useState(
+    suppliedPost?.description || suppliedPost?.caption || "",
+  );
   const [requirements, setRequirements] = useState(
     suppliedPost?.requirements?.length ? suppliedPost.requirements : [""],
   );
+  const requirementsScrollRef = useRef(null);
+  const previousRequirementsLengthRef = useRef(requirements.length);
   const [meetingLocation, setMeetingLocation] = useState(
-    suppliedPost?.locationName || "",
+    suppliedPost?.meetingLocation || suppliedPost?.locationName || "",
+  );
+  const [meetingCoordinates, setMeetingCoordinates] = useState(() =>
+    getCoordinates(suppliedPost),
   );
   const [meetingDate, setMeetingDate] = useState(null);
   const [meetingTime, setMeetingTime] = useState("");
@@ -95,7 +115,7 @@ export default function VolunteerPostCreate({
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [showLocationChoice, setShowLocationChoice] = useState(false);
   const [showLocationEditor, setShowLocationEditor] = useState(false);
-  const [showGpsPlaceholder, setShowGpsPlaceholder] = useState(false);
+  const [showGpsModal, setShowGpsModal] = useState(false);
   const [locationDraft, setLocationDraft] = useState("");
   const [visibleMonth, setVisibleMonth] = useState(() => new Date());
   const [maxVolunteers, setMaxVolunteers] = useState(
@@ -104,6 +124,13 @@ export default function VolunteerPostCreate({
   const [loading, setLoading] = useState(isEditing || isFromPostId);
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState({});
+
+  useEffect(() => {
+    if (requirements.length > previousRequirementsLengthRef.current) {
+      requirementsScrollRef.current?.scrollToEnd({ animated: true });
+    }
+    previousRequirementsLengthRef.current = requirements.length;
+  }, [requirements.length]);
 
   const clearError = (field) => {
     setErrors((current) => {
@@ -135,6 +162,7 @@ export default function VolunteerPostCreate({
           setRequirements(data.requirements?.length ? data.requirements : [""]);
           const savedMeetingDate = parseDateKey(data.meetingDate);
           setMeetingLocation(data.meetingLocation || data.locationName || "");
+          setMeetingCoordinates(getCoordinates(data));
           setMeetingDate(savedMeetingDate);
           setMeetingTime(data.meetingTime || "");
           if (savedMeetingDate) setVisibleMonth(savedMeetingDate);
@@ -164,6 +192,7 @@ export default function VolunteerPostCreate({
           setTitle(data.title || "Need Volunteers");
           setDesc(data.caption || data.description || "");
           setMeetingLocation(data.locationName || "");
+          setMeetingCoordinates(getCoordinates(data));
         } catch (error) {
           console.error("Unable to load source post:", error);
           Alert.alert("Unable to load post details.");
@@ -224,6 +253,7 @@ export default function VolunteerPostCreate({
           requirements: cleanedRequirements.map((item) => hideBadWords(item)),
           meetingLocation: meetingLocation.trim(),
           locationName: meetingLocation.trim(),
+          meetingCoordinates: meetingCoordinates || null,
           meetingDate: formatDateKey(meetingDate),
           meetingTime: meetingTime.trim(),
           maxVolunteers: Number(maxVolunteers),
@@ -263,7 +293,18 @@ export default function VolunteerPostCreate({
         lastName: targetPost.lastName || "",
         meetingLocation: meetingLocation.trim(),
         locationName: meetingLocation.trim(),
+        meetingCoordinates: meetingCoordinates || null,
         postLocationName: targetPost.locationName || "",
+        coordinates:
+          targetPost.coordinates ||
+          (targetPost.latitude && targetPost.longitude
+            ? {
+                latitude: Number(targetPost.latitude),
+                longitude: Number(targetPost.longitude),
+              }
+            : null),
+        purok: targetPost.purok || "",
+        wasteClassification: targetPost.wasteClassification || null,
         meetingDate: formatDateKey(meetingDate),
         meetingTime: meetingTime.trim(),
         maxVolunteers: Number(maxVolunteers),
@@ -311,36 +352,40 @@ export default function VolunteerPostCreate({
 
   return (
     <View style={styles.page}>
+      <TouchableOpacity
+        style={styles.backBtn}
+        onPress={goBack}
+        accessibilityRole="button"
+        accessibilityLabel="Go back"
+        activeOpacity={0.8}
+      >
+        <Image
+          source={require("../../../../assets/images/backG.png")}
+          style={styles.backIcon}
+        />
+      </TouchableOpacity>
+
       <ScrollView
+        style={styles.formScroll}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        <TouchableOpacity
-          style={styles.backBtn}
-          onPress={goBack}
-          accessibilityLabel="Go back"
-        >
-          <Image
-            source={require("../../../../assets/images/backG.png")}
-            style={styles.backIcon}
-          />
-        </TouchableOpacity>
-
         <View
           style={[styles.row, { flexDirection: isMobile ? "column" : "row" }]}
         >
+          {/* LEFT COLUMN: IMAGE & MEETING SCHEDULE */}
           <View style={[styles.card, { flex: isMobile ? 0 : 1 }]}>
             {imageUrl ? (
               <Image
                 source={{ uri: imageUrl }}
-                style={[styles.cardImage, { height: isMobile ? 200 : 300 }]}
+                style={[styles.cardImage, { height: isMobile ? 280 : 360 }]}
                 resizeMode="cover"
               />
             ) : (
               <View
                 style={[
                   styles.imagePlaceholder,
-                  { height: isMobile ? 200 : 300 },
+                  { height: isMobile ? 260 : 360 },
                 ]}
               >
                 <Ionicons name="image-outline" size={42} color="#71907d" />
@@ -354,6 +399,7 @@ export default function VolunteerPostCreate({
                 <TouchableOpacity
                   style={[
                     styles.inputBox,
+                    styles.pickerInput,
                     { flex: 1 },
                     errors.meetingDate && styles.inputError,
                   ]}
@@ -361,6 +407,7 @@ export default function VolunteerPostCreate({
                     clearError("meetingDate");
                     setShowCalendar(true);
                   }}
+                  activeOpacity={0.8}
                 >
                   <Ionicons name="calendar-outline" size={20} color="#276344" />
                   <Text
@@ -368,10 +415,11 @@ export default function VolunteerPostCreate({
                       styles.dateValue,
                       !meetingDate && styles.placeholderValue,
                     ]}
+                    numberOfLines={1}
                   >
                     {meetingDate
                       ? meetingDate.toLocaleDateString(undefined, {
-                          month: "long",
+                          month: "short",
                           day: "numeric",
                           year: "numeric",
                         })
@@ -390,6 +438,7 @@ export default function VolunteerPostCreate({
                     clearError("meetingTime");
                     setShowTimePicker(true);
                   }}
+                  activeOpacity={0.8}
                 >
                   <Ionicons name="time-outline" size={20} color="#276344" />
                   <Text
@@ -397,6 +446,7 @@ export default function VolunteerPostCreate({
                       styles.dateValue,
                       !meetingTime && styles.placeholderValue,
                     ]}
+                    numberOfLines={1}
                   >
                     {meetingTime || "Meeting time"}
                   </Text>
@@ -409,93 +459,8 @@ export default function VolunteerPostCreate({
                 <Text style={styles.fieldError}>{errors.meetingTime}</Text>
               )}
             </View>
-          </View>
 
-          <View style={[styles.editSection, { flex: isMobile ? 0 : 1 }]}>
-            <Text style={styles.heading}>
-              {isEditing
-                ? "Edit volunteer activity"
-                : "Create volunteer activity"}
-            </Text>
-            <View style={styles.inputBox}>
-              <TextInput
-                placeholder="Title"
-                value={title}
-                style={[styles.input, errors.title && styles.inputError]}
-                onChangeText={(value) => {
-                  setTitle(value);
-                  clearError("title");
-                }}
-              />
-            </View>
-            {errors.title && (
-              <Text style={styles.fieldError}>{errors.title}</Text>
-            )}
-            <View style={[styles.inputBox, { minHeight: 100 }]}>
-              <TextInput
-                placeholder="Write something"
-                value={desc}
-                onChangeText={(value) => {
-                  setDesc(value);
-                  clearError("desc");
-                }}
-                multiline
-                style={[
-                  styles.input,
-                  { minHeight: 100 },
-                  errors.desc && styles.inputError,
-                ]}
-                textAlignVertical="top"
-              />
-            </View>
-            {errors.desc && (
-              <Text style={styles.fieldError}>{errors.desc}</Text>
-            )}
-
-            <View style={styles.requirementBox}>
-              <Text style={styles.fieldLabel}>Requirements</Text>
-              {requirements.map((item, index) => (
-                <View
-                  key={`requirement-${index}`}
-                  style={styles.requirementRow}
-                >
-                  <TextInput
-                    placeholder="Requirement"
-                    value={item}
-                    onChangeText={(text) => {
-                      updateRequirement(text, index);
-                      clearError("requirements");
-                    }}
-                    style={[
-                      styles.requirementInput,
-                      errors.requirements && styles.inputError,
-                    ]}
-                  />
-                  {requirements.length > 1 && (
-                    <TouchableOpacity
-                      onPress={() => removeRequirement(index)}
-                      accessibilityLabel="Remove requirement"
-                    >
-                      <Ionicons name="close-circle" size={22} color="#b94b4b" />
-                    </TouchableOpacity>
-                  )}
-                </View>
-              ))}
-              <TouchableOpacity
-                style={styles.addButton}
-                onPress={() => {
-                  clearError("requirements");
-                  addRequirement();
-                }}
-              >
-                <Ionicons name="add-circle-outline" size={22} color="#276344" />
-                <Text style={styles.addButtonText}>Add requirement</Text>
-              </TouchableOpacity>
-              {errors.requirements && (
-                <Text style={styles.fieldError}>{errors.requirements}</Text>
-              )}
-            </View>
-
+            {/* MEETUP AREA */}
             <View style={styles.meetingBox}>
               <Text style={styles.fieldLabel}>Meet up area</Text>
               <TouchableOpacity
@@ -510,22 +475,140 @@ export default function VolunteerPostCreate({
                 }}
                 accessibilityRole="button"
                 accessibilityLabel="Set meetup area"
+                activeOpacity={0.85}
               >
                 <Ionicons name="location-outline" size={20} color="#FFFFFF" />
-                <Text style={styles.meetupLocationText}>
+                <Text style={styles.meetupLocationText} numberOfLines={1}>
                   {meetingLocation || "Add meetup area"}
                 </Text>
               </TouchableOpacity>
+              {meetingCoordinates?.latitude != null &&
+                meetingCoordinates?.longitude != null && (
+                  <Text style={styles.gpsCoordinateHint}>
+                    GPS: {Number(meetingCoordinates.latitude).toFixed(6)},{" "}
+                    {Number(meetingCoordinates.longitude).toFixed(6)}
+                  </Text>
+                )}
+              {errors.meetingLocation && (
+                <Text style={styles.fieldError}>{errors.meetingLocation}</Text>
+              )}
             </View>
-            {errors.meetingLocation && (
-              <Text style={styles.fieldError}>{errors.meetingLocation}</Text>
+          </View>
+
+          {/* RIGHT COLUMN: EDIT SECTION */}
+          <View style={[styles.editSection, { flex: isMobile ? 0 : 1 }]}>
+            <Text style={styles.heading}>
+              {isEditing
+                ? "Edit volunteer activity"
+                : "Create volunteer activity"}
+            </Text>
+
+            <View style={styles.inputBox}>
+              <TextInput
+                placeholder="Title"
+                placeholderTextColor="#8C9E93"
+                value={title}
+                style={[styles.input, errors.title && styles.inputError]}
+                onChangeText={(value) => {
+                  setTitle(value);
+                  clearError("title");
+                }}
+              />
+            </View>
+            {errors.title && (
+              <Text style={styles.fieldError}>{errors.title}</Text>
             )}
 
+            <View style={[styles.inputBox, styles.descriptionBox]}>
+              <TextInput
+                placeholder="Write something"
+                placeholderTextColor="#8C9E93"
+                value={desc}
+                onChangeText={(value) => {
+                  setDesc(value);
+                  clearError("desc");
+                }}
+                multiline
+                style={[
+                  styles.input,
+                  styles.descriptionInput,
+                  errors.desc && styles.inputError,
+                ]}
+                textAlignVertical="top"
+              />
+            </View>
+            {errors.desc && (
+              <Text style={styles.fieldError}>{errors.desc}</Text>
+            )}
+
+            {/* REQUIREMENTS */}
+            <View style={styles.requirementBox}>
+              <Text style={styles.fieldLabel}>Requirements</Text>
+              <ScrollView
+                ref={requirementsScrollRef}
+                style={styles.requirementsList}
+                contentContainerStyle={styles.requirementsListContent}
+                nestedScrollEnabled
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator
+              >
+                {requirements.map((item, index) => (
+                  <View
+                    key={`requirement-${index}`}
+                    style={styles.requirementRow}
+                  >
+                    <TextInput
+                      placeholder="Requirement"
+                      placeholderTextColor="#8C9E93"
+                      value={item}
+                      onChangeText={(text) => {
+                        updateRequirement(text, index);
+                        clearError("requirements");
+                      }}
+                      style={[
+                        styles.requirementInput,
+                        errors.requirements && styles.inputError,
+                      ]}
+                    />
+                    {requirements.length > 1 && (
+                      <TouchableOpacity
+                        onPress={() => removeRequirement(index)}
+                        accessibilityLabel="Remove requirement"
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons
+                          name="close-circle"
+                          size={22}
+                          color="#b94b4b"
+                        />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                ))}
+              </ScrollView>
+              <TouchableOpacity
+                style={styles.addButton}
+                onPress={() => {
+                  clearError("requirements");
+                  addRequirement();
+                }}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="add-circle-outline" size={22} color="#276344" />
+                <Text style={styles.addButtonText}>Add requirement</Text>
+              </TouchableOpacity>
+              {errors.requirements && (
+                <Text style={styles.fieldError}>{errors.requirements}</Text>
+              )}
+            </View>
+
+            {/* MAX VOLUNTEERS */}
             <View style={styles.bottomRow}>
               <View style={[styles.inputBox, { flex: 1 }]}>
                 <Ionicons name="people-outline" size={20} color="#276344" />
                 <TextInput
                   placeholder="Max volunteers"
+                  placeholderTextColor="#8C9E93"
                   keyboardType="numeric"
                   value={maxVolunteers}
                   onChangeText={(text) => {
@@ -546,10 +629,12 @@ export default function VolunteerPostCreate({
           </View>
         </View>
 
+        {/* SAVE BUTTON */}
         <TouchableOpacity
           disabled={saving}
           style={[styles.saveBtn, saving && styles.disabledButton]}
           onPress={saveVolunteerPost}
+          activeOpacity={0.85}
         >
           {saving ? (
             <View
@@ -571,6 +656,7 @@ export default function VolunteerPostCreate({
         </TouchableOpacity>
       </ScrollView>
 
+      {/* CALENDAR MODAL */}
       <Modal
         visible={showCalendar}
         transparent
@@ -679,6 +765,7 @@ export default function VolunteerPostCreate({
         </View>
       </Modal>
 
+      {/* TIME PICKER MODAL */}
       <Modal
         visible={showTimePicker}
         transparent
@@ -715,6 +802,7 @@ export default function VolunteerPostCreate({
         </View>
       </Modal>
 
+      {/* LOCATION CHOICE MODAL */}
       <Modal
         visible={showLocationChoice}
         transparent
@@ -742,7 +830,7 @@ export default function VolunteerPostCreate({
               style={styles.modalActionButton}
               onPress={() => {
                 setShowLocationChoice(false);
-                setShowGpsPlaceholder(true);
+                setShowGpsModal(true);
               }}
             >
               <Text style={styles.modalActionText}>Use GPS tracking</Text>
@@ -751,6 +839,7 @@ export default function VolunteerPostCreate({
         </View>
       </Modal>
 
+      {/* LOCATION EDITOR MODAL */}
       <Modal
         visible={showLocationEditor}
         transparent
@@ -786,27 +875,19 @@ export default function VolunteerPostCreate({
         </View>
       </Modal>
 
-      <Modal
-        visible={showGpsPlaceholder}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowGpsPlaceholder(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.timeModal}>
-            <View style={styles.calendarHeader}>
-              <Text style={styles.calendarTitle}>GPS tracking</Text>
-              <TouchableOpacity onPress={() => setShowGpsPlaceholder(false)}>
-                <Ionicons name="close" size={25} color="#526158" />
-              </TouchableOpacity>
-            </View>
-            <View style={styles.gpsPlaceholder} />
-            <Text style={styles.gpsHint}>
-              GPS location will be available soon.
-            </Text>
-          </View>
-        </View>
-      </Modal>
+      <PostLocationModal
+        key={showGpsModal ? "gps-open" : "gps-closed"}
+        visible={showGpsModal}
+        onClose={() => setShowGpsModal(false)}
+        initialLocation={meetingLocation}
+        initialCoords={meetingCoordinates}
+        onSelectLocation={({ locationName, coordinates }) => {
+          setMeetingLocation(locationName);
+          setMeetingCoordinates(coordinates);
+          clearError("meetingLocation");
+          setShowGpsModal(false);
+        }}
+      />
     </View>
   );
 }
@@ -814,8 +895,9 @@ export default function VolunteerPostCreate({
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: "#f5f6f5" },
   loading: { flex: 1, alignItems: "center", justifyContent: "center" },
-  content: { padding: 20, gap: 20 },
-  backBtn: { alignSelf: "flex-start" },
+  formScroll: { flex: 1 },
+  content: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 24, gap: 20 },
+  backBtn: { alignSelf: "flex-start", marginTop: 20, marginLeft: 20 },
   backIcon: { width: 45, height: 45 },
   row: { gap: 20 },
   card: { borderRadius: 10, overflow: "hidden" },
@@ -830,7 +912,12 @@ const styles = StyleSheet.create({
   },
   placeholderText: { color: "#577061" },
   editSection: { gap: 12 },
-  heading: { fontSize: 20, fontWeight: "700", color: "#1d2b21" },
+  heading: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#1d2b21",
+    marginBottom: 2,
+  },
   inputBox: {
     flexDirection: "row",
     alignItems: "center",
@@ -839,7 +926,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     minHeight: 48,
     borderWidth: 1,
-    borderColor: "transparent",
+    borderColor: "#D8E3DC",
   },
   input: {
     flex: 1,
@@ -847,14 +934,25 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderWidth: 0,
     outlineStyle: "none",
+    color: "#1d2b21",
   },
   requirementBox: {
     backgroundColor: "#fff",
     borderRadius: 8,
     padding: 12,
     gap: 8,
+    borderWidth: 1,
+    borderColor: "#E2ECE5",
   },
-  fieldLabel: { fontWeight: "700", color: "#1d2b21" },
+  requirementsList: {
+    height: 150,
+    flexGrow: 0,
+  },
+  requirementsListContent: {
+    gap: 8,
+    paddingBottom: 4,
+  },
+  fieldLabel: { fontWeight: "700", color: "#1d2b21", marginBottom: 2 },
   inputError: {
     borderWidth: 1.5,
     borderColor: "#D93025",
@@ -863,7 +961,7 @@ const styles = StyleSheet.create({
     color: "#B42318",
     fontSize: 12,
     fontWeight: "600",
-    marginTop: -7,
+    marginTop: -4,
     marginBottom: 2,
   },
   requirementRow: { flexDirection: "row", alignItems: "center", gap: 8 },
@@ -875,6 +973,7 @@ const styles = StyleSheet.create({
     height: 42,
     borderWidth: 0,
     outlineStyle: "none",
+    color: "#1d2b21",
   },
   addButton: {
     flexDirection: "row",
@@ -890,6 +989,8 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 12,
     gap: 10,
+    borderWidth: 1,
+    borderColor: "#E2ECE5",
   },
   meetupLocationBox: {
     backgroundColor: "#5F9C76",
@@ -904,6 +1005,7 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     color: "#FFFFFF",
     fontSize: 15,
+    fontWeight: "500",
   },
   modalActionButton: {
     minHeight: 44,
@@ -926,21 +1028,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
     outlineStyle: "none",
   },
-  gpsPlaceholder: {
-    height: 180,
-    marginTop: 14,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#D8E3DC",
-    backgroundColor: "#FAFCFB",
+  gpsCoordinateHint: {
+    color: "#52675A",
+    fontSize: 12,
+    fontWeight: "600",
+    marginTop: -4,
   },
-  gpsHint: { color: "#718078", textAlign: "center", marginTop: 10 },
   imageMeetingDetails: {
     marginTop: 12,
     padding: 12,
     gap: 10,
     borderRadius: 8,
     backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2ECE5",
   },
   meetingDateRow: { flexDirection: "row", gap: 10 },
   pickerInput: { borderColor: "#D8E3DC", backgroundColor: "#FAFCFB" },
@@ -953,6 +1054,8 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderWidth: 0,
     outlineStyle: "none",
+    color: "#1d2b21",
+    marginLeft: 8,
   },
   saveBtn: {
     backgroundColor: "#5F9C76",
@@ -991,6 +1094,15 @@ const styles = StyleSheet.create({
     gap: 10,
     padding: 12,
     borderRadius: 8,
+  },
+  descriptionBox: {
+    minHeight: 120,
+    alignItems: "flex-start",
+  },
+  descriptionInput: {
+    minHeight: 110,
+    paddingTop: 12,
+    textAlignVertical: "top",
   },
   selectedTime: { backgroundColor: "#EDF7F0" },
   timeOptionText: { color: "#24352A", fontSize: 14 },

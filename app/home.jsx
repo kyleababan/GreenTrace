@@ -1,53 +1,58 @@
+import { Ionicons } from "@expo/vector-icons";
+import { Image as ExpoImage } from "expo-image";
 import { useRouter } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Animated,
-    Image,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    useWindowDimensions,
-    View,
+  ActivityIndicator,
+  Animated,
+  FlatList,
+  Image,
+  PanResponder,
+  Platform,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  useWindowDimensions,
+  View,
 } from "react-native";
 import BadgeWithDetails from "../components/BadgeWithDetails";
 import Navbar from "../components/navbar";
 import PostLocationModal from "../components/PostLocationModal";
 import {
-    BADGES,
-    getUserContributionStats,
-    getVolunteerId,
-    isBadgeEarned,
+  BADGES,
+  getUserContributionStats,
+  getVolunteerId,
+  isBadgeEarned,
 } from "../constants/badges";
 import { formatLocationWithPurok } from "../constants/locationFormat";
 import {
-    formatWasteLabel,
-    getWasteCategoryColor,
+  formatWasteLabel,
+  getWasteCategoryColor,
 } from "../constants/wasteCategories";
 import { hideBadWords } from "../utils/hideBadWords";
 
 import {
-    addDoc,
-    collection,
-    deleteDoc,
-    doc,
-    getDoc,
-    getDocs,
-    increment,
-    limit,
-    onSnapshot,
-    orderBy,
-    query,
-    serverTimestamp,
-    startAfter,
-    updateDoc,
-    where,
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  increment,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  startAfter,
+  updateDoc,
+  where,
 } from "firebase/firestore";
 
 import { auth, db } from "../firebaseConfig";
+import { getNameInitials } from "../utils/getNameInitials";
 
 const formatRelativeTime = (timestamp, now) => {
   if (!timestamp) return "Just now";
@@ -88,18 +93,19 @@ export default function Home() {
 
   const [posts, setPosts] = useState([]);
   const [search, setSearch] = useState("");
-  const [filteredPosts, setFilteredPosts] = useState([]);
   const [selectedLocationPost, setSelectedLocationPost] = useState(null);
   const [userReactions, setUserReactions] = useState({});
-  const [animations, setAnimations] = useState({});
+  const animationsRef = useRef(new Map());
+  const postListenersRef = useRef(new Map());
   const [currentUserData, setCurrentUserData] = useState(null);
   const [announcement, setAnnouncement] = useState(null);
-  const [announcementSlides, setAnnouncementSlides] = useState([]);
   const [announcementIndex, setAnnouncementIndex] = useState(0);
   const [announcementCardWidth, setAnnouncementCardWidth] = useState(0);
+  const [isSwiping, setIsSwiping] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
   const [userRankSummary, setUserRankSummary] = useState(null);
   const [openVolunteerActivity, setOpenVolunteerActivity] = useState(null);
-  const announcementTranslate = useRef(new Animated.Value(0)).current;
+  const [announcementTranslate] = useState(() => new Animated.Value(0));
 
   // Live lookup for points across feed
   const [authorPoints, setAuthorPoints] = useState({});
@@ -176,6 +182,7 @@ export default function Home() {
     }
   };
 
+  /* eslint-disable react-hooks/immutability, react-hooks/set-state-in-effect */
   useEffect(() => {
     loadPosts(true);
     const unsubscribeUsers = onSnapshot(collection(db, "users"), (snapshot) => {
@@ -198,37 +205,54 @@ export default function Home() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  /* eslint-enable react-hooks/immutability, react-hooks/set-state-in-effect */
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30 * 1000);
     return () => clearInterval(timer);
   }, []);
 
-  const visiblePostIds = posts.map((post) => post.id).join("|");
+  useEffect(() => {
+    const currentListeners = postListenersRef.current;
+    const currentIds = new Set(posts.map((post) => post.id));
+
+    // Cleanup listeners for posts no longer in list
+    for (const [id, unsubscribe] of currentListeners.entries()) {
+      if (!currentIds.has(id)) {
+        unsubscribe();
+        currentListeners.delete(id);
+      }
+    }
+
+    // Attach listeners only to new posts
+    posts.forEach((post) => {
+      if (!currentListeners.has(post.id)) {
+        const unsubscribe = onSnapshot(
+          doc(db, "posts", post.id),
+          (snapshot) => {
+            if (!snapshot.exists()) return;
+            const reactionCount = snapshot.data().reactionCount ?? 0;
+            setPosts((currentPosts) =>
+              currentPosts.map((p) =>
+                p.id === post.id && p.reactionCount !== reactionCount
+                  ? { ...p, reactionCount }
+                  : p,
+              ),
+            );
+          },
+        );
+        currentListeners.set(post.id, unsubscribe);
+      }
+    });
+  }, [posts]);
 
   useEffect(() => {
-    if (!visiblePostIds) return undefined;
-
-    const unsubscribePosts = visiblePostIds.split("|").map((postId) =>
-      onSnapshot(doc(db, "posts", postId), (snapshot) => {
-        if (!snapshot.exists()) return;
-
-        const reactionCount = snapshot.data().reactionCount ?? 0;
-
-        setPosts((currentPosts) =>
-          currentPosts.map((post) =>
-            post.id === postId && post.reactionCount !== reactionCount
-              ? { ...post, reactionCount }
-              : post,
-          ),
-        );
-      }),
-    );
-
+    const listeners = postListenersRef.current;
     return () => {
-      unsubscribePosts.forEach((unsubscribe) => unsubscribe());
+      listeners.forEach((unsubscribe) => unsubscribe());
+      listeners.clear();
     };
-  }, [visiblePostIds]);
+  }, []);
 
   const loadUserReactions = async () => {
     const currentUser = auth.currentUser;
@@ -392,28 +416,39 @@ export default function Home() {
     }
   };
 
-  const playReactionAnimation = (postId) => {
-    const scale = animations[postId];
-    if (!scale) return;
+  const getPostScale = useCallback((postId) => {
+    let scale = animationsRef.current.get(postId);
+    if (!scale) {
+      scale = new Animated.Value(1);
+      animationsRef.current.set(postId, scale);
+    }
+    return scale;
+  }, []);
 
-    Animated.sequence([
-      Animated.timing(scale, {
-        toValue: 1.35,
-        duration: 120,
-        useNativeDriver: true,
-      }),
-      Animated.timing(scale, {
-        toValue: 0.9,
-        duration: 80,
-        useNativeDriver: true,
-      }),
-      Animated.spring(scale, {
-        toValue: 1,
-        friction: 4,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  };
+  const playReactionAnimation = useCallback(
+    (postId) => {
+      const scale = getPostScale(postId);
+
+      Animated.sequence([
+        Animated.timing(scale, {
+          toValue: 1.35,
+          duration: 120,
+          useNativeDriver: true,
+        }),
+        Animated.timing(scale, {
+          toValue: 0.9,
+          duration: 80,
+          useNativeDriver: true,
+        }),
+        Animated.spring(scale, {
+          toValue: 1,
+          friction: 4,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    },
+    [getPostScale],
+  );
 
   const adjustLocalReactionCount = (postId, amount) => {
     setPosts((currentPosts) =>
@@ -530,26 +565,23 @@ export default function Home() {
     }
   };
 
-  useEffect(() => {
+  const filteredPosts = useMemo(() => {
     const keyword = search.toLowerCase().trim();
 
     if (!keyword) {
-      setFilteredPosts(posts);
-      return;
+      return posts;
     }
 
-    const filtered = posts.filter(
+    return posts.filter(
       (post) =>
         post.caption?.toLowerCase().includes(keyword) ||
         post.locationName?.toLowerCase().includes(keyword) ||
         post.firstName?.toLowerCase().includes(keyword) ||
         post.lastName?.toLowerCase().includes(keyword),
     );
-
-    setFilteredPosts(filtered);
   }, [search, posts]);
 
-  useEffect(() => {
+  const announcementSlides = useMemo(() => {
     const slides = [];
 
     if (announcement) {
@@ -585,19 +617,151 @@ export default function Home() {
       });
     }
 
-    if (slides.length === 0) {
-      setAnnouncementSlides([]);
-      return;
-    }
-
-    setAnnouncementSlides(slides);
-    setAnnouncementIndex((currentIndex) =>
-      Math.min(currentIndex, Math.max(slides.length - 1, 0)),
-    );
+    return slides;
   }, [announcement, userRankSummary, openVolunteerActivity]);
 
+  const announcementIndexRef = useRef(announcementIndex);
+  const announcementSlidesRef = useRef(announcementSlides);
+  const cardWidthRef = useRef(announcementCardWidth);
+  const isDraggingRef = useRef(false);
+
   useEffect(() => {
-    if (announcementSlides.length < 2 || !announcementCardWidth)
+    announcementIndexRef.current = announcementIndex;
+    announcementSlidesRef.current = announcementSlides;
+    cardWidthRef.current = announcementCardWidth;
+  }, [announcementIndex, announcementSlides, announcementCardWidth]);
+
+  const goToNextSlide = useCallback(() => {
+    setAnnouncementIndex((current) =>
+      announcementSlides.length <= 1
+        ? 0
+        : (current + 1) % announcementSlides.length,
+    );
+  }, [announcementSlides.length]);
+
+  const goToPrevSlide = useCallback(() => {
+    setAnnouncementIndex((current) => {
+      if (announcementSlides.length <= 1) return 0;
+      return current === 0 ? announcementSlides.length - 1 : current - 1;
+    });
+  }, [announcementSlides.length]);
+
+  const finishSwipeRef = useRef(null);
+
+  const finishSwipe = useCallback(
+    (gestureState) => {
+      isDraggingRef.current = false;
+      setIsSwiping(false);
+
+      const width = cardWidthRef.current;
+      const slidesCount = announcementSlidesRef.current.length;
+      const currentIndex = announcementIndexRef.current;
+
+      if (!width || slidesCount <= 1) {
+        Animated.spring(announcementTranslate, {
+          toValue: -currentIndex * (width || 0),
+          friction: 8,
+          tension: 40,
+          useNativeDriver: false,
+        }).start();
+        return;
+      }
+
+      const { dx, vx } = gestureState;
+      const threshold = Math.min(width * 0.18, 50);
+      let newIndex = currentIndex;
+
+      // Swiped left (finger/cursor moved right-to-left): advance to next slide
+      if (dx < -threshold || (vx < -0.35 && dx < -15)) {
+        newIndex = (currentIndex + 1) % slidesCount;
+      }
+      // Swiped right (finger/cursor moved left-to-right): back to previous slide
+      else if (dx > threshold || (vx > 0.35 && dx > 15)) {
+        newIndex = currentIndex === 0 ? slidesCount - 1 : currentIndex - 1;
+      }
+
+      setAnnouncementIndex(newIndex);
+
+      Animated.spring(announcementTranslate, {
+        toValue: -newIndex * width,
+        friction: 8,
+        tension: 45,
+        useNativeDriver: false,
+      }).start();
+    },
+    [announcementTranslate],
+  );
+
+  useEffect(() => {
+    finishSwipeRef.current = finishSwipe;
+  }, [finishSwipe]);
+
+  // eslint-disable-next-line react-hooks/refs
+  const [panResponder] = useState(() =>
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onStartShouldSetPanResponderCapture: () => false,
+      onMoveShouldSetPanResponder: (evt, gestureState) => {
+        if (
+          announcementSlidesRef.current.length <= 1 ||
+          !cardWidthRef.current
+        ) {
+          return false;
+        }
+        const dx = Math.abs(gestureState.dx);
+        const dy = Math.abs(gestureState.dy);
+        return dx > 8 && dx > dy * 1.2;
+      },
+      onMoveShouldSetPanResponderCapture: (evt, gestureState) => {
+        if (
+          announcementSlidesRef.current.length <= 1 ||
+          !cardWidthRef.current
+        ) {
+          return false;
+        }
+        const dx = Math.abs(gestureState.dx);
+        const dy = Math.abs(gestureState.dy);
+        return dx > 10 && dx > dy * 1.2;
+      },
+      onPanResponderGrant: () => {
+        isDraggingRef.current = true;
+        setIsSwiping(true);
+        announcementTranslate.stopAnimation();
+      },
+      onPanResponderMove: (evt, gestureState) => {
+        const width = cardWidthRef.current;
+        if (!width) return;
+        const baseOffset = -announcementIndexRef.current * width;
+        let dx = gestureState.dx;
+
+        const isAtFirst = announcementIndexRef.current === 0 && dx > 0;
+        const isAtLast =
+          announcementIndexRef.current ===
+            announcementSlidesRef.current.length - 1 && dx < 0;
+
+        if (isAtFirst || isAtLast) {
+          dx = dx * 0.4;
+        }
+
+        announcementTranslate.setValue(baseOffset + dx);
+      },
+      onPanResponderRelease: (evt, gestureState) => {
+        finishSwipeRef.current?.(gestureState);
+      },
+      onPanResponderTerminate: (evt, gestureState) => {
+        finishSwipeRef.current?.(gestureState);
+      },
+      onPanResponderTerminationRequest: () => false,
+    }),
+  );
+
+  useEffect(() => {
+    if (
+      announcementSlides.length < 2 ||
+      !announcementCardWidth ||
+      isSwiping ||
+      isHovered
+    )
       return undefined;
 
     const timer = setInterval(() => {
@@ -607,17 +771,41 @@ export default function Home() {
     }, HOME_CAROUSEL_INTERVAL);
 
     return () => clearInterval(timer);
-  }, [announcementCardWidth, announcementSlides.length]);
+  }, [
+    announcementCardWidth,
+    announcementSlides.length,
+    announcementIndex,
+    isSwiping,
+    isHovered,
+  ]);
 
   useEffect(() => {
     if (!announcementCardWidth) return;
+    if (isDraggingRef.current) return;
 
     Animated.timing(announcementTranslate, {
       toValue: -announcementIndex * announcementCardWidth,
       duration: 350,
-      useNativeDriver: true,
+      useNativeDriver: false,
     }).start();
   }, [announcementCardWidth, announcementIndex, announcementTranslate]);
+
+  useEffect(() => {
+    if (Platform.OS !== "web" || typeof window === "undefined")
+      return undefined;
+
+    const handleKeyDown = (event) => {
+      if (!isHovered || announcementSlides.length <= 1) return;
+      if (event.key === "ArrowLeft") {
+        goToPrevSlide();
+      } else if (event.key === "ArrowRight") {
+        goToNextSlide();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isHovered, announcementSlides.length, goToNextSlide, goToPrevSlide]);
 
   const loadPosts = async (reset = false) => {
     if (loadingPostsRef.current || (!reset && !hasMorePostsRef.current)) return;
@@ -646,15 +834,6 @@ export default function Home() {
           ...currentPosts,
           ...data.filter((post) => !currentIds.has(post.id)),
         ];
-      });
-
-      setAnimations((currentAnimations) => {
-        const nextAnimations = { ...currentAnimations };
-        data.forEach((post) => {
-          if (!nextAnimations[post.id])
-            nextAnimations[post.id] = new Animated.Value(1);
-        });
-        return nextAnimations;
       });
 
       lastPostDocRef.current = snapshot.docs[snapshot.docs.length - 1] || null;
@@ -705,118 +884,185 @@ export default function Home() {
           </View>
 
           {/* POSTS FEED */}
-          <ScrollView
+          <FlatList
             style={styles.feed}
             contentContainerStyle={styles.feedContent}
             showsVerticalScrollIndicator={false}
-            scrollEventThrottle={200}
-            onScroll={({ nativeEvent }) => {
-              const { contentOffset, contentSize, layoutMeasurement } =
-                nativeEvent;
-              if (
-                layoutMeasurement.height + contentOffset.y >=
-                contentSize.height - 160
-              ) {
+            data={filteredPosts}
+            keyExtractor={(item) => item.id}
+            initialNumToRender={3}
+            maxToRenderPerBatch={3}
+            windowSize={5}
+            removeClippedSubviews={Platform.OS !== "web"}
+            onEndReached={() => {
+              if (!loadingPostsRef.current && hasMorePostsRef.current) {
                 loadPosts();
               }
             }}
-          >
-            {announcementSlides.length > 0 && (
-              <View
-                style={styles.announcementCard}
-                onLayout={(event) =>
-                  setAnnouncementCardWidth(event.nativeEvent.layout.width)
-                }
-              >
-                <View style={styles.announcementCarousel}>
-                  <Animated.View
+            onEndReachedThreshold={0.4}
+            ListHeaderComponent={
+              announcementSlides.length > 0 ? (
+                <View
+                  style={styles.announcementCard}
+                  onMouseEnter={() => setIsHovered(true)}
+                  onMouseLeave={() => setIsHovered(false)}
+                >
+                  <View
                     style={[
-                      styles.announcementTrack,
-                      {
-                        transform: [{ translateX: announcementTranslate }],
-                      },
+                      styles.announcementCarousel,
+                      Platform.select({
+                        web: {
+                          cursor: isSwiping ? "grabbing" : "grab",
+                          userSelect: "none",
+                          WebkitUserSelect: "none",
+                          touchAction: "pan-y",
+                        },
+                      }),
                     ]}
+                    onLayout={(event) =>
+                      setAnnouncementCardWidth(event.nativeEvent.layout.width)
+                    }
+                    {...panResponder.panHandlers}
                   >
-                    {announcementSlides.map((slide, index) => {
-                      const label =
-                        slide.type === "rank"
-                          ? "TOP CONTRIBUTER"
-                          : slide.type === "volunteer"
-                            ? "VOLUNTEER"
-                            : "SCHEDULED DATE";
+                    <Animated.View
+                      style={[
+                        styles.announcementTrack,
+                        {
+                          transform: [{ translateX: announcementTranslate }],
+                        },
+                      ]}
+                    >
+                      {announcementSlides.map((slide, index) => {
+                        const label =
+                          slide.type === "rank"
+                            ? "TOP CONTRIBUTOR"
+                            : slide.type === "volunteer"
+                              ? "VOLUNTEER"
+                              : "SCHEDULED DATE";
 
-                      return (
-                        <View
-                          key={`${slide.type}-${index}`}
-                          style={[
-                            styles.announcementSlide,
-                            { width: announcementCardWidth || "100%" },
-                          ]}
-                        >
-                          <View style={styles.announcementHeader}>
-                            <Text style={styles.announcementLabel}>
-                              {label}
-                            </Text>
-                            <TouchableOpacity
-                              activeOpacity={0.8}
-                              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                              onPress={() => handleAnnouncementPress(slide)}
-                              style={styles.announcementActionButton}
-                            ></TouchableOpacity>
-                          </View>
-
-                          <Text style={styles.announcementTitle}>
-                            {slide.title}
-                          </Text>
-                          <Text style={styles.announcementDetails}>
-                            {slide.details}
-                          </Text>
-                          {Boolean(slide.message) && (
-                            <Text style={styles.announcementMessage}>
-                              {slide.message}
-                            </Text>
-                          )}
-                          {Boolean(slide.actionText) && (
-                            <TouchableOpacity
-                              activeOpacity={0.7}
-                              onPress={() => handleAnnouncementPress(slide)}
-                            >
-                              <Text style={styles.announcementActionText}>
-                                {slide.actionText}
+                        return (
+                          <View
+                            key={`${slide.type}-${index}`}
+                            style={[
+                              styles.announcementSlide,
+                              { width: announcementCardWidth || "100%" },
+                            ]}
+                          >
+                            <View style={styles.announcementHeader}>
+                              <Text style={styles.announcementLabel}>
+                                {label}
                               </Text>
-                            </TouchableOpacity>
-                          )}
-                        </View>
-                      );
-                    })}
-                  </Animated.View>
-                </View>
+                              <TouchableOpacity
+                                activeOpacity={0.8}
+                                hitSlop={{
+                                  top: 8,
+                                  bottom: 8,
+                                  left: 8,
+                                  right: 8,
+                                }}
+                                onPress={() => handleAnnouncementPress(slide)}
+                                style={styles.announcementActionButton}
+                              ></TouchableOpacity>
+                            </View>
 
-                {announcementSlides.length > 1 && (
-                  <View style={styles.dotRow}>
-                    {announcementSlides.map((slide, index) => (
-                      <TouchableOpacity
-                        key={`dot-${slide.type}-${index}`}
-                        activeOpacity={0.8}
-                        onPress={() => setAnnouncementIndex(index)}
-                        style={[
-                          styles.dot,
-                          announcementIndex === index && styles.dotActive,
-                        ]}
-                      />
-                    ))}
+                            <Text style={styles.announcementTitle}>
+                              {slide.title}
+                            </Text>
+                            <Text style={styles.announcementDetails}>
+                              {slide.details}
+                            </Text>
+                            {Boolean(slide.message) && (
+                              <Text style={styles.announcementMessage}>
+                                {slide.message}
+                              </Text>
+                            )}
+                            {Boolean(slide.actionText) && (
+                              <TouchableOpacity
+                                activeOpacity={0.7}
+                                onPress={() => handleAnnouncementPress(slide)}
+                              >
+                                <Text style={styles.announcementActionText}>
+                                  {slide.actionText}
+                                </Text>
+                              </TouchableOpacity>
+                            )}
+                          </View>
+                        );
+                      })}
+                    </Animated.View>
                   </View>
-                )}
-              </View>
-            )}
-            {filteredPosts.map((post) => (
+
+                  {announcementSlides.length > 1 && (
+                    <View style={styles.announcementFooter}>
+                      <TouchableOpacity
+                        activeOpacity={0.7}
+                        onPress={goToPrevSlide}
+                        style={styles.carouselNavButton}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        accessibilityRole="button"
+                        accessibilityLabel="Previous announcement"
+                      >
+                        <Ionicons
+                          name="chevron-back"
+                          size={14}
+                          color="#397A51"
+                        />
+                      </TouchableOpacity>
+
+                      <View style={styles.dotRow}>
+                        {announcementSlides.map((slide, index) => (
+                          <TouchableOpacity
+                            key={`dot-${slide.type}-${index}`}
+                            activeOpacity={0.8}
+                            onPress={() => setAnnouncementIndex(index)}
+                            style={[
+                              styles.dot,
+                              announcementIndex === index && styles.dotActive,
+                            ]}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Go to announcement ${index + 1}`}
+                          />
+                        ))}
+                      </View>
+
+                      <TouchableOpacity
+                        activeOpacity={0.7}
+                        onPress={goToNextSlide}
+                        style={styles.carouselNavButton}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        accessibilityRole="button"
+                        accessibilityLabel="Next announcement"
+                      >
+                        <Ionicons
+                          name="chevron-forward"
+                          size={14}
+                          color="#397A51"
+                        />
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+              ) : null
+            }
+            ListFooterComponent={
+              loadingMorePosts ? (
+                <ActivityIndicator
+                  color="#5F9C76"
+                  style={{ marginVertical: 16 }}
+                />
+              ) : null
+            }
+            renderItem={({ item: post }) => (
               <View key={post.id} style={styles.card}>
                 {/* Author Info & Location */}
                 <View style={styles.userRow}>
-                  <Image
-                    source={require("../assets/images/profile2.png")}
-                    style={styles.avatar}
-                  />
+                  <View style={styles.avatar}>
+                    <Text style={styles.avatarText}>
+                      {getNameInitials(
+                        `${post.firstName || ""} ${post.lastName || ""}`,
+                      )}
+                    </Text>
+                  </View>
 
                   <View style={styles.userDetails}>
                     <Text style={styles.reportedByLabel}>Reported by</Text>
@@ -983,18 +1229,22 @@ export default function Home() {
                     <View style={styles.cleanupImages}>
                       <View style={styles.cleanupImageColumn}>
                         <Text style={styles.cleanupImageLabel}>Before</Text>
-                        <Image
+                        <ExpoImage
                           source={{ uri: post.imageUrl }}
                           style={styles.cleanupImage}
-                          resizeMode="cover"
+                          contentFit="cover"
+                          cachePolicy="memory-disk"
+                          recyclingKey={post.imageUrl}
                         />
                       </View>
                       <View style={styles.cleanupImageColumn}>
                         <Text style={styles.cleanupImageLabel}>After</Text>
-                        <Image
+                        <ExpoImage
                           source={{ uri: post.afterImageUrl }}
                           style={styles.cleanupImage}
-                          resizeMode="cover"
+                          contentFit="cover"
+                          cachePolicy="memory-disk"
+                          recyclingKey={post.afterImageUrl}
                         />
                       </View>
                     </View>
@@ -1013,10 +1263,12 @@ export default function Home() {
                       })
                     }
                   >
-                    <Image
+                    <ExpoImage
                       source={{ uri: post.imageUrl }}
                       style={styles.postImage}
-                      resizeMode="cover"
+                      contentFit="cover"
+                      cachePolicy="memory-disk"
+                      recyclingKey={post.imageUrl}
                     />
                   </TouchableOpacity>
                 )}
@@ -1043,7 +1295,7 @@ export default function Home() {
                         {
                           transform: [
                             {
-                              scale: animations[post.id] || 1,
+                              scale: getPostScale(post.id),
                             },
                           ],
                         },
@@ -1078,9 +1330,8 @@ export default function Home() {
                   </TouchableOpacity>
                 </View>
               </View>
-            ))}
-            {loadingMorePosts && <ActivityIndicator color="#5F9C76" />}
-          </ScrollView>
+            )}
+          />
 
           {/* BOTTOM NAVBAR */}
           <View style={styles.navbar}>
@@ -1245,11 +1496,30 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textDecorationLine: "underline",
   },
-  dotRow: {
+  announcementFooter: {
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
     marginTop: 12,
+    gap: 12,
+  },
+  carouselNavButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "#DBEBE0",
+    alignItems: "center",
+    justifyContent: "center",
+    ...Platform.select({
+      web: {
+        cursor: "pointer",
+      },
+    }),
+  },
+  dotRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
     gap: 8,
   },
   dot: {
@@ -1280,7 +1550,14 @@ const styles = StyleSheet.create({
     height: 42,
     borderRadius: 21,
     marginRight: 10,
-    resizeMode: "cover",
+    backgroundColor: "#5F9C76",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 14,
   },
   userDetails: {
     flex: 1,
@@ -1493,7 +1770,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "600",
     color: "#555",
-    fontFamily: "sans-serif-medium",
+    fontFamily: "Arial",
   },
   commentBox: {
     flex: 1,

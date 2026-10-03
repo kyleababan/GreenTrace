@@ -1,9 +1,14 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
-  Image,
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -16,13 +21,14 @@ import { auth, db } from "../firebaseConfig";
 
 export default function EditProfile() {
   const router = useRouter();
-
   const currentUser = auth.currentUser;
 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [cellNumber, setcellNumber] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
   const [editable, setEditable] = useState({
     firstName: false,
@@ -32,31 +38,51 @@ export default function EditProfile() {
   });
 
   const loadCurrentUser = async () => {
-    if (!currentUser) return;
+    if (!currentUser) {
+      setLoading(false);
+      return;
+    }
 
-    const snapshot = await getDoc(doc(db, "users", currentUser.uid));
-
-    if (snapshot.exists()) {
-      const data = snapshot.data();
-
-      setFirstName(data.firstName || "");
-      setLastName(data.lastName || "");
-      setEmail(data.email || "");
-      setcellNumber(data.cellNumber || "");
+    try {
+      const snapshot = await getDoc(doc(db, "users", currentUser.uid));
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        setFirstName(data.firstName || "");
+        setLastName(data.lastName || "");
+        setEmail(data.email || "");
+        setcellNumber(data.cellNumber || "");
+      }
+    } catch (error) {
+      console.log("Error loading current user:", error);
+    } finally {
+      setLoading(false);
     }
   };
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadCurrentUser();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const saveProfile = async () => {
     if (!currentUser) return;
 
-    setSaving(true);
+    if (!firstName.trim() || !lastName.trim()) {
+      Alert.alert(
+        "Required Fields",
+        "First name and last name cannot be empty.",
+      );
+      return;
+    }
 
+    setSaving(true);
     try {
       await updateDoc(doc(db, "users", currentUser.uid), {
-        firstName,
-        lastName,
-        email,
-        cellNumber,
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        email: email.trim(),
+        cellNumber: cellNumber.trim(),
       });
 
       setEditable({
@@ -65,170 +91,275 @@ export default function EditProfile() {
         email: false,
         cellNumber: false,
       });
+
+      Alert.alert("Success", "Your profile has been updated successfully.");
     } catch (error) {
-      console.log(error);
+      console.log("Error saving profile:", error);
+      Alert.alert("Error", "Could not save profile changes. Please try again.");
     } finally {
       setSaving(false);
     }
   };
 
-  useEffect(() => {
-    loadCurrentUser();
-  }, []);
+  const getInitials = () => {
+    const f = (firstName || "").charAt(0).toUpperCase();
+    const l = (lastName || "").charAt(0).toUpperCase();
+    return f || l ? `${f}${l}` : "GT";
+  };
 
-  const [saving, setSaving] = useState(false);
   return (
-    <SafeAreaView style={styles.wrapper}>
-      <View style={styles.container}>
-        {/* HEADER */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()}>
-            <Image
-              source={require("../assets/images/back.png")}
-              style={styles.backIcon}
-            />
-          </TouchableOpacity>
-        </View>
-
-        {/* FORM */}
-        <View style={styles.formContainer}>
-          <Text style={styles.title}>Edit Profile</Text>
-
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>First Name</Text>
-
-            <View style={styles.inputWrapper}>
-              <TextInput
-                style={[
-                  styles.input,
-                  editable.firstName && styles.inputEditing,
-                ]}
-                value={firstName}
-                onChangeText={setFirstName}
-                editable={editable.firstName}
-              />
-
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.wrapper}>
+        <View style={styles.container}>
+          {/* TOP HEADER */}
+          <View style={styles.topSection}>
+            <View style={styles.headerRow}>
               <TouchableOpacity
-                onPress={() =>
-                  setEditable((prev) => ({
-                    ...prev,
-                    firstName: !prev.firstName,
-                  }))
-                }
+                onPress={() => router.back()}
+                style={styles.backButton}
+                activeOpacity={0.7}
+                accessibilityLabel="Go back"
               >
-                <Image
-                  source={require("../assets/images/editlabel.png")}
-                  style={styles.fieldEditIcon}
-                />
+                <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
               </TouchableOpacity>
+              <View style={styles.headerTextWrapper}>
+                <Text style={styles.headerTitle}>Edit Profile</Text>
+                <Text style={styles.headerSubtitle}>
+                  Update your personal details
+                </Text>
+              </View>
             </View>
           </View>
 
-          {/* LAST NAME */}
-
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Last Name</Text>
-
-            <View style={styles.inputWrapper}>
-              <TextInput
-                style={[styles.input, editable.lastName && styles.inputEditing]}
-                value={lastName}
-                onChangeText={setLastName}
-                editable={editable.lastName}
-              />
-
-              <TouchableOpacity
-                onPress={() =>
-                  setEditable((prev) => ({
-                    ...prev,
-                    lastName: !prev.lastName,
-                  }))
-                }
-              >
-                <Image
-                  source={require("../assets/images/editlabel.png")}
-                  style={styles.fieldEditIcon}
-                />
-              </TouchableOpacity>
+          {/* MAIN FORM */}
+          {loading ? (
+            <View style={styles.stateContainer}>
+              <ActivityIndicator size="small" color="#5F9C76" />
             </View>
-          </View>
-
-          {/* EMAIL */}
-
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Email</Text>
-
-            <View style={styles.inputWrapper}>
-              <TextInput
-                style={[styles.input, editable.email && styles.inputEditing]}
-                value={email}
-                onChangeText={setEmail}
-                editable={editable.email}
-              />
-
-              <TouchableOpacity
-                onPress={() =>
-                  setEditable((prev) => ({
-                    ...prev,
-                    email: !prev.email,
-                  }))
-                }
+          ) : (
+            <KeyboardAvoidingView
+              behavior={Platform.OS === "ios" ? "padding" : undefined}
+              style={{ flex: 1 }}
+            >
+              <ScrollView
+                style={styles.content}
+                contentContainerStyle={styles.contentContainer}
+                showsVerticalScrollIndicator={false}
               >
-                <Image
-                  source={require("../assets/images/editlabel.png")}
-                  style={styles.fieldEditIcon}
-                />
-              </TouchableOpacity>
-            </View>
+                {/* AVATAR PREVIEW CARD */}
+                <View style={styles.avatarCard}>
+                  <View style={styles.avatarCircle}>
+                    <Text style={styles.avatarInitials}>{getInitials()}</Text>
+                  </View>
+                  <Text style={styles.avatarName}>
+                    {firstName || lastName
+                      ? `${firstName} ${lastName}`.trim()
+                      : "GreenTrace User"}
+                  </Text>
+                  <Text style={styles.avatarEmail}>
+                    {email || "No email address provided"}
+                  </Text>
+                </View>
+
+                {/* FORM FIELDS CARD */}
+                <View style={styles.formCard}>
+                  <Text style={styles.cardSectionTitle}>
+                    Personal Information
+                  </Text>
+
+                  {/* FIRST NAME */}
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.label}>First Name</Text>
+                    <View
+                      style={[
+                        styles.inputWrapper,
+                        editable.firstName && styles.inputWrapperActive,
+                      ]}
+                    >
+                      <TextInput
+                        style={styles.input}
+                        value={firstName}
+                        onChangeText={setFirstName}
+                        editable={editable.firstName}
+                        placeholder="Enter first name"
+                        placeholderTextColor="#94A3B8"
+                        selectionColor="#5F9C76"
+                        cursorColor="#5F9C76"
+                        underlineColorAndroid="transparent"
+                      />
+                      <TouchableOpacity
+                        style={styles.fieldActionBtn}
+                        onPress={() =>
+                          setEditable((prev) => ({
+                            ...prev,
+                            firstName: !prev.firstName,
+                          }))
+                        }
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons
+                          name={editable.firstName ? "checkmark" : "pencil"}
+                          size={16}
+                          color={editable.firstName ? "#2E7D32" : "#5F9C76"}
+                        />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {/* LAST NAME */}
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.label}>Last Name</Text>
+                    <View
+                      style={[
+                        styles.inputWrapper,
+                        editable.lastName && styles.inputWrapperActive,
+                      ]}
+                    >
+                      <TextInput
+                        style={styles.input}
+                        value={lastName}
+                        onChangeText={setLastName}
+                        editable={editable.lastName}
+                        placeholder="Enter last name"
+                        placeholderTextColor="#94A3B8"
+                        selectionColor="#5F9C76"
+                        cursorColor="#5F9C76"
+                        underlineColorAndroid="transparent"
+                      />
+                      <TouchableOpacity
+                        style={styles.fieldActionBtn}
+                        onPress={() =>
+                          setEditable((prev) => ({
+                            ...prev,
+                            lastName: !prev.lastName,
+                          }))
+                        }
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons
+                          name={editable.lastName ? "checkmark" : "pencil"}
+                          size={16}
+                          color={editable.lastName ? "#2E7D32" : "#5F9C76"}
+                        />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {/* EMAIL */}
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.label}>Email Address</Text>
+                    <View
+                      style={[
+                        styles.inputWrapper,
+                        editable.email && styles.inputWrapperActive,
+                      ]}
+                    >
+                      <TextInput
+                        style={styles.input}
+                        value={email}
+                        onChangeText={setEmail}
+                        editable={editable.email}
+                        placeholder="Enter email"
+                        placeholderTextColor="#94A3B8"
+                        keyboardType="email-address"
+                        autoCapitalize="none"
+                        selectionColor="#5F9C76"
+                        cursorColor="#5F9C76"
+                        underlineColorAndroid="transparent"
+                      />
+                      <TouchableOpacity
+                        style={styles.fieldActionBtn}
+                        onPress={() =>
+                          setEditable((prev) => ({
+                            ...prev,
+                            email: !prev.email,
+                          }))
+                        }
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons
+                          name={editable.email ? "checkmark" : "pencil"}
+                          size={16}
+                          color={editable.email ? "#2E7D32" : "#5F9C76"}
+                        />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {/* PHONE NUMBER */}
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.label}>Phone Number</Text>
+                    <View
+                      style={[
+                        styles.inputWrapper,
+                        editable.cellNumber && styles.inputWrapperActive,
+                      ]}
+                    >
+                      <TextInput
+                        style={styles.input}
+                        value={cellNumber}
+                        onChangeText={setcellNumber}
+                        editable={editable.cellNumber}
+                        placeholder="e.g. 09123456789"
+                        placeholderTextColor="#94A3B8"
+                        keyboardType="phone-pad"
+                        selectionColor="#5F9C76"
+                        cursorColor="#5F9C76"
+                        underlineColorAndroid="transparent"
+                      />
+                      <TouchableOpacity
+                        style={styles.fieldActionBtn}
+                        onPress={() =>
+                          setEditable((prev) => ({
+                            ...prev,
+                            cellNumber: !prev.cellNumber,
+                          }))
+                        }
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons
+                          name={editable.cellNumber ? "checkmark" : "pencil"}
+                          size={16}
+                          color={editable.cellNumber ? "#2E7D32" : "#5F9C76"}
+                        />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {/* SAVE BUTTON */}
+                  <TouchableOpacity
+                    style={[
+                      styles.saveButton,
+                      saving && styles.saveButtonDisabled,
+                    ]}
+                    onPress={saveProfile}
+                    disabled={saving}
+                    activeOpacity={0.8}
+                  >
+                    {saving ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <>
+                        <Ionicons
+                          name="save-outline"
+                          size={18}
+                          color="#FFFFFF"
+                        />
+                        <Text style={styles.saveButtonText}>
+                          Confirm Changes
+                        </Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
+            </KeyboardAvoidingView>
+          )}
+
+          {/* NAVBAR */}
+          <View style={styles.navbarContainer}>
+            <Navbar />
           </View>
-
-          {/* PHONE */}
-
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Phone Number</Text>
-
-            <View style={styles.inputWrapper}>
-              <TextInput
-                style={[
-                  styles.input,
-                  editable.cellNumber && styles.inputEditing,
-                ]}
-                value={cellNumber}
-                onChangeText={setcellNumber}
-                editable={editable.cellNumber}
-              />
-
-              <TouchableOpacity
-                onPress={() =>
-                  setEditable((prev) => ({
-                    ...prev,
-                    cellNumber: !prev.cellNumber,
-                  }))
-                }
-              >
-                <Image
-                  source={require("../assets/images/editlabel.png")}
-                  style={styles.fieldEditIcon}
-                />
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* BUTTON */}
-          <TouchableOpacity
-            style={styles.confirmButton}
-            onPress={saveProfile}
-            disabled={saving}
-          >
-            <Text style={styles.confirmButtonText}>
-              {saving ? "Saving..." : "Confirm Changes"}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* NAVBAR */}
-        <View style={styles.navbarContainer}>
-          <Navbar />
         </View>
       </View>
     </SafeAreaView>
@@ -236,157 +367,189 @@ export default function EditProfile() {
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: "#5F9C76",
+  },
   wrapper: {
     flex: 1,
-    alignItems: "center", // ✅ prevents stretch
-    backgroundColor: "#ffffff",
+    alignItems: "center",
+    backgroundColor: "#F5F5F5",
   },
-
   container: {
     flex: 1,
     width: "100%",
-    maxWidth: 500, // ✅ consistent with your app
-    backgroundColor: "#F2F2F2",
+    maxWidth: 500,
+    backgroundColor: "#F5F5F5",
   },
-
-  header: {
+  stateContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  topSection: {
     backgroundColor: "#5F9C76",
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 20,
+    elevation: 3,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+  },
+  headerRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 20,
-    paddingTop: 55,
-    paddingBottom: 25,
+    gap: 14,
   },
-
   backButton: {
-    backgroundColor: "#FFF",
     width: 36,
     height: 36,
     borderRadius: 18,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    alignItems: "center",
     justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 10,
   },
-
-  backIcon: {
-    width: 45,
-    height: 45,
-    resizeMode: "contain",
-  },
-
-  userInfoContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginLeft: 15,
+  headerTextWrapper: {
     flex: 1,
   },
-
-  avatarWrapper: {
-    position: "relative",
+  headerTitle: {
+    fontSize: 22,
+    fontWeight: "700",
+    color: "#FFFFFF",
   },
-
-  profileAvatar: {
-    width: 70,
-    height: 70,
-    borderRadius: 30,
-    backgroundColor: "#5F9C76",
-  },
-
-  editAvatarBadge: {
-    position: "absolute",
-    bottom: 0,
-    right: 0,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-
-  editIcon: {
-    width: 25,
-    height: 25,
-  },
-
-  userName: {
-    fontSize: 24,
-    fontWeight: "bold",
-    color: "#FFF",
-    marginLeft: 12,
-  },
-
-  formContainer: {
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 15,
-  },
-
-  title: {
-    fontSize: 16,
-    fontWeight: "bold",
-    textAlign: "center",
-    marginBottom: 20,
-  },
-
-  inputGroup: {
-    marginBottom: 12,
-  },
-
-  label: {
+  headerSubtitle: {
+    color: "#E8F3EC",
     fontSize: 12,
-    fontWeight: "600",
-    marginBottom: 4,
-    color: "#333",
+    marginTop: 2,
+  },
+  content: {
+    flex: 1,
+  },
+  contentContainer: {
+    padding: 16,
+    paddingBottom: 28,
   },
 
+  /* AVATAR CARD */
+  avatarCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 20,
+    alignItems: "center",
+    marginBottom: 16,
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+  },
+  avatarCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: "#E4F1E8",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 10,
+    borderWidth: 2,
+    borderColor: "#B9D3C5",
+  },
+  avatarInitials: {
+    fontSize: 24,
+    fontWeight: "800",
+    color: "#2E7D32",
+  },
+  avatarName: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#1F3326",
+  },
+  avatarEmail: {
+    fontSize: 13,
+    color: "#64748B",
+    marginTop: 2,
+  },
+
+  /* FORM CARD */
+  formCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 18,
+  },
+  cardSectionTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#64748B",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: 16,
+  },
+  inputGroup: {
+    marginBottom: 14,
+  },
+  label: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#334155",
+    marginBottom: 6,
+  },
   inputWrapper: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#D9D9D9",
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    height: 38,
+    backgroundColor: "#F8FAFC",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    paddingHorizontal: 12,
+    outlineStyle: "none",
   },
-
+  inputWrapperActive: {
+    backgroundColor: "#FFFFFF",
+    borderColor: "#5F9C76",
+  },
   input: {
     flex: 1,
+    paddingVertical: 11,
+    fontSize: 14,
+    color: "#1E293B",
+    outlineStyle: "none",
+  },
+  fieldActionBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "#F0FDF4",
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 6,
+  },
+
+  /* SAVE BUTTON */
+  saveButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#5F9C76",
+    paddingVertical: 13,
+    borderRadius: 12,
+    marginTop: 10,
+    gap: 8,
+  },
+  saveButtonDisabled: {
+    opacity: 0.7,
+  },
+  saveButtonText: {
+    color: "#FFFFFF",
     fontSize: 15,
     fontWeight: "700",
-    color: "#111",
   },
 
-  fieldEditIcon: {
-    width: 14,
-    height: 14,
-    opacity: 0.6,
-  },
-
-  confirmButton: {
-    backgroundColor: "#5F9C76",
-    paddingVertical: 10,
-    borderRadius: 8,
-    marginTop: 20,
-    alignItems: "center",
-  },
-
-  confirmButtonText: {
-    color: "#FFF",
-    fontWeight: "bold",
-    fontSize: 14,
-  },
-
+  /* NAVBAR */
   navbarContainer: {
-    backgroundColor: "#fff",
     borderTopWidth: 1,
-    borderColor: "#ddd",
-  },
-  inputEditing: {
-    color: "#666",
-  },
-  fieldEditIcon: {
-    width: 22,
-    height: 22,
-    marginLeft: 10,
-    resizeMode: "contain",
+    borderColor: "#EBEBEB",
+    backgroundColor: "#FFFFFF",
   },
 });

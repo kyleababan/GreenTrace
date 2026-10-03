@@ -5,6 +5,8 @@ import {
   Animated,
   Easing,
   Image,
+  Platform,
+  RefreshControl,
   SafeAreaView,
   StyleSheet,
   Text,
@@ -20,8 +22,10 @@ import {
   doc,
   getDoc,
   getDocs,
+  limit,
   orderBy,
   query,
+  startAfter,
   where,
 } from "firebase/firestore";
 
@@ -69,59 +73,118 @@ export default function Notification() {
     });
   };
 
-  // This creates 5 placeholder notifications
+  const NOTIFICATIONS_PER_PAGE = 10;
+
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const loadNotifications = useCallback(async () => {
-    if (!currentUser) {
-      setLoading(false);
-      return;
-    }
+  const lastDocRef = useRef(null);
+  const hasMoreRef = useRef(true);
+  const isLoadingRef = useRef(false);
 
-    try {
-      const q = query(
-        collection(db, "notifications"),
-        where("userId", "==", currentUser.uid),
-        orderBy("createdAt", "desc"),
-      );
+  const loadNotifications = useCallback(
+    async (reset = false) => {
+      if (!currentUser) {
+        setLoading(false);
+        return;
+      }
 
-      const snapshot = await getDocs(q);
+      if (isLoadingRef.current) return;
+      if (!reset && !hasMoreRef.current) return;
 
-      const data = await Promise.all(
-        snapshot.docs.map(async (notification) => {
-          const item = {
-            id: notification.id,
-            ...notification.data(),
-          };
+      isLoadingRef.current = true;
+      if (reset) {
+        setLoading(true);
+        lastDocRef.current = null;
+        hasMoreRef.current = true;
+        setHasMore(true);
+      } else {
+        setLoadingMore(true);
+      }
 
-          try {
-            const postSnap = await getDoc(doc(db, "posts", item.postId));
+      try {
+        const constraints = [
+          where("userId", "==", currentUser.uid),
+          orderBy("createdAt", "desc"),
+          limit(NOTIFICATIONS_PER_PAGE),
+        ];
 
-            if (postSnap.exists()) {
-              item.postImage = postSnap.data().imageUrl;
-              item.postAvailable = true;
+        if (!reset && lastDocRef.current) {
+          constraints.push(startAfter(lastDocRef.current));
+        }
+
+        const q = query(collection(db, "notifications"), ...constraints);
+        const snapshot = await getDocs(q);
+
+        const newItems = await Promise.all(
+          snapshot.docs.map(async (notificationDoc) => {
+            const item = {
+              id: notificationDoc.id,
+              ...notificationDoc.data(),
+            };
+
+            if (item.postId) {
+              try {
+                const postSnap = await getDoc(doc(db, "posts", item.postId));
+
+                if (postSnap.exists()) {
+                  item.postImage = postSnap.data().imageUrl;
+                  item.postAvailable = true;
+                } else {
+                  item.postAvailable = false;
+                }
+              } catch (_error) {
+                item.postAvailable = false;
+              }
             } else {
               item.postAvailable = false;
             }
-          } catch (_error) {
-            item.postAvailable = false;
-          }
 
-          return item;
-        }),
-      );
+            return item;
+          }),
+        );
 
-      setNotifications(data);
-    } catch (error) {
-      console.log("Error loading notifications:", error);
+        const isBatchFull = snapshot.docs.length === NOTIFICATIONS_PER_PAGE;
+        hasMoreRef.current = isBatchFull;
+        setHasMore(isBatchFull);
+
+        if (snapshot.docs.length > 0) {
+          lastDocRef.current = snapshot.docs[snapshot.docs.length - 1];
+        }
+
+        setNotifications((current) => {
+          if (reset) return newItems;
+          const existingIds = new Set(current.map((item) => item.id));
+          const filteredNew = newItems.filter(
+            (item) => !existingIds.has(item.id),
+          );
+          return [...current, ...filteredNew];
+        });
+      } catch (error) {
+        console.log("Error loading notifications:", error);
+      } finally {
+        isLoadingRef.current = false;
+        setLoading(false);
+        setLoadingMore(false);
+      }
+    },
+    [currentUser],
+  );
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await loadNotifications(true);
     } finally {
-      setLoading(false);
+      setRefreshing(false);
     }
-  }, [currentUser]);
+  }, [loadNotifications]);
 
   useEffect(() => {
-    loadNotifications();
+    loadNotifications(true);
   }, [loadNotifications]);
 
   useEffect(() => {
@@ -173,7 +236,16 @@ export default function Notification() {
                   ],
                 },
               ]}
+              contentContainerStyle={styles.feedContent}
               showsVerticalScrollIndicator={false}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={handleRefresh}
+                  colors={["#5F9C76"]}
+                  tintColor="#5F9C76"
+                />
+              }
             >
               <View style={styles.sectionHeader}>
                 <Text style={styles.sectionTitle}>Recent activity</Text>
@@ -234,6 +306,48 @@ export default function Notification() {
                   )}
                 </TouchableOpacity>
               ))}
+
+              {/* Load More Button */}
+              {notifications.length > 0 && hasMore && (
+                <View style={styles.loadMoreContainer}>
+                  <TouchableOpacity
+                    style={styles.loadMoreButton}
+                    activeOpacity={0.8}
+                    disabled={loadingMore}
+                    onPress={() => loadNotifications(false)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Load more notifications"
+                  >
+                    {loadingMore ? (
+                      <ActivityIndicator size="small" color="#2E6944" />
+                    ) : (
+                      <>
+                        <Ionicons
+                          name="chevron-down-circle-outline"
+                          size={18}
+                          color="#2E6944"
+                        />
+                        <Text style={styles.loadMoreText}>Load more</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* All caught up indicator */}
+              {notifications.length > 0 && !hasMore && (
+                <View style={styles.endOfListContainer}>
+                  <Ionicons
+                    name="checkmark-circle-outline"
+                    size={16}
+                    color="#8FA396"
+                    style={{ marginBottom: 4 }}
+                  />
+                  <Text style={styles.endOfListText}>
+                    You{"'"}re all caught up
+                  </Text>
+                </View>
+              )}
 
               {notifications.length === 0 && (
                 <View style={styles.emptyState}>
@@ -310,6 +424,47 @@ const styles = StyleSheet.create({
   feed: {
     flex: 1,
     paddingHorizontal: 16,
+  },
+  feedContent: {
+    paddingBottom: 24,
+  },
+  loadMoreContainer: {
+    paddingVertical: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  loadMoreButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#E8F3EC",
+    borderWidth: 1,
+    borderColor: "#C2DEC9",
+    paddingVertical: 10,
+    paddingHorizontal: 24,
+    borderRadius: 22,
+    minWidth: 140,
+    ...Platform.select({
+      web: {
+        cursor: "pointer",
+      },
+    }),
+  },
+  loadMoreText: {
+    color: "#2E6944",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  endOfListContainer: {
+    paddingVertical: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  endOfListText: {
+    color: "#8FA396",
+    fontSize: 12,
+    fontWeight: "600",
   },
   notificationCard: {
     flexDirection: "row",

@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -19,6 +20,7 @@ import {
     getWasteCategoryColor,
 } from "../../../constants/wasteCategories";
 import { db } from "../../../firebaseConfig";
+import { getNameInitials } from "../../../utils/getNameInitials";
 import { hideBadWords } from "../../../utils/hideBadWords";
 
 const STATUS_DETAILS = {
@@ -89,6 +91,19 @@ const formatRelativeTime = (timestamp, now) => {
   return `${dateLabel} • ${relativeTime}`;
 };
 
+const getTimestampMillis = (timestamp) => {
+  if (!timestamp) return 0;
+
+  const date =
+    typeof timestamp.toDate === "function"
+      ? timestamp.toDate()
+      : typeof timestamp.seconds === "number"
+        ? new Date(timestamp.seconds * 1000)
+        : new Date(timestamp);
+
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+};
+
 export default function AssessmentList({
   status,
   searchText = "",
@@ -96,11 +111,13 @@ export default function AssessmentList({
   enabledFilters = [],
   setSelectedPost,
 }) {
+  const router = useRouter();
   const { width } = useWindowDimensions();
   const [posts, setPosts] = useState([]);
   const [authorPoints, setAuthorPoints] = useState({});
   const [now, setNow] = useState(() => Date.now());
   const [volunteerPostMap, setVolunteerPostMap] = useState({});
+  const [completedEvents, setCompletedEvents] = useState([]);
 
   useEffect(() => {
     const postsQuery = query(
@@ -130,15 +147,29 @@ export default function AssessmentList({
       collection(db, "volunteer_posts"),
       (snapshot) => {
         const map = {};
+        const events = [];
         snapshot.forEach((doc) => {
           const data = doc.data();
           if (data.postId) {
             map[data.postId] = doc.id;
+          } else if (
+            data.eventType &&
+            ["completed", "cleaned"].includes(
+              String(data.status || "").toLowerCase(),
+            )
+          ) {
+            events.push({
+              id: doc.id,
+              ...data,
+              status: "cleaned",
+              isVolunteerEvent: true,
+            });
           }
         });
         setVolunteerPostMap(map);
+        setCompletedEvents(events);
       },
-      (error) => console.log("Unable to load volunteer posts map:", error),
+      (error) => console.error("Unable to load volunteer events:", error),
     );
     const timer = setInterval(() => setNow(Date.now()), 30 * 1000);
 
@@ -188,6 +219,57 @@ export default function AssessmentList({
     });
   }, [enabledFilters, filters, posts, searchText, status]);
 
+  const filteredEvents = useMemo(() => {
+    if (status.toLowerCase() !== "cleaned") return [];
+
+    const keyword = searchText.toLowerCase().trim();
+    return completedEvents.filter((event) => {
+      const matchesSearch =
+        !keyword ||
+        event.title?.toLowerCase().includes(keyword) ||
+        event.description?.toLowerCase().includes(keyword) ||
+        event.locationName?.toLowerCase().includes(keyword);
+      const matchesFilters = enabledFilters.every((filterName) => {
+        const filterValue = (filters[filterName] || "").toLowerCase().trim();
+        if (!filterValue) return true;
+        if (filterName === "resident") return false;
+        if (filterName === "purok") {
+          return (
+            getPostPurok(event) === normalizePurok(filterValue).toLowerCase()
+          );
+        }
+        if (filterName === "barangay") {
+          return getPostBarangay(event).includes(filterValue);
+        }
+        return true;
+      });
+
+      return matchesSearch && matchesFilters;
+    });
+  }, [completedEvents, enabledFilters, filters, searchText, status]);
+
+  const sortedItems = useMemo(
+    () =>
+      [...filteredPosts, ...filteredEvents].sort((firstItem, secondItem) => {
+        const firstCompletion = firstItem.isVolunteerEvent
+          ? firstItem.completedAt || firstItem.createdAt
+          : firstItem.cleanedAt ||
+            firstItem.completedAt ||
+            firstItem.createdAt;
+        const secondCompletion = secondItem.isVolunteerEvent
+          ? secondItem.completedAt || secondItem.createdAt
+          : secondItem.cleanedAt ||
+            secondItem.completedAt ||
+            secondItem.createdAt;
+        return (
+          getTimestampMillis(secondCompletion) -
+          getTimestampMillis(firstCompletion)
+        );
+      }),
+    [filteredEvents, filteredPosts],
+  );
+
+  const hasVisibleItems = sortedItems.length > 0;
   const cardWidth = width < 850 ? "100%" : width < 1250 ? "48.5%" : "32%";
   const statusDetails =
     STATUS_DETAILS[status.toLowerCase()] || STATUS_DETAILS.pending;
@@ -198,7 +280,9 @@ export default function AssessmentList({
         <View>
           <Text style={styles.title}>{statusDetails.label}</Text>
           <Text style={styles.resultCount}>
-            {filteredPosts.length} report{filteredPosts.length === 1 ? "" : "s"}
+            {status.toLowerCase() === "cleaned"
+              ? `${filteredPosts.length} report${filteredPosts.length === 1 ? "" : "s"} · ${filteredEvents.length} event${filteredEvents.length === 1 ? "" : "s"}`
+              : `${filteredPosts.length} report${filteredPosts.length === 1 ? "" : "s"}`}
           </Text>
         </View>
       </View>
@@ -207,12 +291,106 @@ export default function AssessmentList({
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {filteredPosts.length ? (
+        {hasVisibleItems ? (
           <View style={styles.postContainer}>
-            {filteredPosts.map((post) => {
+            {sortedItems.map((item) => {
+              if (item.isVolunteerEvent) {
+                const event = item;
+                const completedAt = event.completedAt || event.createdAt;
+
+                return (
+                  <TouchableOpacity
+                    key={`event-${event.id}`}
+                    style={[styles.postCard, { width: cardWidth }]}
+                    activeOpacity={0.85}
+                    onPress={() =>
+                      router.push({
+                        pathname:
+                          "/admin/assessments/post_view/VolunteerPostDetail",
+                        params: { volunteerId: event.id },
+                      })
+                    }
+                  >
+                    <View style={styles.eventHeader}>
+                      <View style={styles.eventIcon}>
+                        <Ionicons
+                          name="calendar-outline"
+                          size={20}
+                          color="#276344"
+                        />
+                      </View>
+                      <View style={styles.eventTitleContainer}>
+                        <Text style={styles.profileName} numberOfLines={1}>
+                          {hideBadWords(event.title || "Volunteer event")}
+                        </Text>
+                        <Text style={styles.postedAt}>
+                          Completed {formatRelativeTime(completedAt, now)}
+                        </Text>
+                      </View>
+                      <View style={styles.eventTag}>
+                        <Text style={styles.eventTagText}>Event</Text>
+                      </View>
+                    </View>
+                    <View style={styles.tagsRow}>
+                      <View
+                        style={[
+                          styles.statusTag,
+                          { backgroundColor: STATUS_DETAILS.cleaned.color },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.statusText,
+                            { color: STATUS_DETAILS.cleaned.textColor },
+                          ]}
+                        >
+                          Cleaned
+                        </Text>
+                      </View>
+                    </View>
+                    {event.locationName ? (
+                      <View style={styles.locationRow}>
+                        <Image
+                          source={require("../../../assets/images/location.png")}
+                          style={styles.locationIcon}
+                        />
+                        <Text style={styles.locationText} numberOfLines={1}>
+                          {formatLocationWithPurok(
+                            event.locationName,
+                            event.purok,
+                          )}
+                        </Text>
+                      </View>
+                    ) : null}
+                    {event.imageUrl ? (
+                      <View style={styles.imageContainer}>
+                        <Image
+                          source={{ uri: event.imageUrl }}
+                          style={styles.image}
+                          resizeMode="cover"
+                        />
+                      </View>
+                    ) : null}
+                    {event.description ? (
+                      <Text style={styles.postDescription} numberOfLines={3}>
+                        {hideBadWords(event.description)}
+                      </Text>
+                    ) : null}
+                    <Text style={styles.eventOpenDetails}>
+                      View event details ›
+                    </Text>
+                  </TouchableOpacity>
+                );
+              }
+
+              const post = item;
               const postStatus =
                 STATUS_DETAILS[(post.status || "pending").toLowerCase()] ||
                 STATUS_DETAILS.pending;
+              const displayDate =
+                post.status?.toLowerCase() === "cleaned"
+                  ? post.cleanedAt || post.completedAt || post.createdAt
+                  : post.createdAt;
 
               return (
                 <TouchableOpacity
@@ -222,10 +400,13 @@ export default function AssessmentList({
                   onPress={() => setSelectedPost(post)}
                 >
                   <View style={styles.authorRow}>
-                    <Image
-                      source={require("../../../assets/images/profile2.png")}
-                      style={styles.profileImage}
-                    />
+                    <View style={styles.profileAvatar}>
+                      <Text style={styles.profileAvatarText}>
+                        {getNameInitials(
+                          `${post.firstName || ""} ${post.lastName || ""}`,
+                        )}
+                      </Text>
+                    </View>
                     <View style={styles.authorDetails}>
                       <View style={styles.authorHeader}>
                         <Text style={styles.profileName} numberOfLines={1}>
@@ -251,7 +432,7 @@ export default function AssessmentList({
                           </View>
                         )}
                         <Text style={styles.postedAt}>
-                          {formatRelativeTime(post.createdAt, now)}
+                          {formatRelativeTime(displayDate, now)}
                         </Text>
                       </View>
 
@@ -353,9 +534,10 @@ export default function AssessmentList({
           </View>
         ) : (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>No reports found</Text>
+            <Text style={styles.emptyTitle}>No {statusDetails.label.toLowerCase()} items found</Text>
             <Text style={styles.emptyText}>
-              Reports matching this status and search will appear here.
+              Reports and completed events matching this status and search will
+              appear here.
             </Text>
           </View>
         )}
@@ -401,8 +583,51 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 2,
   },
+  eventHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+  },
+  eventIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#EAF4ED",
+  },
+  eventTitleContainer: { flex: 1, minWidth: 0 },
+  eventTag: {
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: "#EAF4ED",
+  },
+  eventTagText: { color: "#205A38", fontSize: 10, fontWeight: "700" },
+  eventDate: { color: "#63756a", fontSize: 11, alignSelf: "center" },
+  eventOpenDetails: {
+    color: "#276344",
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 10,
+    textAlign: "right",
+  },
   authorRow: { flexDirection: "row", alignItems: "flex-start" },
-  profileImage: { width: 42, height: 42, borderRadius: 21, marginRight: 10 },
+  profileAvatar: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    marginRight: 10,
+    backgroundColor: "#5F9C76",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  profileAvatarText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "700",
+  },
   authorDetails: { flex: 1 },
   authorHeader: {
     flexDirection: "row",

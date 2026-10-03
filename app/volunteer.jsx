@@ -18,6 +18,22 @@ import {
 import Navbar from "../components/navbar";
 import { db } from "../firebaseConfig";
 
+const formatMeetingDate = (value) => {
+  if (!value) return "";
+
+  const date =
+    typeof value?.toDate === "function"
+      ? value.toDate()
+      : new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return String(value);
+
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+};
+
 export default function Volunteer() {
   const router = useRouter();
   const [activities, setActivities] = useState([]);
@@ -35,7 +51,13 @@ export default function Volunteer() {
       const snapshot = await getDocs(collection(db, "volunteer_posts"));
       const volunteerActivities = snapshot.docs
         .map((activity) => ({ id: activity.id, ...activity.data() }))
-        .filter((activity) => activity.status === "open");
+        .filter((activity) => {
+          const status = String(activity.status || "").toLowerCase();
+          const isCompletedEvent =
+            Boolean(activity.eventType) &&
+            ["completed", "cleaned"].includes(status);
+          return status === "open" && !isCompletedEvent;
+        });
 
       const checkedActivities = await Promise.all(
         volunteerActivities.map(async (activity) => {
@@ -141,6 +163,8 @@ export default function Volunteer() {
                 <Text style={styles.emptyText}>{loadError}</Text>
               ) : null}
               {filteredActivities.map((activity) => {
+                const isStandaloneEvent =
+                  !activity.postId && Boolean(activity.eventType);
                 const memberCount = Number.isFinite(
                   Number(activity.joinedCount),
                 )
@@ -165,16 +189,36 @@ export default function Volunteer() {
                         <Text style={styles.cardTitle} numberOfLines={1}>
                           {activity.title || "Volunteer Activity"}
                         </Text>
-                        <View style={styles.badge}>
-                          <Text style={styles.badgeText}>
-                            {memberCount}/{maxVolunteers}
-                          </Text>
+                        <View style={styles.cardBadges}>
+                          {isStandaloneEvent && (
+                            <View style={styles.eventBadge}>
+                              <Text style={styles.eventBadgeText}>Event</Text>
+                            </View>
+                          )}
+                          <View style={styles.badge}>
+                            <Text style={styles.badgeText}>
+                              {memberCount}/{maxVolunteers}
+                            </Text>
+                          </View>
                         </View>
                       </View>
 
                       <Text style={styles.cardDescription} numberOfLines={2}>
                         {activity.description || "No description provided."}
                       </Text>
+
+                      {isStandaloneEvent && activity.meetingDate ? (
+                        <View style={styles.eventDateRow}>
+                          <Ionicons
+                            name="calendar-outline"
+                            size={13}
+                            color="#64748B"
+                          />
+                          <Text style={styles.eventDateText}>
+                            {formatMeetingDate(activity.meetingDate)}
+                          </Text>
+                        </View>
+                      ) : null}
 
                       <View style={styles.cardFooter}>
                         <View style={styles.locationRow}>
@@ -187,7 +231,9 @@ export default function Volunteer() {
                             {activity.locationName || "Location not specified"}
                           </Text>
                         </View>
-                        <Text style={styles.viewLink}>View details ›</Text>
+                        <Text style={styles.viewLink}>
+                          {isStandaloneEvent ? "Join event ›" : "View details ›"}
+                        </Text>
                       </View>
                     </View>
 
@@ -318,6 +364,11 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: 8,
   },
+  cardBadges: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
   cardTitle: {
     flex: 1,
     fontSize: 15,
@@ -338,11 +389,33 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#5F9C76",
   },
+  eventBadge: {
+    backgroundColor: "#EAF4ED",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+  },
+  eventBadgeText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#276344",
+  },
   cardDescription: {
     fontSize: 13,
     color: "#64748B",
     lineHeight: 18,
     marginTop: 4,
+  },
+  eventDateRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginTop: 6,
+  },
+  eventDateText: {
+    color: "#64748B",
+    fontSize: 11,
+    fontWeight: "500",
   },
   cardFooter: {
     flexDirection: "row",

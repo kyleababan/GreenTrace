@@ -22,6 +22,7 @@ import {
 } from "react-native";
 import Navbar from "../components/navbar";
 import { db } from "../firebaseConfig";
+import { getNameInitials } from "../utils/getNameInitials";
 
 const displayName = (user) => {
   const name = [user?.firstName, user?.lastName].filter(Boolean).join(" ");
@@ -492,10 +493,13 @@ export default function RankScreen() {
                     {index + 1}
                   </Text>
                 </View>
-                <Image
-                  source={require("../assets/images/profile2.png")}
-                  style={styles.avatar}
-                />
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>
+                    {getNameInitials(
+                      `${user.firstName || ""} ${user.lastName || ""}`,
+                    )}
+                  </Text>
+                </View>
                 <View style={styles.userDetails}>
                   <View style={styles.nameRow}>
                     <Text style={styles.userName}>{displayName(user)}</Text>
@@ -685,7 +689,16 @@ const styles = StyleSheet.create({
   topRankBadge: { backgroundColor: "#DFF0E4" },
   rankNumber: { color: "#66756B", fontWeight: "700", fontSize: 13 },
   topRankNumber: { color: "#2F7D4A" },
-  avatar: { width: 44, height: 44, borderRadius: 22, marginRight: 11 },
+  avatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    marginRight: 11,
+    backgroundColor: "#5F9C76",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarText: { color: "#FFFFFF", fontSize: 14, fontWeight: "700" },
   userDetails: { flex: 1 },
   nameRow: {
     flexDirection: "row",
