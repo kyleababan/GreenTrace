@@ -3,52 +3,53 @@ import { Image as ExpoImage } from "expo-image";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Animated,
-  FlatList,
-  Image,
-  PanResponder,
-  Platform,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  useWindowDimensions,
-  View,
+    ActivityIndicator,
+    Animated,
+    FlatList,
+    Image,
+    PanResponder,
+    Platform,
+    SafeAreaView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    useWindowDimensions,
+    View,
 } from "react-native";
 import BadgeWithDetails from "../components/BadgeWithDetails";
 import Navbar from "../components/navbar";
 import PostLocationModal from "../components/PostLocationModal";
+import ScheduleCalendarModal from "../components/ScheduleCalendarModal";
 import {
-  BADGES,
-  getUserContributionStats,
-  getVolunteerId,
-  isBadgeEarned,
+    BADGES,
+    getUserContributionStats,
+    getVolunteerId,
+    isBadgeEarned,
 } from "../constants/badges";
 import { formatLocationWithPurok } from "../constants/locationFormat";
 import {
-  formatWasteLabel,
-  getWasteCategoryColor,
+    formatWasteLabel,
+    getWasteCategoryColor,
 } from "../constants/wasteCategories";
 import { hideBadWords } from "../utils/hideBadWords";
 
 import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  getDoc,
-  getDocs,
-  increment,
-  limit,
-  onSnapshot,
-  orderBy,
-  query,
-  serverTimestamp,
-  startAfter,
-  updateDoc,
-  where,
+    addDoc,
+    collection,
+    deleteDoc,
+    doc,
+    getDoc,
+    getDocs,
+    increment,
+    limit,
+    onSnapshot,
+    orderBy,
+    query,
+    serverTimestamp,
+    startAfter,
+    updateDoc,
+    where,
 } from "firebase/firestore";
 
 import { auth, db } from "../firebaseConfig";
@@ -94,6 +95,7 @@ export default function Home() {
   const [posts, setPosts] = useState([]);
   const [search, setSearch] = useState("");
   const [selectedLocationPost, setSelectedLocationPost] = useState(null);
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [userReactions, setUserReactions] = useState({});
   const animationsRef = useRef(new Map());
   const postListenersRef = useRef(new Map());
@@ -402,6 +404,11 @@ export default function Home() {
 
   const handleAnnouncementPress = (slide) => {
     if (!slide) return;
+
+    if (slide.type === "schedule") {
+      setShowScheduleModal(true);
+      return;
+    }
 
     if (slide.type === "rank") {
       router.push("/rank");
@@ -952,17 +959,40 @@ export default function Home() {
                               <Text style={styles.announcementLabel}>
                                 {label}
                               </Text>
-                              <TouchableOpacity
-                                activeOpacity={0.8}
-                                hitSlop={{
-                                  top: 8,
-                                  bottom: 8,
-                                  left: 8,
-                                  right: 8,
-                                }}
-                                onPress={() => handleAnnouncementPress(slide)}
-                                style={styles.announcementActionButton}
-                              ></TouchableOpacity>
+                              {slide.type === "schedule" ? (
+                                <TouchableOpacity
+                                  activeOpacity={0.7}
+                                  onPress={() => setShowScheduleModal(true)}
+                                  style={styles.seeAllScheduleHeaderBtn}
+                                  hitSlop={{
+                                    top: 8,
+                                    bottom: 8,
+                                    left: 8,
+                                    right: 8,
+                                  }}
+                                >
+                                  <Ionicons
+                                    name="calendar-outline"
+                                    size={12}
+                                    color="#1E5030"
+                                  />
+                                  <Text style={styles.seeAllScheduleHeaderText}>
+                                    See All
+                                  </Text>
+                                </TouchableOpacity>
+                              ) : (
+                                <TouchableOpacity
+                                  activeOpacity={0.8}
+                                  hitSlop={{
+                                    top: 8,
+                                    bottom: 8,
+                                    left: 8,
+                                    right: 8,
+                                  }}
+                                  onPress={() => handleAnnouncementPress(slide)}
+                                  style={styles.announcementActionButton}
+                                />
+                              )}
                             </View>
 
                             <Text style={styles.announcementTitle}>
@@ -1346,6 +1376,12 @@ export default function Home() {
         visible={Boolean(selectedLocationPost)}
         onClose={() => setSelectedLocationPost(null)}
       />
+
+      {/* SCHEDULE CALENDAR MODAL */}
+      <ScheduleCalendarModal
+        visible={showScheduleModal}
+        onClose={() => setShowScheduleModal(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -1495,6 +1531,20 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     marginTop: 8,
     textDecorationLine: "underline",
+  },
+  seeAllScheduleHeaderBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#E2F0E6",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  seeAllScheduleHeaderText: {
+    color: "#2A593A",
+    fontSize: 11,
+    fontWeight: "700",
   },
   announcementFooter: {
     flexDirection: "row",

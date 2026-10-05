@@ -69,7 +69,9 @@ const formatPostedAt = (timestamp) => {
 
 const isPostEditLocked = (postStatus) =>
   ["ongoing", "on-going", "cleaned"].includes(
-    String(postStatus || "").trim().toLowerCase(),
+    String(postStatus || "")
+      .trim()
+      .toLowerCase(),
   );
 
 export default function EditPost() {
@@ -391,10 +393,10 @@ export default function EditPost() {
       return;
     }
 
-    if (asset.fileSize && asset.fileSize > 2.5 * 1024 * 1024) {
+    if (asset.fileSize && asset.fileSize > 10 * 1024 * 1024) {
       setErrors((previous) => ({
         ...previous,
-        image: "Image must be smaller than 2.5 MB.",
+        image: "Image must be smaller than 10 MB.",
       }));
       return;
     }
@@ -678,7 +680,9 @@ export default function EditPost() {
             </View>
           </View>
           <View style={styles.lockedPostState}>
-            <Text style={styles.lockedPostTitle}>This report can’t be changed</Text>
+            <Text style={styles.lockedPostTitle}>
+              This report can’t be changed
+            </Text>
             <Text style={styles.lockedPostMessage}>
               Reports marked On-going or Cleaned can’t be edited or deleted.
             </Text>

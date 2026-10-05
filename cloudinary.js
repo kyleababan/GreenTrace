@@ -1,7 +1,7 @@
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { Platform } from "react-native";
 
-const MAX_BYTES = 2.5 * 1024 * 1024; // 2.5 MB
+const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 
 // ---------------------------------------------------------------------------
 // Native (iOS / Android) — compress with expo-image-manipulator
@@ -28,7 +28,7 @@ async function compressNative(uri) {
   }
 
   throw new Error(
-    "Image is too large to compress below 2.5 MB. Please choose a smaller photo.",
+    "Image is too large to compress below 10 MB. Please choose a smaller photo.",
   );
 }
 
@@ -131,7 +131,7 @@ async function compressWeb(image) {
     URL.revokeObjectURL(objectUrl);
   }
 
-  // 4. Try quality levels to get under MAX_BYTES (2.5 MB)
+  // 4. Try quality levels to get under MAX_BYTES (10 MB)
   for (const quality of qualities) {
     const outputBlob = await new Promise((resolve) =>
       canvas.toBlob(resolve, "image/jpeg", quality),
@@ -164,13 +164,13 @@ async function compressWeb(image) {
 
 // ---------------------------------------------------------------------------
 // Main upload function
-// Flow: Compress (≤ 2.5MB) -> Moderate & Classify with AI FIRST -> Safe? Upload : NSFW? Block!
+// Flow: Compress (≤ 10MB) -> Moderate & Classify with AI FIRST -> Safe? Upload : NSFW? Block!
 // ---------------------------------------------------------------------------
 export const uploadToCloudinary = async (image, options = {}) => {
   let fileToUpload;
   let base64Data = "";
 
-  // 1. Compress image to stay under 2.5 MB & get base64
+  // 1. Compress image to stay under 10 MB & get base64
   if (Platform.OS === "web") {
     const compressed = await compressWeb(image);
     fileToUpload = compressed.blob;
@@ -252,16 +252,26 @@ async function verifyGeminiModerationAndClassification(
   }
 
   const prompt = `You are an AI assistant for GreenTrace, a civic public waste reporting and community sanitation app.
-Analyze this user-submitted photo.
+Analyze this user-submitted photo carefully.
 
-STEP 1: STRICT CONTENT MODERATION
+STEP 1: STRICT CONTENT MODERATION (NSFW / HARMFUL)
 Reject any image that contains:
 - NSFW, adult content, nudity, partial nudity, underwear, lingerie, swimwear/bikini posing, or sexually suggestive/provocative content.
-- Graphic violence, weapons, blood, gore, or hate symbols.
-- Selfies, personal photos, or images completely unrelated to public waste, community concerns, or environmental issues.
-If unsafe: set "isSafe": false, and describe why in "reason".
+- Graphic violence, weapons, blood, gore, hate symbols, or illegal activities.
+If any of these are present:
+Set "isSafe": false, "rejectType": "nsfw", "hasWaste": false, "classification": null, and specify why in "reason".
 
-STEP 2: WASTE CLASSIFICATION (Only if isSafe is true)
+STEP 2: WASTE VERIFICATION (MANDATORY REQUIREMENT)
+GreenTrace is STRICTLY for reporting real-world physical waste, litter, illegal dumping, garbage piles, or community sanitation problems.
+Reject any photo that does NOT clearly depict actual real-world waste, including:
+- Clean landscapes, clean rivers, clean beaches, clean parks, or scenic nature without visible trash or pollution.
+- Anime, manga, cartoons, illustrations, digital drawings, CGI, video game captures, or art wallpapers.
+- Screenshots, memes, text graphics, logos, posters, or digital graphics.
+- Selfies, portraits of people, pets, animals, food dishes, vehicles, or clean indoor room interiors without waste.
+If no actual physical waste is clearly visible, or if the image is anime/drawing/graphic/clean scenery:
+Set "isSafe": false, "rejectType": "no_waste", "hasWaste": false, "classification": null, and specify why in "reason" (e.g., "The image does not contain visible waste (scenic landscape / anime illustration).").
+
+STEP 3: WASTE CLASSIFICATION (Only if isSafe is true AND hasWaste is true)
 Classify the visible waste into ONE of these 9 categories and their subcategories:
 1. Plastic (Subcategories: Plastic bottle, Plastic bag, Plastic food container, Plastic wrapper/packaging, Plastic cup, Other plastic)
 2. Paper (Subcategories: Cardboard, Paper, Newspaper/magazine, Paper packaging, Other paper)
@@ -271,18 +281,20 @@ Classify the visible waste into ONE of these 9 categories and their subcategorie
 6. E-Waste (Subcategories: Electronics, Cables/wires, Batteries, Computer/phone parts, Other e-waste)
 7. Construction Waste (Subcategories: Concrete, Bricks/tiles, Wood construction material, Other construction waste)
 8. Mixed Waste (Use this if multiple waste types or subcategories are present, or more than 1 category/subcategory visible. subcategory MUST be null.)
-9. Other/Unknown (Use this if the object does not fit the categories above, image is too unclear, or confidence < 0.60. subcategory MUST be null.)
+9. Other/Unknown (Use this ONLY if there is actual physical waste present, but it does not fit the categories above or cannot be identified. subcategory MUST be null.)
 
 Rules:
-- Do NOT classify based only on color. Use visible characteristics and likely material.
-- If the subcategories consist of more than 1 (or multiple different waste materials are present), you MUST classify as "Mixed Waste" with "subcategory": null.
-- If confidence is below 0.60, classify as "Other/Unknown" or "Mixed Waste".
-- Provide a confidence score between 0.0 and 1.0.
+- If no waste is visible, or if confidence that real waste is present is below 0.50, you MUST reject the photo (set "isSafe": false, "rejectType": "no_waste", "hasWaste": false).
+- Do NOT classify clean landscapes, anime, or drawings as "Other/Unknown" — they MUST be rejected under STEP 2.
+- If multiple waste types are present, classify as "Mixed Waste" with "subcategory": null.
+- Provide a confidence score between 0.0 and 1.0 for the classification.
 
 Respond strictly in valid JSON format:
 {
   "isSafe": true,
-  "reason": "Brief explanation if unsafe, or short rationale of waste found",
+  "rejectType": null,
+  "hasWaste": true,
+  "reason": "Brief description of the waste found, or explanation if rejected",
   "classification": {
     "category": "Plastic",
     "subcategory": "Plastic bottle",
@@ -290,7 +302,7 @@ Respond strictly in valid JSON format:
     "reason": "Clear visible transparent plastic bottle."
   }
 }
-(If isSafe is false, "classification" should be null).`;
+(If isSafe is false or hasWaste is false, "classification" must be null, and "rejectType" must be either "nsfw" or "no_waste").`;
 
   try {
     const response = await fetch(
@@ -334,21 +346,52 @@ Respond strictly in valid JSON format:
         .trim();
       const parsed = JSON.parse(cleanJson);
 
-      if (parsed.isSafe === false) {
-        // Flagged! Reject and block the post immediately.
-        throw new Error(
-          "Image rejected: " +
-            (parsed.reason ||
-              "Inappropriate or NSFW content was detected. Please choose a different photo."),
-        );
+      // 1. Content moderation & Waste presence check
+      if (parsed.isSafe === false || parsed.hasWaste === false) {
+        if (
+          parsed.rejectType === "no_waste" ||
+          (!parsed.rejectType && parsed.hasWaste === false)
+        ) {
+          // Non-waste rejection (friendly error, does NOT trigger NSFW ban strike)
+          throw new Error(
+            "No waste detected: " +
+              (parsed.reason ||
+                "Please upload a clear photo showing actual waste, litter, or garbage."),
+          );
+        } else {
+          // Inappropriate or NSFW content (triggers warning/strike policy)
+          throw new Error(
+            "Image rejected: " +
+              (parsed.reason ||
+                "Inappropriate or NSFW content was detected. Please choose a different photo."),
+          );
+        }
       }
 
+      // 2. Classification validation
       if (parsed.classification) {
-        // Normalize classification
         let { category, subcategory, confidence, reason } =
           parsed.classification;
 
-        // Enforce confidence threshold >= 0.60
+        // If confidence is below 0.50, reject as not clearly identifiable waste
+        if (typeof confidence === "number" && confidence < 0.5) {
+          throw new Error(
+            "No waste detected: The photo does not clearly show recognizable waste. Please upload a clear photo of the waste issue.",
+          );
+        }
+
+        // If classified as Other/Unknown and confidence < 0.60
+        if (
+          category === "Other/Unknown" &&
+          typeof confidence === "number" &&
+          confidence < 0.6
+        ) {
+          throw new Error(
+            "No waste detected: Could not clearly identify waste in this photo. Please upload a clear photo of the waste issue.",
+          );
+        }
+
+        // Enforce confidence threshold >= 0.60 for specific categories
         if (typeof confidence === "number" && confidence < 0.6) {
           if (category !== "Mixed Waste") {
             category = "Other/Unknown";
@@ -365,13 +408,20 @@ Respond strictly in valid JSON format:
               : 0.8,
           reason: reason || "",
         };
+      } else {
+        throw new Error(
+          "No waste detected: Please upload a clear photo showing actual waste, litter, or garbage.",
+        );
       }
     }
 
     return null;
   } catch (err) {
-    // If the error was a moderation rejection, bubble it up to block post creation!
-    if (err.message?.startsWith("Image rejected:")) {
+    // If the error was a moderation rejection or no-waste rejection, bubble it up to block post creation!
+    if (
+      err.message?.startsWith("Image rejected:") ||
+      err.message?.startsWith("No waste detected:")
+    ) {
       throw err;
     }
     console.warn(

@@ -1,21 +1,21 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Link, useRouter } from "expo-router";
 import {
-  sendPasswordResetEmail,
-  signInWithEmailAndPassword,
-  signOut,
+    sendPasswordResetEmail,
+    signInWithEmailAndPassword,
+    signOut,
 } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { useState } from "react";
 import {
-  Image,
-  Modal,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    Image,
+    Modal,
+    SafeAreaView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 
 import FormError from "../components/form-error";
@@ -50,11 +50,17 @@ export default function Login() {
 
   const updateField = (field, value, setter) => {
     setter(value);
-    setFieldErrors((current) => ({
-      ...current,
-      [field]:
-        field === "email" ? validateEmail(value) : validatePassword(value),
-    }));
+    const errorMsg =
+      field === "email" ? validateEmail(value) : validatePassword(value);
+    setFieldErrors((current) => {
+      const next = { ...current };
+      if (errorMsg) {
+        next[field] = errorMsg;
+      } else {
+        delete next[field];
+      }
+      return next;
+    });
     setFormError("");
   };
 
@@ -97,10 +103,11 @@ export default function Login() {
   const loginUser = async () => {
     if (loggingIn) return;
 
-    const nextFieldErrors = {
-      email: validateEmail(email),
-      password: validatePassword(password),
-    };
+    const nextFieldErrors = {};
+    const emailError = validateEmail(email);
+    const passwordError = validatePassword(password);
+    if (emailError) nextFieldErrors.email = emailError;
+    if (passwordError) nextFieldErrors.password = passwordError;
     setFieldErrors(nextFieldErrors);
 
     if (!email.trim()) {
@@ -113,7 +120,7 @@ export default function Login() {
       return;
     }
 
-    if (nextFieldErrors.email || nextFieldErrors.password) {
+    if (emailError || passwordError) {
       setFormError("Please enter a valid email and password.");
       return;
     }
@@ -208,7 +215,7 @@ export default function Login() {
               autoCapitalize="none"
               accessibilityState={{ invalid: Boolean(fieldErrors.email) }}
             />
-            {fieldErrors.email && (
+            {Boolean(fieldErrors.email) && (
               <Text style={styles.fieldError}>{fieldErrors.email}</Text>
             )}
 
@@ -223,7 +230,7 @@ export default function Login() {
               style={[styles.input, fieldErrors.password && styles.inputError]}
               accessibilityState={{ invalid: Boolean(fieldErrors.password) }}
             />
-            {fieldErrors.password && (
+            {Boolean(fieldErrors.password) && (
               <Text style={styles.fieldError}>{fieldErrors.password}</Text>
             )}
 

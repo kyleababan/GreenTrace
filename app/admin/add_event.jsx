@@ -4,16 +4,16 @@ import { useRouter } from "expo-router";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Image,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-  useWindowDimensions,
+    ActivityIndicator,
+    Image,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+    useWindowDimensions,
 } from "react-native";
 import { uploadToCloudinary } from "../../cloudinary";
 import PostLocationModal from "../../components/PostLocationModal";
@@ -128,11 +128,20 @@ export default function AddEvent() {
     );
   };
 
+  const clearError = (field) => {
+    setErrors((current) => {
+      if (!current[field]) return current;
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+  };
+
   const selectLocation = () => {
     if (!manualBarangay || !manualPurok) return;
     setLocation(`${manualBarangay}, Pk. ${manualPurok}`);
     setCoordinates(null);
-    setErrors((current) => ({ ...current, location: "" }));
+    clearError("location");
     setManualLocationVisible(false);
   };
 
@@ -171,16 +180,16 @@ export default function AddEvent() {
       return;
     }
 
-    if (asset.fileSize && asset.fileSize > 2.5 * 1024 * 1024) {
+    if (asset.fileSize && asset.fileSize > 10 * 1024 * 1024) {
       setErrors((current) => ({
         ...current,
-        image: "Image must be smaller than 2.5 MB.",
+        image: "Image must be smaller than 10 MB.",
       }));
       return;
     }
 
     setImage(asset);
-    setErrors((current) => ({ ...current, image: "" }));
+    clearError("image");
   };
 
   const saveEvent = async () => {
@@ -312,10 +321,7 @@ export default function AddEvent() {
           </View>
 
           <View
-            style={[
-              styles.formColumns,
-              isNarrow && styles.formColumnsStacked,
-            ]}
+            style={[styles.formColumns, isNarrow && styles.formColumnsStacked]}
           >
             <View style={styles.formColumn}>
               <Text style={styles.label}>Event image</Text>
@@ -323,7 +329,9 @@ export default function AddEvent() {
                 style={styles.imagePicker}
                 onPress={pickImage}
                 accessibilityRole="button"
-                accessibilityLabel={image ? "Change event image" : "Upload event image"}
+                accessibilityLabel={
+                  image ? "Change event image" : "Upload event image"
+                }
               >
                 {image ? (
                   <Image
@@ -333,11 +341,7 @@ export default function AddEvent() {
                   />
                 ) : (
                   <>
-                    <Ionicons
-                      name="image-outline"
-                      size={42}
-                      color="#5F9C76"
-                    />
+                    <Ionicons name="image-outline" size={42} color="#5F9C76" />
                     <Text style={styles.imagePickerTitle}>Upload image</Text>
                     <Text style={styles.imagePickerHint}>
                       Add a clear photo of the nature or waste activity
@@ -345,7 +349,9 @@ export default function AddEvent() {
                   </>
                 )}
               </TouchableOpacity>
-              {errors.image && <Text style={styles.error}>{errors.image}</Text>}
+              {Boolean(errors.image) && (
+                <Text style={styles.error}>{errors.image}</Text>
+              )}
 
               <View
                 style={[
@@ -376,7 +382,7 @@ export default function AddEvent() {
                       {date || "Choose date"}
                     </Text>
                   </TouchableOpacity>
-                  {errors.date && (
+                  {Boolean(errors.date) && (
                     <Text style={styles.error}>{errors.date}</Text>
                   )}
                 </View>
@@ -399,7 +405,7 @@ export default function AddEvent() {
                       {time || "Choose time"}
                     </Text>
                   </TouchableOpacity>
-                  {errors.time && (
+                  {Boolean(errors.time) && (
                     <Text style={styles.error}>{errors.time}</Text>
                   )}
                 </View>
@@ -445,7 +451,7 @@ export default function AddEvent() {
                   Enter location manually
                 </Text>
               </TouchableOpacity>
-              {errors.location && (
+              {Boolean(errors.location) && (
                 <Text style={styles.error}>{errors.location}</Text>
               )}
             </View>
@@ -459,7 +465,7 @@ export default function AddEvent() {
                 placeholderTextColor="#91A198"
                 style={styles.input}
               />
-              {errors.title && (
+              {Boolean(errors.title) && (
                 <Text style={styles.error}>{errors.title}</Text>
               )}
 
@@ -472,7 +478,7 @@ export default function AddEvent() {
                 multiline
                 style={[styles.input, styles.multilineInput]}
               />
-              {errors.description && (
+              {Boolean(errors.description) && (
                 <Text style={styles.error}>{errors.description}</Text>
               )}
 
@@ -520,7 +526,7 @@ export default function AddEvent() {
                     + Add requirement
                   </Text>
                 </TouchableOpacity>
-                {errors.requirements && (
+                {Boolean(errors.requirements) && (
                   <Text style={styles.error}>{errors.requirements}</Text>
                 )}
               </View>
@@ -536,12 +542,14 @@ export default function AddEvent() {
                 keyboardType="number-pad"
                 style={styles.input}
               />
-              {errors.maxVolunteers && (
+              {Boolean(errors.maxVolunteers) && (
                 <Text style={styles.error}>{errors.maxVolunteers}</Text>
               )}
             </View>
           </View>
-          {errors.form && <Text style={styles.error}>{errors.form}</Text>}
+          {Boolean(errors.form) && (
+            <Text style={styles.error}>{errors.form}</Text>
+          )}
 
           <TouchableOpacity
             style={[styles.saveButton, saving && styles.disabledButton]}
@@ -637,7 +645,7 @@ export default function AddEvent() {
         onSelectLocation={(selected) => {
           setLocation(selected.locationName);
           setCoordinates(selected.coordinates);
-          setErrors((current) => ({ ...current, location: "" }));
+          clearError("location");
           setGpsVisible(false);
         }}
       />
@@ -700,7 +708,7 @@ export default function AddEvent() {
                     style={[styles.dayCell, selected && styles.selectedDay]}
                     onPress={() => {
                       setDate(dateKey);
-                      setErrors((current) => ({ ...current, date: "" }));
+                      clearError("date");
                       setCalendarVisible(false);
                     }}
                   >
@@ -746,7 +754,7 @@ export default function AddEvent() {
                   ]}
                   onPress={() => {
                     setTime(timeOption);
-                    setErrors((current) => ({ ...current, time: "" }));
+                    clearError("time");
                     setTimeVisible(false);
                   }}
                 >

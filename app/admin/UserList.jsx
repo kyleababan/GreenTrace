@@ -1,14 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
-import {
-    collection,
-    getDocs,
-    limit,
-    orderBy,
-    query,
-    startAfter,
-} from "firebase/firestore";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { collection, getDocs, orderBy, query } from "firebase/firestore";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
     ScrollView,
@@ -43,28 +36,20 @@ export default function UserList() {
   const [searchFocused, setSearchFocused] = useState(false);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
+  const [visibleCount, setVisibleCount] = useState(USERS_PER_PAGE);
   const [loadError, setLoadError] = useState("");
-  const lastUserRef = useRef(null);
-  const hasMoreRef = useRef(true);
   const loadingRef = useRef(false);
 
-  const loadUsers = useCallback(async (reset = true) => {
-    if (loadingRef.current || (!reset && !hasMoreRef.current)) return;
+  const loadUsers = useCallback(async () => {
+    if (loadingRef.current) return;
 
     loadingRef.current = true;
-    if (reset) setLoading(true);
-    else setLoadingMore(true);
+    setLoading(true);
     setLoadError("");
 
     try {
-      const constraints = [orderBy("firstName", "asc"), limit(USERS_PER_PAGE)];
-      if (!reset && lastUserRef.current) {
-        constraints.splice(1, 0, startAfter(lastUserRef.current));
-      }
       const snapshot = await getDocs(
-        query(collection(db, "users"), ...constraints),
+        query(collection(db, "users"), orderBy("firstName", "asc")),
       );
       const data = snapshot.docs.map((user) => ({
         id: user.id,
@@ -74,36 +59,57 @@ export default function UserList() {
       data.sort((firstUser, secondUser) =>
         getFullName(firstUser).localeCompare(getFullName(secondUser)),
       );
-      setUsers((currentUsers) => (reset ? data : [...currentUsers, ...data]));
-      lastUserRef.current = snapshot.docs[snapshot.docs.length - 1] || null;
-      hasMoreRef.current = snapshot.docs.length === USERS_PER_PAGE;
-      setHasMore(hasMoreRef.current);
+      setUsers(data);
+      setVisibleCount(USERS_PER_PAGE);
     } catch (error) {
       console.error("Unable to load users:", error);
       setLoadError("Unable to load users. Please try again.");
     } finally {
       loadingRef.current = false;
       setLoading(false);
-      setLoadingMore(false);
     }
   }, []);
 
   useFocusEffect(
     useCallback(() => {
-      loadUsers(true);
+      loadUsers();
     }, [loadUsers]),
   );
+
+  useEffect(() => {
+    setVisibleCount(USERS_PER_PAGE);
+  }, [search]);
 
   const filteredUsers = useMemo(() => {
     const keyword = search.trim().toLowerCase();
     if (!keyword) return users;
 
-    return users.filter((user) =>
-      [user.firstName, user.lastName, user.email, user.cellNumber, user.address]
-        .filter(Boolean)
-        .some((value) => value.toLowerCase().includes(keyword)),
-    );
+    return users.filter((user) => {
+      const fullName = getFullName(user).toLowerCase();
+      return (
+        fullName.includes(keyword) ||
+        [
+          user.firstName,
+          user.lastName,
+          user.email,
+          user.cellNumber,
+          user.address,
+        ]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(keyword))
+      );
+    });
   }, [search, users]);
+
+  const displayedUsers = useMemo(() => {
+    return filteredUsers.slice(0, visibleCount);
+  }, [filteredUsers, visibleCount]);
+
+  const hasMore = visibleCount < filteredUsers.length;
+
+  const handleLoadMore = () => {
+    setVisibleCount((prev) => prev + USERS_PER_PAGE);
+  };
 
   const isTwoColumns = width >= 560;
 
@@ -139,13 +145,19 @@ export default function UserList() {
       ) : loadError ? (
         <View style={styles.stateContainer}>
           <Text style={styles.stateText}>{loadError}</Text>
+          <TouchableOpacity
+            style={[styles.loadMoreButton, { marginTop: 12 }]}
+            onPress={loadUsers}
+          >
+            <Text style={styles.loadMoreText}>Retry</Text>
+          </TouchableOpacity>
         </View>
       ) : (
         <ScrollView
           contentContainerStyle={styles.grid}
           showsVerticalScrollIndicator={false}
         >
-          {filteredUsers.map((user) => {
+          {displayedUsers.map((user) => {
             const name = getFullName(user);
 
             return (
@@ -195,15 +207,14 @@ export default function UserList() {
           {!filteredUsers.length && (
             <Text style={styles.emptyText}>No users match your search.</Text>
           )}
-          {hasMore && !loadingMore && (
+          {hasMore && (
             <TouchableOpacity
               style={styles.loadMoreButton}
-              onPress={() => loadUsers(false)}
+              onPress={handleLoadMore}
             >
               <Text style={styles.loadMoreText}>Load more users</Text>
             </TouchableOpacity>
           )}
-          {loadingMore && <ActivityIndicator color="#5F9C76" />}
         </ScrollView>
       )}
     </View>

@@ -6,15 +6,12 @@ import {
   updatePassword,
 } from "firebase/auth";
 import {
-  collection,
   deleteField,
   doc,
   getDoc,
-  getDocs,
   serverTimestamp,
   setDoc,
   updateDoc,
-  writeBatch,
 } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
@@ -32,46 +29,6 @@ import {
 import { auth, db } from "../../firebaseConfig";
 
 // ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const BARANGAYS = [
-  "Anislag",
-  "Anopog",
-  "Binabag",
-  "Buhingtubig",
-  "Busay",
-  "Butong",
-  "Cabiangon",
-  "Camugao",
-  "Duangan",
-  "Guimbawian",
-  "Lamac",
-  "Lut-od",
-  "Mangoto",
-  "Opao",
-  "Poblacion",
-  "Punod",
-  "Rizal",
-  "Sacsac",
-  "Sambagon",
-  "Sibago",
-  "Tajao",
-  "Tangub",
-  "Tanibag",
-  "Tupas",
-  "Tutay",
-].sort((a, b) => a.localeCompare(b));
-
-/** Returns a YYYY-MM-DD string for the given Date — same helper as pickup_schedule.jsx */
-const formatDateKey = (date) =>
-  [
-    date.getFullYear(),
-    String(date.getMonth() + 1).padStart(2, "0"),
-    String(date.getDate()).padStart(2, "0"),
-  ].join("-");
-
-// ---------------------------------------------------------------------------
 // Default EcoPoints values (fallback when Firestore doc doesn't exist yet)
 // ---------------------------------------------------------------------------
 const DEFAULT_ECOPOINTS = {
@@ -81,11 +38,9 @@ const DEFAULT_ECOPOINTS = {
 };
 
 // ---------------------------------------------------------------------------
-// Default AppConfig values
+// Default Notification values
 // ---------------------------------------------------------------------------
 const DEFAULT_APP_CONFIG = {
-  defaultBarangay: "",
-  scheduleReminderDays: "2",
   pushNotificationsEnabled: true,
   emailAlertsEnabled: false,
 };
@@ -124,26 +79,9 @@ export default function AdminSettings() {
   const [ecoPointsSaving, setEcoPointsSaving] = useState(false);
   const [ecoPointsStatus, setEcoPointsStatus] = useState(null); // { type: "success"|"error", msg }
 
-  // ---- App Configuration ----
-  const [defaultBarangay, setDefaultBarangay] = useState("");
-  const [barangayDropdownOpen, setBarangayDropdownOpen] = useState(false);
-  const [scheduleReminderDays, setScheduleReminderDays] = useState("2");
-  const [appConfigSaving, setAppConfigSaving] = useState(false);
-  const [appConfigStatus, setAppConfigStatus] = useState(null);
-
   // ---- Notifications ----
   const [pushEnabled, setPushEnabled] = useState(true);
   const [emailAlertsEnabled, setEmailAlertsEnabled] = useState(false);
-
-  // ---- Data Management ----
-  const [clearingAnnouncements, setClearingAnnouncements] = useState(false);
-
-  // ---------------------------------------------------------------------------
-  // Filtered barangay list for the dropdown
-  // ---------------------------------------------------------------------------
-  const matchingBarangays = BARANGAYS.filter((name) =>
-    name.toLowerCase().includes(defaultBarangay.trim().toLowerCase()),
-  );
 
   // ---------------------------------------------------------------------------
   // On mount — load settings + admin profile in parallel
@@ -181,18 +119,9 @@ export default function AdminSettings() {
         });
       }
 
-      // App Config
+      // Notifications
       if (appSnap.exists()) {
         const data = appSnap.data();
-        setDefaultBarangay(
-          data.defaultBarangay ?? DEFAULT_APP_CONFIG.defaultBarangay,
-        );
-        setScheduleReminderDays(
-          String(
-            data.scheduleReminderDays ??
-              DEFAULT_APP_CONFIG.scheduleReminderDays,
-          ),
-        );
         setPushEnabled(
           data.pushNotificationsEnabled ??
             DEFAULT_APP_CONFIG.pushNotificationsEnabled,
@@ -369,48 +298,6 @@ export default function AdminSettings() {
   };
 
   // ---------------------------------------------------------------------------
-  // App Config — Save
-  // ---------------------------------------------------------------------------
-  const saveAppConfig = async () => {
-    if (appConfigSaving) return;
-    setAppConfigStatus(null);
-
-    const reminderDays = parseInt(scheduleReminderDays, 10);
-    if (
-      !/^\d+$/.test(scheduleReminderDays.trim()) ||
-      reminderDays < 1 ||
-      reminderDays > 14
-    ) {
-      setAppConfigStatus({
-        type: "error",
-        msg: "Schedule reminder days must be a number between 1 and 14.",
-      });
-      return;
-    }
-
-    setAppConfigSaving(true);
-    try {
-      await setDoc(
-        doc(db, "settings", "appConfig"),
-        {
-          defaultBarangay: defaultBarangay.trim(),
-          scheduleReminderDays: reminderDays,
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true },
-      );
-      setAppConfigStatus({ type: "success", msg: "App configuration saved." });
-    } catch (error) {
-      setAppConfigStatus({
-        type: "error",
-        msg: error?.message || "Failed to save app configuration.",
-      });
-    } finally {
-      setAppConfigSaving(false);
-    }
-  };
-
-  // ---------------------------------------------------------------------------
   // Notifications — Toggle helpers (save immediately)
   // ---------------------------------------------------------------------------
   const togglePushNotifications = async (value) => {
@@ -438,73 +325,6 @@ export default function AdminSettings() {
     } catch (error) {
       console.error("Failed to save email alerts setting:", error);
       setEmailAlertsEnabled(!value); // revert on failure
-    }
-  };
-
-  // ---------------------------------------------------------------------------
-  // Data Management — Clear Past Announcements
-  // ---------------------------------------------------------------------------
-  const confirmClearAnnouncements = () => {
-    Alert.alert(
-      "Clear Past Announcements",
-      "This will permanently delete all announcements whose scheduled dates have all already passed. This action cannot be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: clearPastAnnouncements,
-        },
-      ],
-    );
-  };
-
-  const clearPastAnnouncements = async () => {
-    if (clearingAnnouncements) return;
-    setClearingAnnouncements(true);
-    try {
-      const todayKey = formatDateKey(new Date());
-      const snapshot = await getDocs(collection(db, "announcements"));
-
-      const pastDocs = snapshot.docs.filter((docSnap) => {
-        const data = docSnap.data();
-        const keys = data.scheduledDateKeys;
-        return (
-          Array.isArray(keys) &&
-          keys.length > 0 &&
-          keys.every((k) => k < todayKey)
-        );
-      });
-
-      if (pastDocs.length === 0) {
-        Alert.alert(
-          "No Past Announcements",
-          "There are no past announcements to clear.",
-        );
-        return;
-      }
-
-      // Firestore writeBatch supports up to 500 operations per batch
-      const BATCH_SIZE = 500;
-      for (let i = 0; i < pastDocs.length; i += BATCH_SIZE) {
-        const batch = writeBatch(db);
-        pastDocs.slice(i, i + BATCH_SIZE).forEach((d) => {
-          batch.delete(doc(db, "announcements", d.id));
-        });
-        await batch.commit();
-      }
-
-      Alert.alert(
-        "Done",
-        `Successfully deleted ${pastDocs.length} past announcement${pastDocs.length === 1 ? "" : "s"}.`,
-      );
-    } catch (error) {
-      Alert.alert(
-        "Error",
-        error?.message || "Could not clear announcements. Please try again.",
-      );
-    } finally {
-      setClearingAnnouncements(false);
     }
   };
 
@@ -675,127 +495,7 @@ export default function AdminSettings() {
       </View>
 
       {/* ================================================================== */}
-      {/* SECTION 3 — App Configuration                                       */}
-      {/* ================================================================== */}
-      <View style={styles.sectionCard}>
-        <View style={styles.sectionTitleRow}>
-          <Ionicons name="settings-outline" size={22} color="#234B33" />
-          <Text style={styles.sectionTitle}>App Configuration</Text>
-        </View>
-        <Text style={styles.sectionSubtitle}>
-          General app behaviour and default values.
-        </Text>
-
-        {/* Default Barangay */}
-        <Text style={styles.fieldLabel}>Default Barangay</Text>
-        <Text style={styles.fieldDescription}>
-          Pre-selected barangay used when creating new announcements and
-          reports.
-        </Text>
-        <View style={styles.barangayFieldWrapper}>
-          <TextInput
-            style={styles.input}
-            value={defaultBarangay}
-            onFocus={() => setBarangayDropdownOpen(true)}
-            onChangeText={(val) => {
-              setDefaultBarangay(val);
-              setBarangayDropdownOpen(true);
-            }}
-            placeholder="Type or select a barangay"
-            placeholderTextColor="#9CA3AF"
-          />
-          {barangayDropdownOpen && (
-            <ScrollView
-              style={styles.barangayDropdown}
-              nestedScrollEnabled
-              keyboardShouldPersistTaps="handled"
-            >
-              {matchingBarangays.map((name) => (
-                <TouchableOpacity
-                  key={name}
-                  style={styles.barangayOption}
-                  onPress={() => {
-                    setDefaultBarangay(name);
-                    setBarangayDropdownOpen(false);
-                  }}
-                >
-                  <Text style={styles.barangayOptionText}>{name}</Text>
-                </TouchableOpacity>
-              ))}
-              {matchingBarangays.length === 0 && (
-                <Text style={styles.noBarangayMatch}>
-                  No matching barangay.
-                </Text>
-              )}
-            </ScrollView>
-          )}
-        </View>
-
-        {/* Schedule Reminder Days */}
-        <Text style={[styles.fieldLabel, { marginTop: 18 }]}>
-          Schedule Reminder Days
-        </Text>
-        <Text style={styles.fieldDescription}>
-          How many days in advance residents receive a reminder before a
-          scheduled pickup (1–14).
-        </Text>
-        <TextInput
-          style={styles.input}
-          value={scheduleReminderDays}
-          onChangeText={setScheduleReminderDays}
-          keyboardType="numeric"
-          placeholder="e.g. 2"
-          placeholderTextColor="#9CA3AF"
-          maxLength={2}
-        />
-
-        {/* Status message */}
-        {appConfigStatus && (
-          <View
-            style={[
-              styles.statusBox,
-              appConfigStatus.type === "success"
-                ? styles.statusBoxSuccess
-                : styles.statusBoxError,
-            ]}
-          >
-            <Ionicons
-              name={
-                appConfigStatus.type === "success"
-                  ? "checkmark-circle"
-                  : "alert-circle"
-              }
-              size={16}
-              color={appConfigStatus.type === "success" ? "#15803D" : "#DC2626"}
-            />
-            <Text
-              style={[
-                styles.statusText,
-                appConfigStatus.type === "success"
-                  ? styles.statusTextSuccess
-                  : styles.statusTextError,
-              ]}
-            >
-              {appConfigStatus.msg}
-            </Text>
-          </View>
-        )}
-
-        <TouchableOpacity
-          style={[styles.saveButton, appConfigSaving && styles.disabledButton]}
-          onPress={saveAppConfig}
-          disabled={appConfigSaving}
-        >
-          {appConfigSaving ? (
-            <ActivityIndicator color="#FFFFFF" />
-          ) : (
-            <Text style={styles.saveButtonText}>Save App Config</Text>
-          )}
-        </TouchableOpacity>
-      </View>
-
-      {/* ================================================================== */}
-      {/* SECTION 4 — Notifications                                           */}
+      {/* SECTION 3 — Notifications                                           */}
       {/* ================================================================== */}
       <View style={styles.sectionCard}>
         <View style={styles.sectionTitleRow}>
@@ -839,69 +539,7 @@ export default function AdminSettings() {
       </View>
 
       {/* ================================================================== */}
-      {/* SECTION 5 — Data Management                                         */}
-      {/* ================================================================== */}
-      <View style={styles.sectionCard}>
-        <View style={styles.sectionTitleRow}>
-          <Ionicons name="trash-outline" size={22} color="#234B33" />
-          <Text style={styles.sectionTitle}>Data Management</Text>
-        </View>
-        <Text style={styles.sectionSubtitle}>
-          Maintain the app database by clearing stale data.
-        </Text>
-
-        {/* Clear Past Announcements */}
-        <View style={styles.dataActionRow}>
-          <View style={styles.dataActionText}>
-            <Text style={styles.dataActionTitle}>Clear Past Announcements</Text>
-            <Text style={styles.dataActionDescription}>
-              Permanently delete all pickup schedule announcements whose dates
-              have all passed.
-            </Text>
-          </View>
-          <TouchableOpacity
-            style={[
-              styles.dangerButton,
-              clearingAnnouncements && styles.disabledButton,
-            ]}
-            onPress={confirmClearAnnouncements}
-            disabled={clearingAnnouncements}
-          >
-            {clearingAnnouncements ? (
-              <ActivityIndicator color="#DC2626" size="small" />
-            ) : (
-              <>
-                <Ionicons name="trash-outline" size={15} color="#DC2626" />
-                <Text style={styles.dangerButtonText}>Clear</Text>
-              </>
-            )}
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.rowDivider} />
-
-        {/* Export Reports */}
-        <View style={styles.dataActionRow}>
-          <View style={styles.dataActionText}>
-            <Text style={styles.dataActionTitle}>Export Reports</Text>
-            <Text style={styles.dataActionDescription}>
-              Download all waste reports as a data export file.
-            </Text>
-          </View>
-          <TouchableOpacity
-            style={styles.outlineButton}
-            onPress={() =>
-              Alert.alert("Coming Soon", "Export feature coming soon.")
-            }
-          >
-            <Ionicons name="download-outline" size={15} color="#599A74" />
-            <Text style={styles.outlineButtonText}>Export</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* ================================================================== */}
-      {/* SECTION 6 — About                                                   */}
+      {/* SECTION 4 — About                                                   */}
       {/* ================================================================== */}
       <View style={styles.sectionCard}>
         <View style={styles.sectionTitleRow}>
@@ -1405,45 +1043,6 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
 
-  // Barangay picker (App Config)
-  barangayFieldWrapper: {
-    position: "relative",
-    zIndex: 100,
-  },
-  barangayDropdown: {
-    position: "absolute",
-    top: 46,
-    left: 0,
-    right: 0,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#D8E6DC",
-    borderRadius: 8,
-    maxHeight: 180,
-    zIndex: 200,
-    elevation: 6,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-  },
-  barangayOption: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F3F4F6",
-  },
-  barangayOptionText: {
-    color: "#1F2937",
-    fontSize: 14,
-  },
-  noBarangayMatch: {
-    padding: 12,
-    color: "#64748B",
-    fontSize: 13,
-    fontStyle: "italic",
-  },
-
   // Notification toggles
   toggleRow: {
     flexDirection: "row",
@@ -1469,47 +1068,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 3,
     lineHeight: 17,
-  },
-
-  // Data Management
-  dataActionRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 14,
-    gap: 12,
-  },
-  dataActionText: {
-    flex: 1,
-  },
-  dataActionTitle: {
-    color: "#1F2937",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  dataActionDescription: {
-    color: "#64748B",
-    fontSize: 12,
-    marginTop: 3,
-    lineHeight: 17,
-  },
-  dangerButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    backgroundColor: "#FEF2F2",
-    borderWidth: 1,
-    borderColor: "#FECACA",
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    minWidth: 76,
-    justifyContent: "center",
-  },
-  dangerButtonText: {
-    color: "#DC2626",
-    fontSize: 14,
-    fontWeight: "600",
   },
   rowDivider: {
     height: 1,

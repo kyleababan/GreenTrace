@@ -1,54 +1,57 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 
+import { Ionicons } from "@expo/vector-icons";
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Image,
-  Modal,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Animated,
+    Image,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    SafeAreaView,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 
 import {
-  addDoc,
-  arrayUnion,
-  collection,
-  deleteDoc,
-  doc,
-  getDoc,
-  getDocs,
-  increment,
-  limit,
-  onSnapshot,
-  orderBy,
-  query,
-  serverTimestamp,
-  startAfter,
-  updateDoc,
-  where,
+    addDoc,
+    arrayUnion,
+    collection,
+    deleteDoc,
+    doc,
+    getDoc,
+    getDocs,
+    increment,
+    limit,
+    onSnapshot,
+    orderBy,
+    query,
+    serverTimestamp,
+    startAfter,
+    updateDoc,
+    where,
 } from "firebase/firestore";
 import FormError from "../components/form-error";
 import Navbar from "../components/navbar";
 import PostLocationModal from "../components/PostLocationModal";
 import {
-  formatWasteLabel,
-  getWasteCategoryColor,
+    formatWasteLabel,
+    getWasteCategoryColor,
 } from "../constants/wasteCategories";
 import { auth, db } from "../firebaseConfig";
 import { deleteRelatedDocuments } from "../utils/deletePostHelper";
 import { getNameInitials } from "../utils/getNameInitials";
 import { hideBadWords } from "../utils/hideBadWords";
 import {
-  COMMENTS_PER_PAGE,
-  getUserPointsMap,
-  mergeUniqueById,
+    COMMENTS_PER_PAGE,
+    getUserPointsMap,
+    mergeUniqueById,
 } from "../utils/pagination";
 
 const formatPostedAt = (timestamp) => {
@@ -73,7 +76,9 @@ const formatPostedAt = (timestamp) => {
 
 const isPostEditLocked = (status) =>
   ["ongoing", "on-going", "cleaned"].includes(
-    String(status || "").trim().toLowerCase(),
+    String(status || "")
+      .trim()
+      .toLowerCase(),
   );
 
 export default function Post() {
@@ -99,6 +104,12 @@ export default function Post() {
   const [loadingMoreComments, setLoadingMoreComments] = useState(false);
   const [commentError, setCommentError] = useState("");
   const [locationModalVisible, setLocationModalVisible] = useState(false);
+  const [selectedCommentForMenu, setSelectedCommentForMenu] = useState(null);
+  const [editingComment, setEditingComment] = useState(null);
+  const [editCommentText, setEditCommentText] = useState("");
+  const [savingEditComment, setSavingEditComment] = useState(false);
+  const [commentToDelete, setCommentToDelete] = useState(null);
+  const [deletingComment, setDeletingComment] = useState(false);
   const lastCommentDocRef = useRef(null);
   const loadingCommentsRef = useRef(false);
 
@@ -301,6 +312,74 @@ export default function Post() {
     }
   };
 
+  const handleSaveEditComment = async () => {
+    if (!editingComment) return;
+    const trimmed = editCommentText.trim();
+    if (!trimmed) {
+      Alert.alert("Empty Comment", "Comment cannot be empty.");
+      return;
+    }
+
+    try {
+      setSavingEditComment(true);
+      const cleaned = hideBadWords(trimmed);
+      const commentDocRef = doc(db, "comments", editingComment.id);
+      await updateDoc(commentDocRef, {
+        comment: cleaned,
+        updatedAt: serverTimestamp(),
+      });
+
+      setComments((prevComments) =>
+        prevComments.map((c) =>
+          c.id === editingComment.id ? { ...c, comment: cleaned } : c,
+        ),
+      );
+
+      setEditingComment(null);
+      setEditCommentText("");
+    } catch (error) {
+      console.error("Error updating comment:", error);
+      Alert.alert("Error", "Could not update comment. Please try again.");
+    } finally {
+      setSavingEditComment(false);
+    }
+  };
+
+  const handleDeleteComment = async () => {
+    if (!commentToDelete || deletingComment) return;
+
+    try {
+      setDeletingComment(true);
+      await deleteDoc(doc(db, "comments", commentToDelete.id));
+
+      if (post?.id) {
+        await updateDoc(doc(db, "posts", post.id), {
+          commentCount: increment(-1),
+        });
+      }
+
+      setPost((prev) =>
+        prev
+          ? {
+              ...prev,
+              commentCount: Math.max(0, (prev.commentCount ?? 1) - 1),
+            }
+          : prev,
+      );
+
+      setComments((prevComments) =>
+        prevComments.filter((c) => c.id !== commentToDelete.id),
+      );
+
+      setCommentToDelete(null);
+    } catch (error) {
+      console.error("Error deleting comment:", error);
+      Alert.alert("Error", "Could not delete comment. Please try again.");
+    } finally {
+      setDeletingComment(false);
+    }
+  };
+
   const playReactionAnimation = () => {
     Animated.sequence([
       Animated.timing(reactionScale, {
@@ -487,16 +566,16 @@ export default function Post() {
 
                       {currentUser?.uid === post.userId &&
                         !isPostEditLocked(post.status) && (
-                        <TouchableOpacity
-                          style={styles.settingsButtonTrigger}
-                          onPress={() => setShowSettings(true)}
-                        >
-                          <Image
-                            source={require("../assets/images/setting.png")}
-                            style={styles.settingsIcon}
-                          />
-                        </TouchableOpacity>
-                      )}
+                          <TouchableOpacity
+                            style={styles.settingsButtonTrigger}
+                            onPress={() => setShowSettings(true)}
+                          >
+                            <Image
+                              source={require("../assets/images/setting.png")}
+                              style={styles.settingsIcon}
+                            />
+                          </TouchableOpacity>
+                        )}
                     </View>
                   </View>
 
@@ -710,10 +789,28 @@ export default function Post() {
                     <Text style={styles.commentUsername}>
                       {item.firstName} {item.lastName}
                     </Text>
-                    {/* Always displays live/updated user points */}
-                    <Text style={styles.commentPoints}>
-                      {item.currentPoints ?? item.points ?? 0} pts
-                    </Text>
+                    <View style={styles.commentHeaderRight}>
+                      {/* Always displays live/updated user points */}
+                      <Text style={styles.commentPoints}>
+                        {item.currentPoints ?? item.points ?? 0} pts
+                      </Text>
+
+                      {/* 3 small box dot options menu, only shown if you are the owner of that comment */}
+                      {currentUser?.uid === item.userId && (
+                        <TouchableOpacity
+                          activeOpacity={0.7}
+                          style={styles.commentMenuButton}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          onPress={() => setSelectedCommentForMenu(item)}
+                        >
+                          <Ionicons
+                            name="ellipsis-vertical"
+                            size={14}
+                            color="#52675A"
+                          />
+                        </TouchableOpacity>
+                      )}
+                    </View>
                   </View>
 
                   <Text style={styles.commentText}>
@@ -880,6 +977,172 @@ export default function Post() {
                   ]}
                   disabled={deletingPost}
                   onPress={() => setShowDeleteModal(false)}
+                >
+                  <Text style={styles.cancelModalText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </Modal>
+
+          {/* COMMENT OPTIONS MODAL */}
+          <Modal
+            animationType="fade"
+            transparent={true}
+            visible={Boolean(selectedCommentForMenu)}
+            onRequestClose={() => setSelectedCommentForMenu(null)}
+          >
+            <TouchableOpacity
+              activeOpacity={1}
+              style={styles.settingsOverlay}
+              onPress={() => setSelectedCommentForMenu(null)}
+            >
+              <TouchableOpacity
+                activeOpacity={1}
+                style={styles.settingsBox}
+                onPress={(e) => e.stopPropagation?.()}
+              >
+                <Text style={styles.modalTitle}>Comment Options</Text>
+
+                <TouchableOpacity
+                  style={styles.settingsButton}
+                  onPress={() => {
+                    const c = selectedCommentForMenu;
+                    setSelectedCommentForMenu(null);
+                    setEditingComment(c);
+                    setEditCommentText(c?.comment || "");
+                  }}
+                >
+                  <View style={styles.commentModalBtnContent}>
+                    <Ionicons name="pencil-outline" size={17} color="#2D5A3E" />
+                    <Text style={styles.settingsText}>Edit Comment</Text>
+                  </View>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.settingsButton}
+                  onPress={() => {
+                    const c = selectedCommentForMenu;
+                    setSelectedCommentForMenu(null);
+                    setCommentToDelete(c);
+                  }}
+                >
+                  <View style={styles.commentModalBtnContent}>
+                    <Ionicons name="trash-outline" size={17} color="#FF5B5B" />
+                    <Text style={[styles.settingsText, { color: "#FF5B5B" }]}>
+                      Delete Comment
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.cancelModalButton}
+                  onPress={() => setSelectedCommentForMenu(null)}
+                >
+                  <Text style={styles.cancelModalText}>Cancel</Text>
+                </TouchableOpacity>
+              </TouchableOpacity>
+            </TouchableOpacity>
+          </Modal>
+
+          {/* EDIT COMMENT MODAL */}
+          <Modal
+            animationType="fade"
+            transparent={true}
+            visible={Boolean(editingComment)}
+            onRequestClose={() => {
+              if (!savingEditComment) {
+                setEditingComment(null);
+                setEditCommentText("");
+              }
+            }}
+          >
+            <KeyboardAvoidingView
+              behavior={Platform.OS === "ios" ? "padding" : "height"}
+              style={styles.settingsOverlay}
+            >
+              <View style={styles.editCommentBox}>
+                <Text style={styles.modalTitle}>Edit Comment</Text>
+
+                <TextInput
+                  style={styles.editCommentInput}
+                  multiline
+                  placeholder="Edit your comment..."
+                  placeholderTextColor="#888"
+                  value={editCommentText}
+                  onChangeText={setEditCommentText}
+                  maxLength={500}
+                />
+
+                <View style={styles.editModalActionRow}>
+                  <TouchableOpacity
+                    style={styles.editCancelBtn}
+                    disabled={savingEditComment}
+                    onPress={() => {
+                      setEditingComment(null);
+                      setEditCommentText("");
+                    }}
+                  >
+                    <Text style={styles.editCancelBtnText}>Cancel</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.editSaveBtn,
+                      (!editCommentText.trim() || savingEditComment) && {
+                        opacity: 0.6,
+                      },
+                    ]}
+                    disabled={!editCommentText.trim() || savingEditComment}
+                    onPress={handleSaveEditComment}
+                  >
+                    {savingEditComment ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Text style={styles.editSaveBtnText}>Save</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </KeyboardAvoidingView>
+          </Modal>
+
+          {/* DELETE COMMENT CONFIRMATION MODAL */}
+          <Modal
+            animationType="fade"
+            transparent={true}
+            visible={Boolean(commentToDelete)}
+            onRequestClose={() => {
+              if (!deletingComment) setCommentToDelete(null);
+            }}
+          >
+            <View style={styles.settingsOverlay}>
+              <View style={styles.settingsBox}>
+                <Text style={styles.deleteTitle}>Delete Comment</Text>
+
+                <Text style={styles.deleteMessage}>
+                  Are you sure you want to delete this comment? This action
+                  cannot be undone.
+                </Text>
+
+                <TouchableOpacity
+                  style={[
+                    styles.confirmDeleteBtn,
+                    deletingComment && { opacity: 0.6 },
+                  ]}
+                  disabled={deletingComment}
+                  onPress={handleDeleteComment}
+                >
+                  {deletingComment ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.confirmDeleteText}>Delete</Text>
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.cancelModalButton, { marginTop: 10 }]}
+                  disabled={deletingComment}
+                  onPress={() => setCommentToDelete(null)}
                 >
                   <Text style={styles.cancelModalText}>Cancel</Text>
                 </TouchableOpacity>
@@ -1268,6 +1531,21 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#2E7D32",
   },
+  commentHeaderRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  commentMenuButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    backgroundColor: "#F2F6F3",
+    borderWidth: 1,
+    borderColor: "#DCE5DF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   commentText: {
     fontSize: 13,
     color: "#405047",
@@ -1387,5 +1665,69 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontWeight: "700",
     fontSize: 15,
+  },
+
+  /* Comment Modals */
+  commentModalBtnContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  editCommentBox: {
+    backgroundColor: "#FFFFFF",
+    width: "88%",
+    maxWidth: 380,
+    borderRadius: 16,
+    padding: 20,
+    elevation: 5,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+  },
+  editCommentInput: {
+    backgroundColor: "#F8FAF8",
+    borderWidth: 1,
+    borderColor: "#D2E2D7",
+    borderRadius: 12,
+    padding: 12,
+    fontSize: 14,
+    color: "#24352A",
+    minHeight: 85,
+    maxHeight: 160,
+    textAlignVertical: "top",
+    marginBottom: 16,
+  },
+  editModalActionRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 10,
+  },
+  editCancelBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: "#ECEFEF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  editCancelBtnText: {
+    color: "#526259",
+    fontWeight: "600",
+    fontSize: 14,
+  },
+  editSaveBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    backgroundColor: "#5F9C76",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 70,
+  },
+  editSaveBtnText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 14,
   },
 });

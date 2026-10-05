@@ -379,10 +379,10 @@ export default function CreateReport() {
       return;
     }
 
-    if (asset.fileSize && asset.fileSize > 2.5 * 1024 * 1024) {
+    if (asset.fileSize && asset.fileSize > 10 * 1024 * 1024) {
       setErrors((previous) => ({
         ...previous,
-        image: "Image must be smaller than 2.5 MB.",
+        image: "Image must be smaller than 10 MB.",
       }));
       return;
     }
