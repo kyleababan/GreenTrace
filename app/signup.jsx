@@ -222,7 +222,7 @@ export default function Signup() {
                   updateField("firstName", value, setFirstName);
                 }}
                 placeholder="First Name"
-                placeholderTextColor="#888"
+                placeholderTextColor={errors.firstName ? "#D66A6A" : "#888"}
                 accessibilityState={{ invalid: Boolean(errors.firstName) }}
               />
               {renderFieldError("firstName")}
@@ -233,7 +233,7 @@ export default function Signup() {
                   updateField("lastName", value, setLastName);
                 }}
                 placeholder="Last Name"
-                placeholderTextColor="#888"
+                placeholderTextColor={errors.lastName ? "#D66A6A" : "#888"}
                 accessibilityState={{ invalid: Boolean(errors.lastName) }}
               />
               {renderFieldError("lastName")}
@@ -244,7 +244,7 @@ export default function Signup() {
                   updateField("email", value, setEmail);
                 }}
                 placeholder="Email"
-                placeholderTextColor="#888"
+                placeholderTextColor={errors.email ? "#D66A6A" : "#888"}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 accessibilityState={{ invalid: Boolean(errors.email) }}
@@ -253,7 +253,7 @@ export default function Signup() {
               <TextInput
                 style={[styles.input, errors.password && styles.inputError]}
                 placeholder="Password"
-                placeholderTextColor="#888"
+                placeholderTextColor={errors.password ? "#D66A6A" : "#888"}
                 secureTextEntry
                 value={password}
                 onChangeText={(value) => {
@@ -269,7 +269,7 @@ export default function Signup() {
                   updateField("cellNumber", value, setCellNumber);
                 }}
                 placeholder="Phone Number (e.g. 09123456789)"
-                placeholderTextColor="#888"
+                placeholderTextColor={errors.cellNumber ? "#D66A6A" : "#888"}
                 keyboardType="phone-pad"
                 maxLength={11}
                 accessibilityState={{ invalid: Boolean(errors.cellNumber) }}
@@ -286,7 +286,7 @@ export default function Signup() {
                   );
                 }}
                 placeholder="Birth Date (MM/DD/YYYY)"
-                placeholderTextColor="#888"
+                placeholderTextColor={errors.birthDate ? "#D66A6A" : "#888"}
                 keyboardType="number-pad"
                 maxLength={10}
                 accessibilityState={{ invalid: Boolean(errors.birthDate) }}
@@ -307,11 +307,19 @@ export default function Signup() {
                   style={[
                     styles.checkbox,
                     acceptedTerms && styles.checkboxChecked,
+                    errors.terms && styles.checkboxError,
                   ]}
                 >
                   {acceptedTerms && <Text style={styles.checkmark}>✓</Text>}
                 </View>
-                <Text style={styles.termsText}>Terms and Agreement</Text>
+                <Text
+                  style={[
+                    styles.termsText,
+                    errors.terms && styles.termsTextError,
+                  ]}
+                >
+                  Terms and Agreement
+                </Text>
               </TouchableOpacity>
               {renderFieldError("terms")}
 
@@ -428,7 +436,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   inputError: {
-    borderColor: "#F04438",
+    borderColor: "#E59898",
     borderWidth: 1.5,
   },
   fieldError: {
@@ -466,6 +474,12 @@ const styles = StyleSheet.create({
   termsText: {
     color: "#FFFFFF",
     fontSize: 13,
+  },
+  termsTextError: {
+    color: "#FFE0DE",
+  },
+  checkboxError: {
+    borderColor: "#F2A0A0",
   },
 
   /* Action Buttons */

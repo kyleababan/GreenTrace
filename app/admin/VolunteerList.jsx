@@ -54,6 +54,8 @@ const formatRelativeTime = (timestamp) => {
 
 export default function VolunteerList({ setActivePage }) {
   const { width: windowWidth } = useWindowDimensions();
+  const pagePadding =
+    windowWidth < 768 ? 12 : windowWidth < 1024 ? 16 : 20;
   const [posts, setPosts] = useState([]);
   const [search, setSearch] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
@@ -71,9 +73,9 @@ export default function VolunteerList({ setActivePage }) {
   const [assessmentTab, setAssessmentTab] = useState("all");
   const [volunteerPostMap, setVolunteerPostMap] = useState({});
 
-  // Follow AssessmentList structure for card width calculation
+  // Keep volunteer cards readable across phone, tablet, and desktop widths.
   const cardWidth =
-    windowWidth < 850 ? "100%" : windowWidth < 1250 ? "48.5%" : "32%";
+    windowWidth < 700 ? "100%" : windowWidth < 1200 ? "48.5%" : "32%";
 
   const loadVolunteerPosts = useCallback(async () => {
     try {
@@ -215,7 +217,7 @@ export default function VolunteerList({ setActivePage }) {
 
   return (
     <View style={styles.page}>
-      <View style={styles.content}>
+      <View style={[styles.content, { padding: pagePadding }]}>
         {/* TOP BAR */}
         <View style={styles.topBar}>
           <View
@@ -258,7 +260,7 @@ export default function VolunteerList({ setActivePage }) {
           showsVerticalScrollIndicator={true}
         >
           {filteredPosts.map((post) => (
-            <View key={post.id} style={styles.card}>
+            <View key={post.id} style={[styles.card, { width: cardWidth }]}>
               {/* LEFT */}
               <View style={styles.cardLeft}>
                 {post.eventType ? (
@@ -277,7 +279,7 @@ export default function VolunteerList({ setActivePage }) {
                 ) : null}
                 <Text style={styles.title}>{hideBadWords(post.title)}</Text>
 
-                <Text style={styles.desc} numberOfLines={3}>
+                <Text style={styles.desc}>
                   {hideBadWords(post.description)}
                 </Text>
 
@@ -813,7 +815,6 @@ const styles = StyleSheet.create({
   },
 
   card: {
-    width: "48.5%",
     backgroundColor: "#fff",
     borderRadius: 10,
     padding: 12,
@@ -823,6 +824,7 @@ const styles = StyleSheet.create({
 
   cardLeft: {
     flex: 1,
+    minWidth: 0,
     paddingRight: 10,
   },
   badgesRow: {
@@ -881,6 +883,8 @@ const styles = StyleSheet.create({
   },
 
   location: {
+    flex: 1,
+    minWidth: 0,
     fontSize: 11,
     color: "#333",
   },

@@ -308,7 +308,13 @@ export default function AddEvent() {
       </View>
       <ScrollView
         style={styles.formScroll}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[
+          styles.content,
+          {
+            paddingHorizontal: isNarrow ? 12 : width < 1024 ? 16 : 24,
+            paddingTop: isNarrow ? 12 : 18,
+          },
+        ]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >

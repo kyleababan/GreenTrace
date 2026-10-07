@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Easing,
   Image,
@@ -26,10 +27,13 @@ import {
   orderBy,
   query,
   startAfter,
+  updateDoc,
   where,
+  writeBatch,
 } from "firebase/firestore";
 
 import { auth, db } from "../firebaseConfig";
+import { subscribeToUnreadNotifications } from "../utils/notificationHelpers";
 
 export default function Notification() {
   const router = useRouter();
@@ -53,6 +57,7 @@ export default function Notification() {
     if (type === "comment") return "chatbubble-ellipses";
     if (type === "reaction" || type === "priority") return "heart";
     if (type === "deleted_post") return "shield-checkmark";
+    if (type === "volunteer_kicked") return "person-remove";
     return "notifications";
   };
 
@@ -80,6 +85,8 @@ export default function Notification() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [markingAllRead, setMarkingAllRead] = useState(false);
 
   const lastDocRef = useRef(null);
   const hasMoreRef = useRef(true);
@@ -188,6 +195,89 @@ export default function Notification() {
   }, [loadNotifications]);
 
   useEffect(() => {
+    if (!currentUser) {
+      return undefined;
+    }
+
+    return subscribeToUnreadNotifications(db, currentUser.uid, setUnreadCount);
+  }, [currentUser]);
+
+  const markAllAsRead = async () => {
+    if (!currentUser || markingAllRead || unreadCount === 0) return;
+
+    setMarkingAllRead(true);
+    try {
+      const snapshot = await getDocs(
+        query(
+          collection(db, "notifications"),
+          where("userId", "==", currentUser.uid),
+        ),
+      );
+      const unreadNotifications = snapshot.docs.filter(
+        (notification) => notification.data().read !== true,
+      );
+
+      for (let index = 0; index < unreadNotifications.length; index += 450) {
+        const batch = writeBatch(db);
+        unreadNotifications
+          .slice(index, index + 450)
+          .forEach((notification) => {
+            batch.update(notification.ref, { read: true });
+          });
+        await batch.commit();
+      }
+
+      setNotifications((current) =>
+        current.map((notification) => ({ ...notification, read: true })),
+      );
+      setUnreadCount(0);
+    } catch (error) {
+      console.error("Unable to mark all notifications as read:", error);
+      Alert.alert(
+        "Unable to mark notifications as read",
+        "Please try again.",
+      );
+    } finally {
+      setMarkingAllRead(false);
+    }
+  };
+
+  const openNotification = async (item) => {
+    if (item.read !== true) {
+      try {
+        await updateDoc(doc(db, "notifications", item.id), { read: true });
+        setNotifications((current) =>
+          current.map((notification) =>
+            notification.id === item.id
+              ? { ...notification, read: true }
+              : notification,
+          ),
+        );
+      } catch (error) {
+        console.error("Unable to mark notification as read:", error);
+        Alert.alert(
+          "Unable to update notification",
+          "The notification will still open. Please try again later.",
+        );
+      }
+    }
+
+    if (item.type === "volunteer_kicked" && item.volunteerPostId) {
+      router.push({
+        pathname: "/volunteering",
+        params: { volunteerId: item.volunteerPostId },
+      });
+    } else if (item.postAvailable) {
+      router.push({
+        pathname: "/post",
+        params: { id: item.postId },
+      });
+    } else {
+      router.push("/post-unavailable");
+    }
+  };
+
+  useEffect(() => {
     if (loading) return;
 
     listEntrance.setValue(0);
@@ -252,20 +342,34 @@ export default function Notification() {
                 <Text style={styles.notificationCount}>
                   {notifications.length}
                 </Text>
+                {unreadCount > 0 && (
+                  <TouchableOpacity
+                    style={styles.markAllReadButton}
+                    activeOpacity={0.8}
+                    disabled={markingAllRead}
+                    onPress={markAllAsRead}
+                    accessibilityRole="button"
+                  >
+                    {markingAllRead ? (
+                      <ActivityIndicator size="small" color="#397A51" />
+                    ) : (
+                      <Text style={styles.markAllReadText}>
+                        Mark all as read
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                )}
               </View>
               {notifications.map((item) => (
                 <TouchableOpacity
                   key={item.id}
-                  style={styles.notificationCard}
+                  style={[
+                    styles.notificationCard,
+                    item.read !== true && styles.unreadNotificationCard,
+                  ]}
                   activeOpacity={0.8}
-                  onPress={() =>
-                    item.postAvailable
-                      ? router.push({
-                          pathname: "/post",
-                          params: { id: item.postId },
-                        })
-                      : router.push("/post-unavailable")
-                  }
+                  onPress={() => openNotification(item)}
+                  accessibilityLabel={`${item.read === true ? "Read" : "Unread"} notification from ${item.type === "deleted_post" ? "GreenTrace LGU" : getActorText(item)}`}
                 >
                   <View style={styles.iconWrapper}>
                     <Ionicons
@@ -293,6 +397,22 @@ export default function Notification() {
                     <Text style={styles.notificationTime}>
                       {formatNotificationTime(item.createdAt)}
                     </Text>
+                    <View style={styles.readStatus}>
+                      <View
+                        style={[
+                          styles.readStatusDot,
+                          item.read === true && styles.readStatusDotRead,
+                        ]}
+                      />
+                      <Text
+                        style={[
+                          styles.readStatusText,
+                          item.read === true && styles.readStatusTextRead,
+                        ]}
+                      >
+                        {item.read === true ? "Read" : "Unread"}
+                      </Text>
+                    </View>
                   </View>
 
                   {/* RIGHT: Small Thumbnail of the post */}
@@ -480,6 +600,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 2,
   },
+  unreadNotificationCard: {
+    borderWidth: 1,
+    borderColor: "#B8DCC2",
+    backgroundColor: "#F7FCF8",
+  },
   sectionHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -538,6 +663,43 @@ const styles = StyleSheet.create({
     color: "#94A3B8",
     fontSize: 11,
     marginTop: 5,
+  },
+  readStatus: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginTop: 5,
+  },
+  readStatusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: "#E53935",
+  },
+  readStatusDotRead: {
+    backgroundColor: "#93A39A",
+  },
+  readStatusText: {
+    color: "#C62828",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  readStatusTextRead: {
+    color: "#839189",
+    fontWeight: "500",
+  },
+  markAllReadButton: {
+    minHeight: 30,
+    justifyContent: "center",
+    marginLeft: 10,
+    paddingHorizontal: 10,
+    borderRadius: 16,
+    backgroundColor: "#E4F1E8",
+  },
+  markAllReadText: {
+    color: "#397A51",
+    fontSize: 11,
+    fontWeight: "700",
   },
   emptyState: {
     marginTop: 60,

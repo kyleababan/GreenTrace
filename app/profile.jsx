@@ -414,6 +414,8 @@ const styles = StyleSheet.create({
 
   /* PROFILE CARD */
   profileCard: {
+    position: "relative",
+    zIndex: 5,
     backgroundColor: "#FFFFFF",
     borderRadius: 16,
     padding: 16,

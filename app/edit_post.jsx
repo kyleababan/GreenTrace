@@ -1,5 +1,5 @@
+import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
-import * as Location from "expo-location";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { signOut } from "firebase/auth";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
@@ -26,7 +26,7 @@ import {
     getWasteCategoryColor,
 } from "../constants/wasteCategories";
 import { auth, db } from "../firebaseConfig";
-import { deleteRelatedDocuments } from "../utils/deletePostHelper";
+import { getCurrentCoordinates } from "../utils/getCurrentCoordinates";
 import { hideBadWords } from "../utils/hideBadWords";
 
 const BARANGAYS = [
@@ -101,6 +101,7 @@ export default function EditPost() {
     latitude: 10.2705,
     longitude: 123.5855,
   });
+  const [hasGpsCoordinates, setHasGpsCoordinates] = useState(false);
   const [postCoordinates, setPostCoordinates] = useState(null);
   const [gpsBarangay, setGpsBarangay] = useState("");
   const [gpsStreet, setGpsStreet] = useState("");
@@ -111,8 +112,6 @@ export default function EditPost() {
   const [imageSourceModalVisible, setImageSourceModalVisible] = useState(false);
   const [errors, setErrors] = useState({});
   const [wasteClassification, setWasteClassification] = useState(null);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [deletingPost, setDeletingPost] = useState(false);
 
   // NSFW Warning & Ban Modal States
   const [warningModalVisible, setWarningModalVisible] = useState(false);
@@ -208,10 +207,16 @@ export default function EditPost() {
         }
       }
 
-      if (data.coordinates?.latitude && data.coordinates?.longitude) {
+      if (
+        Number.isFinite(Number(data.coordinates?.latitude)) &&
+        Number.isFinite(Number(data.coordinates?.longitude)) &&
+        data.coordinates?.latitude != null &&
+        data.coordinates?.longitude != null
+      ) {
         const lat = parseFloat(Number(data.coordinates.latitude).toFixed(6));
         const lng = parseFloat(Number(data.coordinates.longitude).toFixed(6));
         setCoords({ latitude: lat, longitude: lng });
+        setHasGpsCoordinates(true);
         setPostCoordinates({ latitude: lat, longitude: lng });
       }
 
@@ -234,10 +239,28 @@ export default function EditPost() {
               ? JSON.parse(event.data)
               : event.data;
           if (data && data.type === "GPS_PIN_MOVED") {
-            const nextLat = parseFloat(Number(data.lat).toFixed(6));
-            const nextLng = parseFloat(Number(data.lng).toFixed(6));
-            setCoords({ latitude: nextLat, longitude: nextLng });
-            reverseGeocodeCoordinates(nextLat, nextLng);
+            const nextLat = Number(data.lat);
+            const nextLng = Number(data.lng);
+            if (
+              !Number.isFinite(nextLat) ||
+              !Number.isFinite(nextLng) ||
+              nextLat < -90 ||
+              nextLat > 90 ||
+              nextLng < -180 ||
+              nextLng > 180
+            ) {
+              return;
+            }
+            const latitude = Number(nextLat.toFixed(6));
+            const longitude = Number(nextLng.toFixed(6));
+            setCoords({ latitude, longitude });
+            setHasGpsCoordinates(true);
+            setGpsErrors((previous) => {
+              const next = { ...previous };
+              delete next.location;
+              return next;
+            });
+            reverseGeocodeCoordinates(latitude, longitude);
           }
         } catch {
           // Ignore non-JSON postMessages
@@ -297,50 +320,42 @@ export default function EditPost() {
     }
   };
 
-  const detectGpsLocation = async () => {
-    setGpsErrors({});
-    setGpsLoading(true);
-    let lat = coords?.latitude || 10.2705;
-    let lng = coords?.longitude || 123.5855;
-
-    if (!postCoordinates) {
-      try {
-        if (
-          Platform.OS === "web" &&
-          typeof navigator !== "undefined" &&
-          navigator.geolocation
-        ) {
-          const pos = await new Promise((resolve, reject) => {
-            navigator.geolocation.getCurrentPosition(resolve, reject, {
-              enableHighAccuracy: true,
-              timeout: 8000,
-              maximumAge: 10000,
-            });
-          });
-          lat = parseFloat(pos.coords.latitude.toFixed(6));
-          lng = parseFloat(pos.coords.longitude.toFixed(6));
-        } else {
-          const { status } = await Location.requestForegroundPermissionsAsync();
-          if (status === "granted") {
-            const loc = await Location.getCurrentPositionAsync({
-              accuracy: Location.Accuracy.Balanced,
-            });
-            lat = parseFloat(loc.coords.latitude.toFixed(6));
-            lng = parseFloat(loc.coords.longitude.toFixed(6));
-          }
-        }
-      } catch (locErr) {
-        console.warn("Could not get GPS, using default:", locErr);
-      }
-    }
-
-    setCoords({ latitude: lat, longitude: lng });
-    setMapSessionId((prev) => prev + 1);
-    if (!gpsBarangay && !gpsStreet) {
-      await reverseGeocodeCoordinates(lat, lng);
-    }
-    setGpsLoading(false);
+  const detectGpsLocation = async (refresh = false) => {
     setGpsModalVisible(true);
+    setGpsErrors((previous) => {
+      const next = { ...previous };
+      delete next.location;
+      return next;
+    });
+    if (hasGpsCoordinates && !refresh) {
+      setMapSessionId((previous) => previous + 1);
+      if (!gpsBarangay && !gpsStreet) {
+        await reverseGeocodeCoordinates(coords.latitude, coords.longitude);
+      }
+      return;
+    }
+
+    setGpsLoading(true);
+    try {
+      const currentCoordinates = await getCurrentCoordinates();
+      setCoords(currentCoordinates);
+      setHasGpsCoordinates(true);
+      setMapSessionId((previous) => previous + 1);
+      await reverseGeocodeCoordinates(
+        currentCoordinates.latitude,
+        currentCoordinates.longitude,
+      );
+    } catch (locErr) {
+      console.warn("Could not get current GPS location:", locErr);
+      setGpsErrors((previous) => ({
+        ...previous,
+        location:
+          locErr.message ||
+          "Could not retrieve GPS location. Check your device settings and try again.",
+      }));
+    } finally {
+      setGpsLoading(false);
+    }
   };
 
   const handleUseCamera = async () => {
@@ -384,7 +399,7 @@ export default function EditPost() {
     }
   };
 
-  const processSelectedImage = async (asset) => {
+  const processSelectedImage = (asset) => {
     if (asset.type === "video") {
       setErrors((previous) => ({
         ...previous,
@@ -407,9 +422,6 @@ export default function EditPost() {
       delete next.image;
       return next;
     });
-
-    // Automatically trigger GPS tracking detection & show map
-    await detectGpsLocation();
   };
 
   const handleConfirmGpsLocation = () => {
@@ -422,6 +434,12 @@ export default function EditPost() {
     }
     if (!street) {
       newGpsErrors.street = "Street / Purok is required.";
+    }
+    if (!hasGpsCoordinates) {
+      newGpsErrors.location =
+        Platform.OS === "web"
+          ? "Get your GPS location or move the map pin first."
+          : "Get your GPS location before confirming.";
     }
 
     if (Object.keys(newGpsErrors).length > 0) {
@@ -471,8 +489,8 @@ export default function EditPost() {
 <body>
   <div id="map"></div>
   <script>
-    var lat = ${coords.latitude || 10.2705};
-    var lng = ${coords.longitude || 123.5855};
+    var lat = ${coords.latitude ?? 10.2705};
+    var lng = ${coords.longitude ?? 123.5855};
     var map = L.map('map', {
       center: [lat, lng],
       zoom: 16,
@@ -876,17 +894,6 @@ export default function EditPost() {
               )}
             </View>
 
-            {/* DELETE POST BUTTON */}
-            <TouchableOpacity
-              style={[
-                styles.deletePostButton,
-                (uploading || deletingPost) && { opacity: 0.5 },
-              ]}
-              disabled={uploading || deletingPost}
-              onPress={() => setShowDeleteModal(true)}
-            >
-              <Text style={styles.deletePostButtonText}>Delete Post</Text>
-            </TouchableOpacity>
           </ScrollView>
         </View>
 
@@ -900,6 +907,20 @@ export default function EditPost() {
           <View style={styles.modalBackground}>
             <View style={[styles.modalBox, styles.gpsModalBox]}>
               <Text style={styles.modalTitle}>GPS Tracking</Text>
+              <TouchableOpacity
+                style={styles.gpsCurrentLocationBtn}
+                onPress={() => detectGpsLocation(true)}
+                disabled={gpsLoading}
+              >
+                {gpsLoading ? (
+                  <ActivityIndicator size="small" color="#276344" />
+                ) : (
+                  <Ionicons name="locate" size={16} color="#276344" />
+                )}
+                <Text style={styles.gpsCurrentLocationText}>
+                  {gpsLoading ? "Getting current location..." : "Use current GPS"}
+                </Text>
+              </TouchableOpacity>
 
               {/* INTERACTIVE LEAFLET / OPENSTREETMAP */}
               <View style={styles.gpsPlaceholder}>
@@ -934,19 +955,24 @@ export default function EditPost() {
                 📍 Drag the pin or tap on the map to adjust location if
                 inaccurate.
               </Text>
+              {!!gpsErrors.location && (
+                <Text style={styles.gpsLocationError}>
+                  {gpsErrors.location}
+                </Text>
+              )}
 
               <View style={styles.gpsDetails}>
                 <View style={styles.gpsCoordinateRow}>
                   <View style={styles.gpsDetailItem}>
                     <Text style={styles.gpsDetailLabel}>Latitude</Text>
                     <Text style={styles.gpsDetailValue}>
-                      {coords.latitude ? coords.latitude.toFixed(6) : "--"}
+                      {hasGpsCoordinates ? coords.latitude.toFixed(6) : "--"}
                     </Text>
                   </View>
                   <View style={styles.gpsDetailItem}>
                     <Text style={styles.gpsDetailLabel}>Longitude</Text>
                     <Text style={styles.gpsDetailValue}>
-                      {coords.longitude ? coords.longitude.toFixed(6) : "--"}
+                      {hasGpsCoordinates ? coords.longitude.toFixed(6) : "--"}
                     </Text>
                   </View>
                 </View>
@@ -1079,81 +1105,6 @@ export default function EditPost() {
           onClose={() => setWarningModalVisible(false)}
           onSignOut={handleSignOut}
         />
-
-        {/* DELETE CONFIRMATION MODAL */}
-        <Modal
-          animationType="fade"
-          transparent={true}
-          visible={showDeleteModal}
-          onRequestClose={() => !deletingPost && setShowDeleteModal(false)}
-        >
-          <View style={styles.modalBackground}>
-            <View style={styles.deleteModalBox}>
-              <Text style={styles.deleteTitle}>Delete Post</Text>
-
-              <Text style={styles.deleteMessage}>
-                Are you sure you want to delete this post? This action cannot be
-                undone.
-              </Text>
-
-              <TouchableOpacity
-                style={[
-                  styles.confirmDeleteBtn,
-                  deletingPost && { opacity: 0.6 },
-                ]}
-                disabled={deletingPost}
-                onPress={async () => {
-                  if (deletingPost) return;
-                  try {
-                    setDeletingPost(true);
-                    const latestPost = await getDoc(doc(db, "posts", id));
-                    if (
-                      latestPost.exists() &&
-                      isPostEditLocked(latestPost.data().status)
-                    ) {
-                      setPostLocked(true);
-                      setShowDeleteModal(false);
-                      return;
-                    }
-                    if (originalImageUrl) {
-                      await deleteFromCloudinary(originalImageUrl);
-                    }
-                    await deleteRelatedDocuments(id);
-                    setShowDeleteModal(false);
-                    router.replace("/home");
-                  } catch (error) {
-                    console.log(error);
-                    setDeletingPost(false);
-                  }
-                }}
-              >
-                {deletingPost ? (
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: 8,
-                    }}
-                  >
-                    <ActivityIndicator size="small" color="#fff" />
-                    <Text style={styles.confirmDeleteText}>Deleting...</Text>
-                  </View>
-                ) : (
-                  <Text style={styles.confirmDeleteText}>Delete</Text>
-                )}
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.modalCancel, deletingPost && { opacity: 0.5 }]}
-                disabled={deletingPost}
-                onPress={() => setShowDeleteModal(false)}
-              >
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
 
         <View style={styles.navbarContainer}>
           <Navbar />
@@ -1352,13 +1303,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#E5E5E5",
     borderRadius: 8,
     padding: 10,
-    height: 80,
+    height: 150,
     marginTop: 10,
     textAlignVertical: "top",
     color: "#24352A",
     fontSize: 14,
   },
-
   imageBox: {
     width: "100%",
     aspectRatio: 4 / 3,
@@ -1509,6 +1459,20 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
 
+  gpsCurrentLocationBtn: {
+    alignSelf: "flex-end",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 8,
+  },
+
+  gpsCurrentLocationText: {
+    color: "#276344",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+
   gpsLoadingCenter: {
     flex: 1,
     alignItems: "center",
@@ -1529,6 +1493,13 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: "center",
     fontStyle: "italic",
+  },
+
+  gpsLocationError: {
+    color: "#B42318",
+    fontSize: 12,
+    marginTop: 6,
+    textAlign: "center",
   },
 
   gpsDetails: {
@@ -1603,60 +1574,4 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
 
-  deletePostButton: {
-    marginTop: 24,
-    marginBottom: 40,
-    paddingVertical: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#FF4D4D",
-    backgroundColor: "#FFF5F5",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  deletePostButtonText: {
-    color: "#FF4D4D",
-    fontSize: 15,
-    fontWeight: "bold",
-  },
-
-  deleteModalBox: {
-    backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 24,
-    width: "85%",
-    maxWidth: 360,
-    alignItems: "center",
-  },
-
-  deleteTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#222",
-    marginBottom: 10,
-  },
-
-  deleteMessage: {
-    fontSize: 14,
-    color: "#666",
-    textAlign: "center",
-    marginBottom: 20,
-    lineHeight: 20,
-  },
-
-  confirmDeleteBtn: {
-    width: "100%",
-    backgroundColor: "#FF5B5B",
-    paddingVertical: 12,
-    borderRadius: 10,
-    alignItems: "center",
-    marginBottom: 10,
-  },
-
-  confirmDeleteText: {
-    color: "#fff",
-    fontWeight: "bold",
-    fontSize: 15,
-  },
 });

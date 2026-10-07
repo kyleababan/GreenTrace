@@ -1,9 +1,11 @@
 import { collection, getDocs } from "firebase/firestore";
+import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
   Easing,
+  Pressable,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -18,6 +20,7 @@ function AnalyticsBar({
   highestValue,
   chartHeight,
   index,
+  onPress,
 }) {
   const progress = useRef(new Animated.Value(0)).current;
   const [displayValue, setDisplayValue] = useState(0);
@@ -62,7 +65,15 @@ function AnalyticsBar({
   }, [index, progress, value]);
 
   return (
-    <View style={styles.statColumn}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${label}: ${value} reports. Open ${label} assessment`}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.statColumn,
+        pressed && styles.statPressed,
+      ]}
+    >
       <View style={[styles.barTrack, { height: chartHeight }]}>
         <Animated.View
           style={[
@@ -80,12 +91,15 @@ function AnalyticsBar({
         </Animated.View>
       </View>
       <Text style={styles.cardLabel}>{label}</Text>
-    </View>
+    </Pressable>
   );
 }
 
 export default function Dashboard() {
+  const router = useRouter();
   const { width } = useWindowDimensions();
+  const isMobile = width < 768;
+  const isTablet = width >= 768 && width < 1024;
 
   const [stats, setStats] = useState(null);
 
@@ -152,9 +166,7 @@ export default function Dashboard() {
     loadDashboard();
   }, []);
 
-  const isDesktop = width >= 1024;
-
-  const chartHeight = isDesktop ? 360 : 250;
+  const chartHeight = width >= 1024 ? 360 : isMobile ? 170 : 240;
   const highestValue = stats ? Math.max(...Object.values(stats), 1) : 1;
   const chartStats = [
     { key: "critical", label: "Critical Situation", color: "#FF5B5B" },
@@ -164,7 +176,12 @@ export default function Dashboard() {
   ];
 
   return (
-    <View style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        { padding: isMobile ? 12 : isTablet ? 16 : 20 },
+      ]}
+    >
       <Text style={styles.title}>Dashboard</Text>
 
       {stats ? (
@@ -178,6 +195,12 @@ export default function Dashboard() {
                 highestValue={highestValue}
                 chartHeight={chartHeight}
                 index={index}
+                onPress={() =>
+                  router.push({
+                    pathname: "/admin/situtation_assessment",
+                    params: { status: stat.key },
+                  })
+                }
               />
             </View>
           ))}
@@ -194,13 +217,12 @@ export default function Dashboard() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
   },
 
   title: {
     fontSize: 32,
     fontWeight: "bold",
-    marginBottom: 50,
+    marginBottom: 28,
     color: "#599A74",
   },
 
@@ -213,19 +235,23 @@ const styles = StyleSheet.create({
   cards: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 12,
+    gap: 10,
     alignItems: "flex-start",
   },
 
   cardContainer: {
     flexGrow: 1,
-    flexBasis: 140,
+    flexBasis: 130,
     alignItems: "center",
   },
 
   statColumn: {
     width: "100%",
     alignItems: "center",
+  },
+
+  statPressed: {
+    opacity: 0.8,
   },
 
   barTrack: {

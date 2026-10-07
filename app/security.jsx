@@ -1,15 +1,26 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import {
   EmailAuthProvider,
   reauthenticateWithCredential,
+  reload,
   updatePassword,
+  verifyBeforeUpdateEmail,
 } from "firebase/auth";
-import { useState } from "react";
+import {
+  collection,
+  doc,
+  getDoc,
+  serverTimestamp,
+  writeBatch,
+} from "firebase/firestore";
+import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   SafeAreaView,
   ScrollView,
@@ -19,13 +30,16 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import FormError from "../components/form-error";
 import Navbar from "../components/navbar";
-import { auth } from "../firebaseConfig";
+import { auth, db } from "../firebaseConfig";
+import { getAuthErrorMessage } from "../utils/authErrors";
 
 export default function Security() {
   const router = useRouter();
   const currentUser = auth.currentUser;
 
+  const [displayEmail, setDisplayEmail] = useState(currentUser?.email || "");
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [repeatPassword, setRepeatPassword] = useState("");
@@ -33,6 +47,118 @@ export default function Security() {
   const [showNew, setShowNew] = useState(false);
   const [showRepeat, setShowRepeat] = useState(false);
   const [updating, setUpdating] = useState(false);
+  const [emailModalVisible, setEmailModalVisible] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
+  const [emailPassword, setEmailPassword] = useState("");
+  const [emailUpdating, setEmailUpdating] = useState(false);
+  const [emailError, setEmailError] = useState("");
+  const [emailSyncError, setEmailSyncError] = useState("");
+
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+      let isSyncing = false;
+
+      const syncVerifiedEmail = async () => {
+        if (!currentUser || isSyncing) return;
+
+        isSyncing = true;
+        try {
+          await reload(currentUser);
+          if (!isActive || !currentUser.email) return;
+          setDisplayEmail(currentUser.email);
+          setEmailSyncError("");
+
+          const profileRef = doc(db, "users", currentUser.uid);
+          const profile = await getDoc(profileRef);
+          if (
+            isActive &&
+            profile.exists() &&
+            profile.data().email !== currentUser.email
+          ) {
+            const oldEmail = String(profile.data().email || "");
+            const batch = writeBatch(db);
+            batch.update(profileRef, { email: currentUser.email });
+            batch.set(doc(collection(profileRef, "changeLogs")), {
+              field: "email",
+              oldValue: oldEmail,
+              newValue: currentUser.email,
+              source: "verified_email_change",
+              changedAt: serverTimestamp(),
+            });
+            await batch.commit();
+          }
+        } catch (error) {
+          console.error("Could not sync verified account email:", error);
+          if (isActive) {
+            setEmailSyncError(
+              "Your verified sign-in email could not be synced to your profile. Reopen this screen when you have a connection.",
+            );
+          }
+        } finally {
+          isSyncing = false;
+        }
+      };
+
+      syncVerifiedEmail();
+      const subscription = AppState.addEventListener("change", (state) => {
+        if (state === "active") syncVerifiedEmail();
+      });
+      return () => {
+        isActive = false;
+        subscription.remove();
+      };
+    }, [currentUser]),
+  );
+
+  const changeEmail = async () => {
+    const normalizedEmail = newEmail.trim();
+    if (!normalizedEmail || !emailPassword) {
+      setEmailError("Enter the new email address and your current password.");
+      return;
+    }
+
+    if (!currentUser?.email) {
+      setEmailError(
+        "Your account email could not be found. Please sign in again.",
+      );
+      return;
+    }
+
+    if (normalizedEmail.toLowerCase() === currentUser.email.toLowerCase()) {
+      setEmailError("Enter an email address different from your current one.");
+      return;
+    }
+
+    setEmailUpdating(true);
+    setEmailError("");
+    try {
+      const credential = EmailAuthProvider.credential(
+        currentUser.email,
+        emailPassword,
+      );
+      await reauthenticateWithCredential(currentUser, credential);
+      await verifyBeforeUpdateEmail(currentUser, normalizedEmail);
+
+      setEmailModalVisible(false);
+      setNewEmail("");
+      setEmailPassword("");
+      Alert.alert(
+        "Verification sent",
+        `A verification link was sent to ${normalizedEmail}. Your sign-in email will change only after you verify it.`,
+      );
+    } catch (error) {
+      console.error("Error requesting email change:", error);
+      setEmailError(
+        getAuthErrorMessage(
+          error,
+          "Could not request the email change. Please try again.",
+        ),
+      );
+    } finally {
+      setEmailUpdating(false);
+    }
+  };
 
   const changePassword = async () => {
     if (!currentPassword || !newPassword || !repeatPassword) {
@@ -40,10 +166,10 @@ export default function Security() {
       return;
     }
 
-    if (newPassword.length < 6) {
+    if (newPassword.length < 8) {
       Alert.alert(
         "Weak Password",
-        "New password must be at least 6 characters long.",
+        "New password must be at least 8 characters long.",
       );
       return;
     }
@@ -136,6 +262,26 @@ export default function Security() {
                 </View>
               </View>
 
+              {/* EMAIL FORM CARD */}
+              <View style={styles.formCard}>
+                <Text style={styles.cardSectionTitle}>Sign-in Email</Text>
+                <Text style={styles.currentEmail}>
+                  {displayEmail || "No email address found"}
+                </Text>
+                {emailSyncError ? <FormError message={emailSyncError} /> : null}
+                <TouchableOpacity
+                  style={styles.secondaryButton}
+                  onPress={() => {
+                    setEmailError("");
+                    setEmailModalVisible(true);
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="mail-outline" size={18} color="#4B7F5F" />
+                  <Text style={styles.secondaryButtonText}>Change Email</Text>
+                </TouchableOpacity>
+              </View>
+
               {/* PASSWORD FORM CARD */}
               <View style={styles.formCard}>
                 <Text style={styles.cardSectionTitle}>Change Password</Text>
@@ -175,7 +321,7 @@ export default function Security() {
                       value={newPassword}
                       onChangeText={setNewPassword}
                       secureTextEntry={!showNew}
-                      placeholder="At least 6 characters"
+                      placeholder="At least 8 characters"
                       placeholderTextColor="#94A3B8"
                     />
                     <TouchableOpacity
@@ -264,6 +410,93 @@ export default function Security() {
           <View style={styles.navbarContainer}>
             <Navbar />
           </View>
+
+          <Modal
+            visible={emailModalVisible}
+            transparent
+            animationType="fade"
+            onRequestClose={() => {
+              if (!emailUpdating) setEmailModalVisible(false);
+            }}
+          >
+            <View style={styles.modalBackdrop}>
+              <View style={styles.emailModal}>
+                <View style={styles.modalHeading}>
+                  <View style={styles.modalIcon}>
+                    <Ionicons
+                      name="mail-unread-outline"
+                      size={22}
+                      color="#4B7F5F"
+                    />
+                  </View>
+                  <Text style={styles.modalTitle}>Change sign-in email</Text>
+                </View>
+                <Text style={styles.modalWarning}>
+                  This will replace the email you use to sign in after you
+                  verify the new address. You can request another change later,
+                  but you will need to verify this address before it takes
+                  effect.
+                </Text>
+                <Text style={styles.label}>New Email Address</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  value={newEmail}
+                  onChangeText={(value) => {
+                    setNewEmail(value);
+                    setEmailError("");
+                  }}
+                  placeholder="Enter new email address"
+                  placeholderTextColor="#94A3B8"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  textContentType="emailAddress"
+                />
+                <Text style={styles.label}>Current Password</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  value={emailPassword}
+                  onChangeText={(value) => {
+                    setEmailPassword(value);
+                    setEmailError("");
+                  }}
+                  placeholder="Confirm your current password"
+                  placeholderTextColor="#94A3B8"
+                  secureTextEntry
+                  textContentType="password"
+                />
+                <FormError message={emailError} />
+                <View style={styles.modalActions}>
+                  <TouchableOpacity
+                    style={styles.cancelButton}
+                    onPress={() => setEmailModalVisible(false)}
+                    disabled={emailUpdating}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.confirmButton,
+                      styles.modalConfirmButton,
+                      emailUpdating && styles.confirmButtonDisabled,
+                    ]}
+                    onPress={changeEmail}
+                    disabled={emailUpdating}
+                    activeOpacity={0.8}
+                  >
+                    {emailUpdating ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Text style={styles.confirmButtonText}>
+                        Send Verification
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </Modal>
         </View>
       </View>
     </SafeAreaView>
@@ -386,6 +619,24 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     marginBottom: 16,
   },
+  currentEmail: {
+    color: "#334155",
+    fontSize: 15,
+    marginBottom: 4,
+  },
+  secondaryButton: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    marginTop: 12,
+    paddingVertical: 8,
+  },
+  secondaryButtonText: {
+    color: "#4B7F5F",
+    fontSize: 14,
+    fontWeight: "700",
+  },
   inputGroup: {
     marginBottom: 14,
   },
@@ -437,6 +688,77 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 15,
     fontWeight: "700",
+  },
+  modalBackdrop: {
+    flex: 1,
+    justifyContent: "center",
+    padding: 20,
+    backgroundColor: "rgba(15, 23, 42, 0.55)",
+  },
+  emailModal: {
+    width: "100%",
+    maxWidth: 440,
+    alignSelf: "center",
+    padding: 20,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+  },
+  modalHeading: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 12,
+  },
+  modalIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#E8F5E9",
+  },
+  modalTitle: {
+    flex: 1,
+    color: "#1E293B",
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  modalWarning: {
+    color: "#64748B",
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 16,
+  },
+  modalInput: {
+    backgroundColor: "#F8FAFC",
+    borderColor: "#E2E8F0",
+    borderRadius: 10,
+    borderWidth: 1,
+    color: "#1E293B",
+    fontSize: 14,
+    marginBottom: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+  },
+  modalActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 4,
+  },
+  cancelButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  cancelButtonText: {
+    color: "#64748B",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  modalConfirmButton: {
+    marginTop: 0,
+    paddingHorizontal: 14,
   },
 
   /* TIPS */

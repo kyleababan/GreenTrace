@@ -6,6 +6,7 @@ import {
     getDoc,
     getDocs,
     increment,
+    orderBy,
     query,
     serverTimestamp,
     updateDoc,
@@ -43,6 +44,16 @@ const getInitials = (name) =>
     .join("")
     .toUpperCase() || "U";
 
+const getChangeLabel = (field) =>
+  ({
+    firstName: "First name",
+    lastName: "Last name",
+    email: "Email",
+  })[field] || field;
+
+const formatChangeTime = (timestamp) =>
+  timestamp?.toDate ? timestamp.toDate().toLocaleString() : "Time unavailable";
+
 export default function UserPostDetail() {
   const { userId } = useLocalSearchParams();
   const router = useRouter();
@@ -50,6 +61,12 @@ export default function UserPostDetail() {
   const isMobile = width < 700;
   const [user, setUser] = useState(null);
   const [posts, setPosts] = useState([]);
+  const [visibleReportCount, setVisibleReportCount] = useState(6);
+  const [changeLogs, setChangeLogs] = useState([]);
+  const [visibleLogCount, setVisibleLogCount] = useState(6);
+  const [logsLoading, setLogsLoading] = useState(true);
+  const [logsError, setLogsError] = useState("");
+  const [activeActivityTab, setActiveActivityTab] = useState("reports");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [showPointsModal, setShowPointsModal] = useState(false);
@@ -62,6 +79,23 @@ export default function UserPostDetail() {
   const [deletingUser, setDeletingUser] = useState(false);
   const [banningUser, setBanningUser] = useState(false);
   const [unbanningUser, setUnbanningUser] = useState(false);
+  const visiblePosts = posts.slice(0, visibleReportCount);
+  const visibleChangeLogs = changeLogs.slice(0, visibleLogCount);
+
+  const openCommentLog = (entry) => {
+    router.push({
+      pathname: "/admin/situtation_assessment",
+      params: {
+        status: ["critical", "moderate", "ongoing", "cleaned"].includes(
+          String(entry.postStatus || "").toLowerCase(),
+        )
+          ? String(entry.postStatus).toLowerCase()
+          : "critical",
+        postId: entry.postId,
+        commentId: entry.id,
+      },
+    });
+  };
 
   useEffect(() => {
     const loadUserData = async () => {
@@ -100,6 +134,88 @@ export default function UserPostDetail() {
     };
 
     if (userId) loadUserData();
+  }, [userId]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    const loadChangeLogs = async () => {
+      if (!userId) return;
+
+      setLogsLoading(true);
+      setLogsError("");
+      try {
+        const [profileLogsSnapshot, commentsSnapshot] = await Promise.all([
+          getDocs(
+            query(
+              collection(db, "users", userId, "changeLogs"),
+              orderBy("changedAt", "desc"),
+            ),
+          ),
+          getDocs(
+            query(collection(db, "comments"), where("userId", "==", userId)),
+          ),
+        ]);
+        const comments = commentsSnapshot.docs.map((comment) => ({
+          id: comment.id,
+          ...comment.data(),
+        }));
+        const relatedPostIds = [
+          ...new Set(comments.map((comment) => comment.postId).filter(Boolean)),
+        ];
+        const postSnapshots = await Promise.all(
+          relatedPostIds.map((postId) => getDoc(doc(db, "posts", postId))),
+        );
+        const relatedPosts = new Map(
+          postSnapshots
+            .filter((postSnapshot) => postSnapshot.exists())
+            .map((postSnapshot) => [
+              postSnapshot.id,
+              { id: postSnapshot.id, ...postSnapshot.data() },
+            ]),
+        );
+        const commentLogs = comments.map((comment) => {
+          const post = relatedPosts.get(comment.postId);
+          return {
+            ...comment,
+            type: "comment",
+            createdAt: comment.createdAt,
+            postCaption: post?.caption || "Waste report",
+            postStatus: post?.status || "pending",
+            postExists: Boolean(post),
+          };
+        });
+        const profileLogs = profileLogsSnapshot.docs.map((entry) => ({
+          id: entry.id,
+          type: "profile",
+          ...entry.data(),
+        }));
+        const sortedLogs = [...profileLogs, ...commentLogs].sort(
+          (first, second) =>
+            (second.changedAt?.toMillis?.() ??
+              second.createdAt?.toMillis?.() ??
+              0) -
+            (first.changedAt?.toMillis?.() ??
+              first.createdAt?.toMillis?.() ??
+              0),
+        );
+        if (isActive) {
+          setChangeLogs(sortedLogs);
+        }
+      } catch (error) {
+        console.error("Unable to load reporter change logs:", error);
+        if (isActive) {
+          setLogsError("Unable to load this user's profile change logs.");
+        }
+      } finally {
+        if (isActive) setLogsLoading(false);
+      }
+    };
+
+    loadChangeLogs();
+    return () => {
+      isActive = false;
+    };
   }, [userId]);
 
   const addPoints = async () => {
@@ -313,62 +429,240 @@ export default function UserPostDetail() {
         </View>
 
         <View style={styles.postsPanel}>
+          <View style={styles.activityTabs}>
+            <TouchableOpacity
+              style={[
+                styles.activityTab,
+                activeActivityTab === "reports" && styles.activityTabActive,
+              ]}
+              onPress={() => setActiveActivityTab("reports")}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: activeActivityTab === "reports" }}
+            >
+              <Text
+                style={[
+                  styles.activityTabText,
+                  activeActivityTab === "reports" &&
+                    styles.activityTabTextActive,
+                ]}
+              >
+                Reports ({posts.length})
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.activityTab,
+                activeActivityTab === "logs" && styles.activityTabActive,
+              ]}
+              onPress={() => setActiveActivityTab("logs")}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: activeActivityTab === "logs" }}
+            >
+              <Text
+                style={[
+                  styles.activityTabText,
+                  activeActivityTab === "logs" && styles.activityTabTextActive,
+                ]}
+              >
+                Logs ({changeLogs.length})
+              </Text>
+            </TouchableOpacity>
+          </View>
           <Text style={styles.sectionTitle}>
-            {name}
-            {"'s reports"}
+            {activeActivityTab === "reports"
+              ? `${name}'s reports`
+              : `${name}'s profile changes`}
           </Text>
-          <ScrollView
-            style={styles.reportsScroll}
-            contentContainerStyle={styles.postList}
-            showsVerticalScrollIndicator
-          >
-            {posts.length ? (
-              posts.map((post) => (
+          {activeActivityTab === "reports" ? (
+            <ScrollView
+              style={styles.reportsScroll}
+              contentContainerStyle={styles.postList}
+              showsVerticalScrollIndicator
+            >
+              {posts.length ? (
+                visiblePosts.map((post) => (
+                  <TouchableOpacity
+                    key={post.id}
+                    style={[styles.postCard, isMobile && styles.mobilePostCard]}
+                    onPress={() =>
+                      router.push({
+                        pathname: "/admin/assessments/post_view/PostDetail",
+                        params: { postId: post.id },
+                      })
+                    }
+                    accessibilityRole="button"
+                    accessibilityLabel={`View report: ${hideBadWords(post.caption) || "Waste report"}`}
+                  >
+                    <View style={styles.postCopy}>
+                      <Text style={styles.postTitle} numberOfLines={2}>
+                        {hideBadWords(post.caption) || "Waste report"}
+                      </Text>
+                      <Text style={styles.postLocation} numberOfLines={2}>
+                        {post.locationName || "Location not specified"}
+                      </Text>
+                      <Text style={styles.postStatus}>
+                        {post.status || "pending"}
+                      </Text>
+                    </View>
+                    {post.imageUrl ? (
+                      <Image
+                        source={{ uri: post.imageUrl }}
+                        style={styles.postImage}
+                      />
+                    ) : (
+                      <View style={styles.imagePlaceholder}>
+                        <Ionicons
+                          name="image-outline"
+                          size={25}
+                          color="#71907d"
+                        />
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                ))
+              ) : (
+                <Text style={styles.emptyText}>
+                  This user has not submitted any reports.
+                </Text>
+              )}
+              {visibleReportCount < posts.length ? (
                 <TouchableOpacity
-                  key={post.id}
-                  style={[styles.postCard, isMobile && styles.mobilePostCard]}
+                  style={styles.loadMoreButton}
                   onPress={() =>
-                    router.push({
-                      pathname: "/admin/assessments/post_view/PostDetail",
-                      params: { postId: post.id },
-                    })
+                    setVisibleReportCount((count) =>
+                      Math.min(count + 6, posts.length),
+                    )
                   }
                   accessibilityRole="button"
-                  accessibilityLabel={`View report: ${hideBadWords(post.caption) || "Waste report"}`}
                 >
-                  <View style={styles.postCopy}>
-                    <Text style={styles.postTitle} numberOfLines={2}>
-                      {hideBadWords(post.caption) || "Waste report"}
-                    </Text>
-                    <Text style={styles.postLocation} numberOfLines={2}>
-                      {post.locationName || "Location not specified"}
-                    </Text>
-                    <Text style={styles.postStatus}>
-                      {post.status || "pending"}
-                    </Text>
-                  </View>
-                  {post.imageUrl ? (
-                    <Image
-                      source={{ uri: post.imageUrl }}
-                      style={styles.postImage}
-                    />
-                  ) : (
-                    <View style={styles.imagePlaceholder}>
+                  <Text style={styles.loadMoreButtonText}>
+                    Load 6 more reports
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+            </ScrollView>
+          ) : (
+            <ScrollView
+              style={styles.reportsScroll}
+              contentContainerStyle={styles.changeLogList}
+              showsVerticalScrollIndicator
+            >
+              {logsLoading ? (
+                <ActivityIndicator size="small" color="#5F9C76" />
+              ) : logsError ? (
+                <Text style={styles.logError}>{logsError}</Text>
+              ) : changeLogs.length ? (
+                visibleChangeLogs.map((entry) => (
+                  <TouchableOpacity
+                    key={`${entry.type}-${entry.id}`}
+                    style={[
+                      styles.changeLogCard,
+                      entry.type === "comment" && styles.commentLogCard,
+                    ]}
+                    onPress={
+                      entry.type === "comment" && entry.postExists
+                        ? () => openCommentLog(entry)
+                        : undefined
+                    }
+                    disabled={entry.type !== "comment" || !entry.postExists}
+                    activeOpacity={0.75}
+                    accessibilityRole={
+                      entry.type === "comment" && entry.postExists
+                        ? "button"
+                        : undefined
+                    }
+                    accessibilityLabel={
+                      entry.type === "comment" && entry.postExists
+                        ? `Open comment on ${entry.postCaption}`
+                        : undefined
+                    }
+                  >
+                    <View style={styles.changeLogIcon}>
                       <Ionicons
-                        name="image-outline"
-                        size={25}
-                        color="#71907d"
+                        name={
+                          entry.type === "comment"
+                            ? "chatbubble-outline"
+                            : "create-outline"
+                        }
+                        size={18}
+                        color="#4B7F5F"
                       />
                     </View>
-                  )}
+                    <View style={styles.changeLogCopy}>
+                      {entry.type === "comment" ? (
+                        <>
+                          <Text style={styles.changeLogTitle}>
+                            Commented on a report
+                          </Text>
+                          <Text style={styles.changeLogValues}>
+                            Report: {hideBadWords(entry.postCaption)}
+                          </Text>
+                          <Text style={styles.changeLogValues}>
+                            Comment: {hideBadWords(entry.comment || "")}
+                          </Text>
+                          {entry.postExists ? (
+                            <Text style={styles.commentLogHint}>
+                              Tap to view the highlighted comment
+                            </Text>
+                          ) : (
+                            <Text style={styles.changeLogTime}>
+                              The report is no longer available.
+                            </Text>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <Text style={styles.changeLogTitle}>
+                            {getChangeLabel(entry.field)} changed
+                          </Text>
+                          <Text style={styles.changeLogValues}>
+                            From: {entry.oldValue || "Not set"}
+                          </Text>
+                          <Text style={styles.changeLogValues}>
+                            To: {entry.newValue || "Not set"}
+                          </Text>
+                        </>
+                      )}
+                      <Text style={styles.changeLogTime}>
+                        {formatChangeTime(
+                          entry.type === "comment"
+                            ? entry.createdAt
+                            : entry.changedAt,
+                        )}
+                      </Text>
+                    </View>
+                    {entry.type === "comment" && entry.postExists ? (
+                      <Ionicons
+                        name="chevron-forward"
+                        size={18}
+                        color="#4B7F5F"
+                      />
+                    ) : null}
+                  </TouchableOpacity>
+                ))
+              ) : (
+                <Text style={styles.emptyText}>
+                  No profile changes have been logged yet. Changes made before
+                  logging was added are not available.
+                </Text>
+              )}
+              {!logsLoading &&
+              !logsError &&
+              visibleLogCount < changeLogs.length ? (
+                <TouchableOpacity
+                  style={styles.loadMoreButton}
+                  onPress={() =>
+                    setVisibleLogCount((count) =>
+                      Math.min(count + 6, changeLogs.length),
+                    )
+                  }
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.loadMoreButtonText}>Load 6 more logs</Text>
                 </TouchableOpacity>
-              ))
-            ) : (
-              <Text style={styles.emptyText}>
-                This user has not submitted any reports.
-              </Text>
-            )}
-          </ScrollView>
+              ) : null}
+            </ScrollView>
+          )}
         </View>
       </View>
 
@@ -760,6 +1054,31 @@ const styles = StyleSheet.create({
     padding: 14,
     overflow: "hidden",
   },
+  activityTabs: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e2e8e3",
+  },
+  activityTab: {
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderBottomWidth: 2,
+    borderBottomColor: "transparent",
+  },
+  activityTabActive: {
+    borderBottomColor: "#5F9C76",
+  },
+  activityTabText: {
+    color: "#63756a",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  activityTabTextActive: {
+    color: "#276344",
+    fontWeight: "700",
+  },
   reportsScroll: { flex: 1, minHeight: 0 },
   sectionTitle: {
     fontSize: 17,
@@ -772,6 +1091,65 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: 12,
     paddingBottom: 4,
+  },
+  changeLogList: {
+    gap: 10,
+    paddingBottom: 4,
+  },
+  changeLogCard: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    backgroundColor: "#f7f9f7",
+    borderWidth: 1,
+    borderColor: "#e2e8e3",
+    borderRadius: 10,
+    padding: 12,
+  },
+  commentLogCard: {
+    borderColor: "#b8d2ff",
+    backgroundColor: "#f2f7ff",
+  },
+  changeLogIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#e6f0e9",
+  },
+  changeLogCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  changeLogTitle: {
+    color: "#1d2b21",
+    fontSize: 14,
+    fontWeight: "700",
+    marginBottom: 4,
+  },
+  changeLogValues: {
+    color: "#4d5d52",
+    fontSize: 12,
+    lineHeight: 18,
+    overflowWrap: "anywhere",
+  },
+  changeLogTime: {
+    color: "#849188",
+    fontSize: 11,
+    marginTop: 6,
+  },
+  commentLogHint: {
+    color: "#3973c6",
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 6,
+  },
+  logError: {
+    color: "#b42318",
+    fontSize: 13,
+    textAlign: "center",
+    marginTop: 24,
   },
   postCard: {
     width: "48%",
@@ -809,6 +1187,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     alignSelf: "center",
+  },
+  loadMoreButton: {
+    alignSelf: "center",
+    marginTop: 4,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: "#e6f0e9",
+  },
+  loadMoreButtonText: {
+    color: "#276344",
+    fontSize: 13,
+    fontWeight: "700",
   },
   emptyText: { color: "#63756a", textAlign: "center", marginTop: 30 },
   modalOverlay: {

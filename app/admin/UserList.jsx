@@ -32,6 +32,7 @@ const USERS_PER_PAGE = 10;
 export default function UserList() {
   const router = useRouter();
   const { width } = useWindowDimensions();
+  const pagePadding = width < 768 ? 12 : width < 1024 ? 16 : 20;
   const [users, setUsers] = useState([]);
   const [searchFocused, setSearchFocused] = useState(false);
   const [search, setSearch] = useState("");
@@ -114,7 +115,7 @@ export default function UserList() {
   const isTwoColumns = width >= 560;
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { padding: pagePadding }]}>
       <View
         style={[
           styles.searchContainer,

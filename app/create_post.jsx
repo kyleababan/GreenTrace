@@ -1,6 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
-import * as Location from "expo-location";
 import { useRouter } from "expo-router";
 import { signOut } from "firebase/auth";
 import { useEffect, useRef, useState } from "react";
@@ -22,6 +21,7 @@ import Navbar from "../components/navbar";
 import NsfwWarningModal from "../components/nsfw-warning-modal";
 import { normalizePurok } from "../constants/locationFormat";
 import { auth, db } from "../firebaseConfig";
+import { getCurrentCoordinates } from "../utils/getCurrentCoordinates";
 import { getNameInitials } from "../utils/getNameInitials";
 import { hideBadWords } from "../utils/hideBadWords";
 
@@ -125,6 +125,7 @@ export default function CreateReport() {
     latitude: 10.2705,
     longitude: 123.5855,
   });
+  const [hasGpsCoordinates, setHasGpsCoordinates] = useState(false);
   const [postCoordinates, setPostCoordinates] = useState(null);
   const [gpsBarangay, setGpsBarangay] = useState("");
   const [gpsStreet, setGpsStreet] = useState("");
@@ -144,67 +145,17 @@ export default function CreateReport() {
     setLocationMessage("Checking and requesting location access...");
 
     try {
-      if (
-        Platform.OS === "web" &&
-        typeof navigator !== "undefined" &&
-        navigator.geolocation
-      ) {
-        navigator.geolocation.getCurrentPosition(
-          (pos) => {
-            const newLat = parseFloat(pos.coords.latitude.toFixed(6));
-            const newLng = parseFloat(pos.coords.longitude.toFixed(6));
-            setLocationStatus("granted");
-            setLocationMessage(
-              `✅ Location allowed & active! (GPS: ${newLat}, ${newLng}). Make sure device location toggle is ON.`,
-            );
-            setCoords({ latitude: newLat, longitude: newLng });
-            setMapSessionId((prev) => prev + 1);
-          },
-          (err) => {
-            setLocationStatus("denied");
-            if (err.code === 1) {
-              setLocationMessage(
-                "❌ Permission denied. In your browser URL bar, click the lock / site settings icon, set Location to 'Allow', and reload the page.",
-              );
-            } else {
-              setLocationMessage(
-                "⚠️ Could not retrieve GPS location. Please make sure your device Location / GPS switch is turned ON.",
-              );
-            }
-          },
-          { enableHighAccuracy: true, timeout: 8000 },
-        );
-      } else {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status === "granted") {
-          try {
-            const loc = await Location.getCurrentPositionAsync({
-              accuracy: Location.Accuracy.Balanced,
-            });
-            const newLat = parseFloat(loc.coords.latitude.toFixed(6));
-            const newLng = parseFloat(loc.coords.longitude.toFixed(6));
-            setLocationStatus("granted");
-            setLocationMessage(
-              `✅ Location allowed & active! (GPS: ${newLat}, ${newLng})`,
-            );
-            setCoords({ latitude: newLat, longitude: newLng });
-            setMapSessionId((prev) => prev + 1);
-          } catch (gpsErr) {
-            setLocationStatus("granted");
-            setLocationMessage(
-              "✅ Location permission granted! Please ensure your device GPS toggle is turned ON.",
-            );
-          }
-        } else {
-          setLocationStatus("denied");
-          setLocationMessage(
-            "❌ Location permission denied. Please allow GreenTrace location access in your device Settings.",
-          );
-        }
-      }
+      const currentCoordinates = await getCurrentCoordinates();
+      setLocationStatus("granted");
+      setLocationMessage(
+        `✅ Location allowed & active! (GPS: ${currentCoordinates.latitude}, ${currentCoordinates.longitude})`,
+      );
+      setCoords(currentCoordinates);
+      setHasGpsCoordinates(true);
+      setMapSessionId((prev) => prev + 1);
     } catch (err) {
       setLocationStatus("denied");
-      setLocationMessage("⚠️ Error: " + err.message);
+      setLocationMessage(`⚠️ ${err.message || "Could not retrieve GPS location."}`);
     }
   };
 
@@ -217,11 +168,29 @@ export default function CreateReport() {
             typeof event.data === "string"
               ? JSON.parse(event.data)
               : event.data;
-          if (payload?.type === "GPS_PIN_MOVED" && payload.lat && payload.lng) {
-            const newLat = parseFloat(Number(payload.lat).toFixed(6));
-            const newLng = parseFloat(Number(payload.lng).toFixed(6));
-            setCoords({ latitude: newLat, longitude: newLng });
-            triggerReverseGeocode(newLat, newLng);
+          if (payload?.type === "GPS_PIN_MOVED") {
+            const newLat = Number(payload.lat);
+            const newLng = Number(payload.lng);
+            if (
+              !Number.isFinite(newLat) ||
+              !Number.isFinite(newLng) ||
+              newLat < -90 ||
+              newLat > 90 ||
+              newLng < -180 ||
+              newLng > 180
+            ) {
+              return;
+            }
+            const latitude = Number(newLat.toFixed(6));
+            const longitude = Number(newLng.toFixed(6));
+            setCoords({ latitude, longitude });
+            setHasGpsCoordinates(true);
+            setGpsErrors((previous) => {
+              const next = { ...previous };
+              delete next.location;
+              return next;
+            });
+            triggerReverseGeocode(latitude, longitude);
           }
         } catch (e) {
           // Ignore non-JSON messages
@@ -287,46 +256,42 @@ export default function CreateReport() {
     }
   };
 
-  const detectGpsLocation = async () => {
-    setGpsErrors({});
-    setGpsLoading(true);
-    let lat = 10.2705; // Pinamungajan center default
-    let lng = 123.5855;
-
-    try {
-      if (
-        Platform.OS === "web" &&
-        typeof navigator !== "undefined" &&
-        navigator.geolocation
-      ) {
-        const pos = await new Promise((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(resolve, reject, {
-            enableHighAccuracy: true,
-            timeout: 8000,
-            maximumAge: 10000,
-          });
-        });
-        lat = parseFloat(pos.coords.latitude.toFixed(6));
-        lng = parseFloat(pos.coords.longitude.toFixed(6));
-      } else {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status === "granted") {
-          const loc = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Balanced,
-          });
-          lat = parseFloat(loc.coords.latitude.toFixed(6));
-          lng = parseFloat(loc.coords.longitude.toFixed(6));
-        }
+  const detectGpsLocation = async (refresh = false) => {
+    setGpsModalVisible(true);
+    setGpsErrors((previous) => {
+      const next = { ...previous };
+      delete next.location;
+      return next;
+    });
+    if (hasGpsCoordinates && !refresh) {
+      setMapSessionId((previous) => previous + 1);
+      if (!gpsBarangay && !gpsStreet) {
+        await reverseGeocodeCoordinates(coords.latitude, coords.longitude);
       }
-    } catch (locErr) {
-      console.warn("Could not get GPS, using Pinamungajan default:", locErr);
+      return;
     }
 
-    setCoords({ latitude: lat, longitude: lng });
-    setMapSessionId((prev) => prev + 1);
-    await reverseGeocodeCoordinates(lat, lng);
-    setGpsLoading(false);
-    setGpsModalVisible(true);
+    setGpsLoading(true);
+    try {
+      const currentCoordinates = await getCurrentCoordinates();
+      setCoords(currentCoordinates);
+      setHasGpsCoordinates(true);
+      setMapSessionId((previous) => previous + 1);
+      await reverseGeocodeCoordinates(
+        currentCoordinates.latitude,
+        currentCoordinates.longitude,
+      );
+    } catch (locErr) {
+      console.warn("Could not get current GPS location:", locErr);
+      setGpsErrors((previous) => ({
+        ...previous,
+        location:
+          locErr.message ||
+          "Could not retrieve GPS location. Check your device settings and try again.",
+      }));
+    } finally {
+      setGpsLoading(false);
+    }
   };
 
   const handleUseCamera = async () => {
@@ -370,7 +335,7 @@ export default function CreateReport() {
     }
   };
 
-  const processSelectedImage = async (asset) => {
+  const processSelectedImage = (asset) => {
     if (asset.type === "video") {
       setErrors((previous) => ({
         ...previous,
@@ -393,9 +358,6 @@ export default function CreateReport() {
       delete next.image;
       return next;
     });
-
-    // Automatically trigger GPS tracking detection & show map
-    await detectGpsLocation();
   };
 
   const handleConfirmGpsLocation = () => {
@@ -408,6 +370,12 @@ export default function CreateReport() {
     }
     if (!street) {
       newGpsErrors.street = "Street / Purok is required.";
+    }
+    if (!hasGpsCoordinates) {
+      newGpsErrors.location =
+        Platform.OS === "web"
+          ? "Get your GPS location or move the map pin first."
+          : "Get your GPS location before confirming.";
     }
 
     if (Object.keys(newGpsErrors).length > 0) {
@@ -457,8 +425,8 @@ export default function CreateReport() {
 <body>
   <div id="map"></div>
   <script>
-    var lat = ${coords.latitude || 10.2705};
-    var lng = ${coords.longitude || 123.5855};
+    var lat = ${coords.latitude ?? 10.2705};
+    var lng = ${coords.longitude ?? 123.5855};
     var map = L.map('map', {
       zoomControl: true,
       attributionControl: false
@@ -552,10 +520,7 @@ export default function CreateReport() {
           purok: normalizePurok(manualPurok) || null,
 
           coordinates:
-            postCoordinates ||
-            (coords.latitude
-              ? { latitude: coords.latitude, longitude: coords.longitude }
-              : null),
+            postCoordinates,
 
           status: "moderate",
 
@@ -1070,6 +1035,20 @@ export default function CreateReport() {
           <View style={styles.modalBackground}>
             <View style={[styles.modalBox, styles.gpsModalBox]}>
               <Text style={styles.modalTitle}>GPS Tracking</Text>
+              <TouchableOpacity
+                style={styles.gpsCurrentLocationBtn}
+                onPress={() => detectGpsLocation(true)}
+                disabled={gpsLoading}
+              >
+                {gpsLoading ? (
+                  <ActivityIndicator size="small" color="#276344" />
+                ) : (
+                  <Ionicons name="locate" size={16} color="#276344" />
+                )}
+                <Text style={styles.gpsCurrentLocationText}>
+                  {gpsLoading ? "Getting current location..." : "Use current GPS"}
+                </Text>
+              </TouchableOpacity>
 
               {/* INTERACTIVE LEAFLET / OPENSTREETMAP */}
               <View style={styles.gpsPlaceholder}>
@@ -1104,19 +1083,24 @@ export default function CreateReport() {
                 📍 Drag the pin or tap on the map to adjust location if
                 inaccurate.
               </Text>
+              {!!gpsErrors.location && (
+                <Text style={styles.gpsLocationError}>
+                  {gpsErrors.location}
+                </Text>
+              )}
 
               <View style={styles.gpsDetails}>
                 <View style={styles.gpsCoordinateRow}>
                   <View style={styles.gpsDetailItem}>
                     <Text style={styles.gpsDetailLabel}>Latitude</Text>
                     <Text style={styles.gpsDetailValue}>
-                      {coords.latitude ? coords.latitude.toFixed(6) : "--"}
+                      {hasGpsCoordinates ? coords.latitude.toFixed(6) : "--"}
                     </Text>
                   </View>
                   <View style={styles.gpsDetailItem}>
                     <Text style={styles.gpsDetailLabel}>Longitude</Text>
                     <Text style={styles.gpsDetailValue}>
-                      {coords.longitude ? coords.longitude.toFixed(6) : "--"}
+                      {hasGpsCoordinates ? coords.longitude.toFixed(6) : "--"}
                     </Text>
                   </View>
                 </View>
@@ -1675,6 +1659,20 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
 
+  gpsCurrentLocationBtn: {
+    alignSelf: "flex-end",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 8,
+  },
+
+  gpsCurrentLocationText: {
+    color: "#276344",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+
   gpsLoadingCenter: {
     flex: 1,
     alignItems: "center",
@@ -1695,6 +1693,13 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: "center",
     fontStyle: "italic",
+  },
+
+  gpsLocationError: {
+    color: "#B42318",
+    fontSize: 12,
+    marginTop: 6,
+    textAlign: "center",
   },
 
   gpsDetails: {

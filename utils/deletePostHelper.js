@@ -59,5 +59,12 @@ export const deleteUserRelatedDocuments = async (userId) => {
     await deleteDoc(notification.ref);
   }
 
+  const changeLogsSnapshot = await getDocs(
+    collection(db, "users", userId, "changeLogs"),
+  );
+  for (const changeLog of changeLogsSnapshot.docs) {
+    await deleteDoc(changeLog.ref);
+  }
+
   await deleteDoc(doc(db, "users", userId));
 };

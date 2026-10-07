@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
     Image,
     ScrollView,
@@ -113,11 +113,28 @@ export default function AssessmentList({
 }) {
   const router = useRouter();
   const { width } = useWindowDimensions();
+  const isMobile = width < 700;
+  const initialBatchSize = isMobile ? 5 : width < 1250 ? 5 : 6;
+  const nextBatchSize = isMobile ? 4 : width < 1250 ? 4 : 6;
   const [posts, setPosts] = useState([]);
   const [authorPoints, setAuthorPoints] = useState({});
   const [now, setNow] = useState(() => Date.now());
   const [volunteerPostMap, setVolunteerPostMap] = useState({});
   const [completedEvents, setCompletedEvents] = useState([]);
+  const [pagination, setPagination] = useState({ key: "", count: 0 });
+  const loadedNearEnd = useRef(false);
+  const paginationKey = JSON.stringify([
+    status,
+    searchText,
+    enabledFilters,
+    filters,
+  ]);
+  const visibleCount =
+    pagination.key === paginationKey ? pagination.count : initialBatchSize;
+
+  useEffect(() => {
+    loadedNearEnd.current = false;
+  }, [paginationKey]);
 
   useEffect(() => {
     const postsQuery = query(
@@ -270,9 +287,39 @@ export default function AssessmentList({
   );
 
   const hasVisibleItems = sortedItems.length > 0;
-  const cardWidth = width < 850 ? "100%" : width < 1250 ? "48.5%" : "32%";
+  const visibleItems = sortedItems.slice(0, visibleCount);
+  const hasMoreItems = visibleCount < sortedItems.length;
+  const cardWidth = isMobile ? "100%" : width < 1250 ? "48%" : "31%";
   const statusDetails =
     STATUS_DETAILS[status.toLowerCase()] || STATUS_DETAILS.pending;
+
+  const handleListScroll = (event) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const distanceFromEnd =
+      contentSize.height - (contentOffset.y + layoutMeasurement.height);
+    const loadThreshold = 180;
+
+    if (distanceFromEnd > loadThreshold * 1.5) {
+      loadedNearEnd.current = false;
+      return;
+    }
+
+    if (
+      contentOffset.y > 0 &&
+      distanceFromEnd <= loadThreshold &&
+      hasMoreItems &&
+      !loadedNearEnd.current
+    ) {
+      loadedNearEnd.current = true;
+      setPagination((current) => ({
+        key: paginationKey,
+        count:
+          (current.key === paginationKey
+            ? current.count
+            : initialBatchSize) + nextBatchSize,
+      }));
+    }
+  };
 
   return (
     <View style={styles.container}>
@@ -290,10 +337,12 @@ export default function AssessmentList({
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        onScroll={handleListScroll}
+        scrollEventThrottle={16}
       >
         {hasVisibleItems ? (
           <View style={styles.postContainer}>
-            {sortedItems.map((item) => {
+            {visibleItems.map((item) => {
               if (item.isVolunteerEvent) {
                 const event = item;
                 const completedAt = event.completedAt || event.createdAt;
@@ -301,7 +350,11 @@ export default function AssessmentList({
                 return (
                   <TouchableOpacity
                     key={`event-${event.id}`}
-                    style={[styles.postCard, { width: cardWidth }]}
+                    style={[
+                      styles.postCard,
+                      isMobile && styles.postCardMobile,
+                      { width: cardWidth },
+                    ]}
                     activeOpacity={0.85}
                     onPress={() =>
                       router.push({
@@ -363,7 +416,12 @@ export default function AssessmentList({
                       </View>
                     ) : null}
                     {event.imageUrl ? (
-                      <View style={styles.imageContainer}>
+                      <View
+                        style={[
+                          styles.imageContainer,
+                          isMobile && styles.imageContainerMobile,
+                        ]}
+                      >
                         <Image
                           source={{ uri: event.imageUrl }}
                           style={styles.image}
@@ -393,12 +451,19 @@ export default function AssessmentList({
                   : post.createdAt;
 
               return (
-                <TouchableOpacity
+                <View
                   key={post.id}
-                  style={[styles.postCard, { width: cardWidth }]}
-                  activeOpacity={0.85}
-                  onPress={() => setSelectedPost(post)}
+                  style={[styles.postCardWrapper, { width: cardWidth }]}
                 >
+                  <TouchableOpacity
+                    style={[
+                      styles.postCard,
+                      isMobile && styles.postCardMobile,
+                      { width: "100%" },
+                    ]}
+                    activeOpacity={0.85}
+                    onPress={() => setSelectedPost(post)}
+                  >
                   <View style={styles.authorRow}>
                     <View style={styles.profileAvatar}>
                       <Text style={styles.profileAvatarText}>
@@ -489,7 +554,12 @@ export default function AssessmentList({
                     </View>
                   </View>
 
-                  <View style={styles.imageContainer}>
+                  <View
+                    style={[
+                      styles.imageContainer,
+                      isMobile && styles.imageContainerMobile,
+                    ]}
+                  >
                     <Image
                       source={{ uri: post.imageUrl }}
                       style={styles.image}
@@ -528,9 +598,15 @@ export default function AssessmentList({
                       </Text>
                     </View>
                   </View>
-                </TouchableOpacity>
+                  </TouchableOpacity>
+                </View>
               );
             })}
+            {hasMoreItems && (
+              <Text style={styles.loadMoreHint}>
+                Scroll to load more reports
+              </Text>
+            )}
           </View>
         ) : (
           <View style={styles.emptyState}>
@@ -552,7 +628,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 14,
+    marginBottom: 12,
   },
   title: {
     color: "#234B33",
@@ -569,7 +645,14 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     alignItems: "flex-start",
-    gap: 18,
+    gap: 14,
+  },
+  loadMoreHint: {
+    width: "100%",
+    paddingVertical: 12,
+    color: "#7A8A80",
+    fontSize: 12,
+    textAlign: "center",
   },
   postCard: {
     backgroundColor: "#FFFFFF",
@@ -582,6 +665,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.07,
     shadowRadius: 6,
     elevation: 2,
+  },
+  postCardWrapper: {
+    minWidth: 0,
+  },
+  postCardMobile: {
+    padding: 12,
   },
   eventHeader: {
     flexDirection: "row",
@@ -714,6 +803,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#C9DCCF",
     backgroundColor: "#EBEBEB",
+  },
+  imageContainerMobile: {
+    height: 190,
   },
   image: { width: "100%", height: "100%" },
   reactionRow: {

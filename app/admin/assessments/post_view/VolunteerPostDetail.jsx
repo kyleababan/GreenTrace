@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
+  collection,
   doc,
   getDoc,
   runTransaction,
@@ -22,7 +23,7 @@ import {
 } from "react-native";
 
 import PostLocationModal from "../../../../components/PostLocationModal";
-import { db } from "../../../../firebaseConfig";
+import { auth, db } from "../../../../firebaseConfig";
 import { hideBadWords } from "../../../../utils/hideBadWords";
 
 const getMemberId = (member) =>
@@ -69,6 +70,7 @@ export default function VolunteerPostDetail({
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [selectedMember, setSelectedMember] = useState(null);
   const [removingMemberId, setRemovingMemberId] = useState("");
+  const [kickReason, setKickReason] = useState("");
   const [updatingAttendanceId, setUpdatingAttendanceId] = useState("");
   const [memberProfiles, setMemberProfiles] = useState({});
   const [kickDialog, setKickDialog] = useState(null);
@@ -196,18 +198,35 @@ export default function VolunteerPostDetail({
           ? activity.volunteers
           : [];
         const activityJoinedCount = Number(activity.joinedCount) || 0;
+        const isCompletedStandaloneEvent =
+          !activity.postId &&
+          ["completed", "cleaned"].includes(
+            String(activity.status || "").toLowerCase(),
+          );
 
-        if (activity.status !== "open") {
-          throw new Error("Only open events can be deleted.");
+        if (activity.status !== "open" && !isCompletedStandaloneEvent) {
+          throw new Error(
+            "Only open or completed standalone events can be deleted.",
+          );
         }
 
-        if (activityMembers.length > 0 || activityJoinedCount > 0) {
+        if (
+          !isCompletedStandaloneEvent &&
+          (activityMembers.length > 0 || activityJoinedCount > 0)
+        ) {
           throw new Error("Events with joined volunteers cannot be deleted.");
         }
 
         transaction.delete(activityRef);
       });
-      router.replace("/admin/VolunteerList");
+      if (
+        isStandaloneEvent &&
+        ["completed", "cleaned"].includes(String(post.status || "").toLowerCase())
+      ) {
+        router.back();
+      } else {
+        router.replace("/admin/VolunteerList");
+      }
     } catch (error) {
       console.error("Unable to delete volunteer activity:", error);
       setShowDeleteDialog(false);
@@ -490,23 +509,29 @@ export default function VolunteerPostDetail({
 
     setKickDialog({
       title: "Kick volunteer?",
-      message: `Remove ${memberName} from this activity?`,
+      message: `Remove ${memberName} from this activity? Please provide a reason. They will be notified.`,
       memberId,
     });
+    setKickReason("");
   };
 
   const confirmKickMember = () => {
     const memberId = kickDialog?.memberId;
+    const reason = kickReason.trim();
+    if (!memberId || !reason || removingMemberId) return;
+
     setKickDialog(null);
-    if (memberId) kickMember(memberId);
+    setKickReason("");
+    kickMember(memberId, reason);
   };
 
-  const kickMember = async (memberId) => {
+  const kickMember = async (memberId, reason) => {
     if (!post?.id || removingMemberId) return;
 
     setRemovingMemberId(memberId);
     try {
-      await runTransaction(db, async (transaction) => {
+      const notificationRef = doc(collection(db, "notifications"));
+      const removed = await runTransaction(db, async (transaction) => {
         const postRef = doc(db, "volunteer_posts", post.id);
         const snapshot = await transaction.get(postRef);
 
@@ -524,7 +549,9 @@ export default function VolunteerPostDetail({
           ? data.attendedVolunteerIds
           : [];
 
-        if (updatedMembers.length === currentMembers.length) return;
+        if (updatedMembers.length === currentMembers.length) {
+          throw new Error("This volunteer is no longer in the activity.");
+        }
 
         transaction.update(postRef, {
           volunteers: updatedMembers,
@@ -533,7 +560,22 @@ export default function VolunteerPostDetail({
             (attendedId) => attendedId !== memberId,
           ),
         });
+        transaction.set(notificationRef, {
+          userId: memberId,
+          ...(auth.currentUser?.uid ? { actorId: auth.currentUser.uid } : {}),
+          actorNames: ["GreenTrace Admin"],
+          type: "volunteer_kicked",
+          title: "Removed from volunteer activity",
+          message: `You were removed from "${data.title || post.title || "a volunteer activity"}". Reason: ${reason}`,
+          volunteerPostId: post.id,
+          read: false,
+          createdAt: serverTimestamp(),
+        });
+
+        return true;
       });
+
+      if (!removed) return;
 
       setPost((currentPost) => {
         const updatedMembers = (currentPost?.volunteers || []).filter(
@@ -558,7 +600,7 @@ export default function VolunteerPostDetail({
       console.error("Unable to kick volunteer:", error);
       setKickDialog({
         title: "Unable to remove",
-        message: "Please try again.",
+        message: error.message || "Please try again.",
       });
     } finally {
       setRemovingMemberId("");
@@ -1170,7 +1212,9 @@ export default function VolunteerPostDetail({
             <Text style={styles.confirmMessage}>
               {post.postId
                 ? "This cannot be undone. The original waste report will remain, but this volunteer event will be removed."
-                : "This cannot be undone. This volunteer event will be permanently removed."}
+                : standaloneOperationCompleted
+                  ? "This cannot be undone. The completed event will be removed. EcoPoints already earned by volunteers will remain."
+                  : "This cannot be undone. This volunteer event will be permanently removed."}
             </Text>
             <View style={styles.confirmActions}>
               <TouchableOpacity
@@ -1236,20 +1280,44 @@ export default function VolunteerPostDetail({
             </View>
             <Text style={styles.confirmTitle}>{kickDialog?.title}</Text>
             <Text style={styles.confirmMessage}>{kickDialog?.message}</Text>
+            {kickDialog?.memberId && (
+              <TextInput
+                value={kickReason}
+                onChangeText={setKickReason}
+                placeholder="Reason for removing this volunteer"
+                placeholderTextColor="#8C9E93"
+                multiline
+                maxLength={500}
+                editable={!removingMemberId}
+                style={styles.kickReasonInput}
+                textAlignVertical="top"
+              />
+            )}
             <View style={styles.confirmActions}>
               {kickDialog?.memberId ? (
                 <>
                   <TouchableOpacity
                     style={styles.cancelButton}
-                    onPress={() => setKickDialog(null)}
+                    disabled={Boolean(removingMemberId)}
+                    onPress={() => {
+                      setKickDialog(null);
+                      setKickReason("");
+                    }}
                   >
                     <Text style={styles.cancelButtonText}>Cancel</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={styles.confirmKickButton}
+                    style={[
+                      styles.confirmKickButton,
+                      (!kickReason.trim() || removingMemberId) &&
+                        styles.disabledAction,
+                    ]}
+                    disabled={!kickReason.trim() || Boolean(removingMemberId)}
                     onPress={confirmKickMember}
                   >
-                    <Text style={styles.confirmKickText}>Kick</Text>
+                    <Text style={styles.confirmKickText}>
+                      {removingMemberId ? "Removing..." : "Kick"}
+                    </Text>
                   </TouchableOpacity>
                 </>
               ) : (
@@ -1598,6 +1666,19 @@ const styles = StyleSheet.create({
     color: "#63756a",
     lineHeight: 20,
     textAlign: "center",
+  },
+  kickReasonInput: {
+    width: "100%",
+    minHeight: 90,
+    maxHeight: 150,
+    padding: 12,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: "#D8E2DC",
+    borderRadius: 10,
+    backgroundColor: "#F8FAF9",
+    color: "#1F2937",
+    fontSize: 13,
   },
   confirmActions: {
     width: "100%",

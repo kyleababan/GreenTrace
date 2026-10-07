@@ -12,7 +12,7 @@ import {
   startAfter,
   updateDoc,
 } from "firebase/firestore";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -22,42 +22,21 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { normalizePurok } from "../../constants/locationFormat";
+import { BARANGAYS } from "../../constants/barangays";
 import { db } from "../../firebaseConfig";
+import {
+  formatPickupScheduleDate,
+  getPickupRecurrenceLabel,
+  hasUpcomingPickupDate,
+} from "../../utils/formatPickupScheduleDate";
 
 const WEEK_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const EVENT_COLORS = ["#599A74", "#E69B45", "#5B8DEF", "#C76DBA", "#D85B5B"];
 const SCHEDULES_PER_PAGE = 10;
-const BARANGAYS = [
-  "Anislag",
-  "Anopog",
-  "Binabag",
-  "Buhingtubig",
-  "Busay",
-  "Butong",
-  "Cabiangon",
-  "Camugao",
-  "Duangan",
-  "Guimbawian",
-  "Lamac",
-  "Lut-od",
-  "Mangoto",
-  "Opao",
-  "Poblacion",
-  "Punod",
-  "Rizal",
-  "Sacsac",
-  "Sambagon",
-  "Sibago",
-  "Tajao",
-  "Tangub",
-  "Tanibag",
-  "Tupas",
-  "Tutay",
-].sort((first, second) => first.localeCompare(second));
-
 const startOfMonth = (date) => new Date(date.getFullYear(), date.getMonth(), 1);
 
 const isSameDate = (first, second) =>
@@ -131,9 +110,12 @@ const getCalendarDays = (month) => {
 };
 
 export default function PickupSchedule() {
+  const { width } = useWindowDimensions();
+  const pagePadding = width < 768 ? 12 : width < 1024 ? 16 : 20;
   const today = new Date();
   const [visibleMonth, setVisibleMonth] = useState(() => startOfMonth(today));
   const [selectedDate, setSelectedDate] = useState(null);
+  const [visibleSelectedDateCount, setVisibleSelectedDateCount] = useState(5);
   const [operations, setOperations] = useState([]);
   const [loadingMoreOperations, setLoadingMoreOperations] = useState(false);
   const [hasMoreOperations, setHasMoreOperations] = useState(true);
@@ -155,7 +137,31 @@ export default function PickupSchedule() {
   const [deleting, setDeleting] = useState(false);
   const [showAllAnnouncements, setShowAllAnnouncements] = useState(false);
   const [visibleAllCount, setVisibleAllCount] = useState(5);
+  const [announcementBarangayFilter, setAnnouncementBarangayFilter] =
+    useState("");
+  const [purokSortOrder, setPurokSortOrder] = useState("asc");
   const calendarDays = getCalendarDays(visibleMonth);
+  const upcomingAnnouncements = useMemo(
+    () => operations.filter((operation) => hasUpcomingPickupDate(operation)),
+    [operations],
+  );
+  const filteredAnnouncements = useMemo(() => {
+    const filtered = upcomingAnnouncements.filter(
+      (operation) =>
+        !announcementBarangayFilter ||
+        operation.barangay?.trim().toLocaleLowerCase() ===
+          announcementBarangayFilter.toLocaleLowerCase(),
+    );
+
+    return filtered.sort((first, second) => {
+      const comparison = String(first.purok || "").localeCompare(
+        String(second.purok || ""),
+        undefined,
+        { numeric: true, sensitivity: "base" },
+      );
+      return purokSortOrder === "asc" ? comparison : -comparison;
+    });
+  }, [upcomingAnnouncements, announcementBarangayFilter, purokSortOrder]);
   const selectedDateOperations = selectedDate
     ? operations.filter((operation) =>
         (operation.scheduledDateKeys || []).includes(
@@ -256,6 +262,7 @@ export default function PickupSchedule() {
     const currentDate = new Date();
     setVisibleMonth(startOfMonth(currentDate));
     setSelectedDate(currentDate);
+    setVisibleSelectedDateCount(5);
   };
 
   const saveOperation = async () => {
@@ -391,6 +398,7 @@ export default function PickupSchedule() {
 
   const selectDate = (date) => {
     setSelectedDate(date);
+    setVisibleSelectedDateCount(5);
     if (date.getMonth() !== visibleMonth.getMonth()) {
       setVisibleMonth(startOfMonth(date));
     }
@@ -398,7 +406,7 @@ export default function PickupSchedule() {
 
   return (
     <ScrollView
-      contentContainerStyle={styles.container}
+      contentContainerStyle={[styles.container, { padding: pagePadding }]}
       showsVerticalScrollIndicator={false}
     >
       <Text style={styles.heading}>Scheduled Date</Text>
@@ -538,8 +546,8 @@ export default function PickupSchedule() {
           <View>
             <Text style={styles.allAnnouncementsTitle}>All Announcements</Text>
             <Text style={styles.allAnnouncementsSubtitle}>
-              {operations.length} announcement
-              {operations.length !== 1 ? "s" : ""} total
+              {filteredAnnouncements.length} upcoming announcement
+              {filteredAnnouncements.length !== 1 ? "s" : ""}
             </Text>
           </View>
           <TouchableOpacity
@@ -564,52 +572,134 @@ export default function PickupSchedule() {
             showsVerticalScrollIndicator
             keyboardShouldPersistTaps="handled"
           >
+            <View style={styles.announcementFilterSection}>
+              <Text style={styles.announcementFilterLabel}>
+                Filter by Barangay
+              </Text>
+              <View style={styles.barangayFilterList}>
+                {["", ...BARANGAYS].map((name) => {
+                  const isSelected = announcementBarangayFilter === name;
+                  return (
+                    <TouchableOpacity
+                      key={name || "all-barangays"}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: isSelected }}
+                      style={[
+                        styles.barangayFilterChip,
+                        isSelected && styles.barangayFilterChipSelected,
+                      ]}
+                      onPress={() => {
+                        setAnnouncementBarangayFilter(name);
+                        setVisibleAllCount(5);
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.barangayFilterChipText,
+                          isSelected && styles.barangayFilterChipTextSelected,
+                        ]}
+                      >
+                        {name || "All Barangays"}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <View style={styles.purokSortRow}>
+                <Text style={styles.announcementFilterLabel}>Sort by Purok</Text>
+                {["asc", "desc"].map((order) => {
+                  const isSelected = purokSortOrder === order;
+                  return (
+                    <TouchableOpacity
+                      key={order}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: isSelected }}
+                      style={[
+                        styles.sortOrderButton,
+                        isSelected && styles.sortOrderButtonSelected,
+                      ]}
+                      onPress={() => {
+                        setPurokSortOrder(order);
+                        setVisibleAllCount(5);
+                      }}
+                    >
+                      <Ionicons
+                        name={order === "asc" ? "arrow-up" : "arrow-down"}
+                        size={13}
+                        color={isSelected ? "#FFFFFF" : "#397A51"}
+                      />
+                      <Text
+                        style={[
+                          styles.sortOrderButtonText,
+                          isSelected && styles.sortOrderButtonTextSelected,
+                        ]}
+                      >
+                        {order === "asc" ? "Ascending" : "Descending"}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
             {operations.length === 0 ? (
               <Text style={styles.noAnnouncementsText}>
                 No announcements found.
               </Text>
+            ) : filteredAnnouncements.length === 0 ? (
+              <>
+                <Text style={styles.noAnnouncementsText}>
+                  {upcomingAnnouncements.length === 0
+                    ? "No upcoming announcements found."
+                    : "No upcoming announcements found for this barangay."}
+                </Text>
+                {hasMoreOperations && !loadingMoreOperations && (
+                  <TouchableOpacity
+                    style={styles.loadMoreButton}
+                    onPress={() => loadOperations(false)}
+                  >
+                    <Text style={styles.loadMoreText}>
+                      Load more from server
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </>
             ) : (
               <>
-                {operations.slice(0, visibleAllCount).map((operation) => {
-                  const todayKey = formatDateKey(new Date());
-                  const hasPastOnly =
-                    Array.isArray(operation.scheduledDateKeys) &&
-                    operation.scheduledDateKeys.length > 0 &&
-                    operation.scheduledDateKeys.every((k) => k < todayKey);
-                  const isActive =
-                    Array.isArray(operation.scheduledDateKeys) &&
-                    operation.scheduledDateKeys.some((k) => k >= todayKey);
-
+                {filteredAnnouncements
+                  .slice(0, visibleAllCount)
+                  .map((operation) => {
+                  const recurrenceLabel =
+                    getPickupRecurrenceLabel(operation);
                   return (
                     <View
                       key={operation.id}
-                      style={[
-                        styles.allAnnouncementCard,
-                        hasPastOnly && styles.allAnnouncementCardPast,
-                      ]}
+                      style={styles.allAnnouncementCard}
                     >
                       <View style={styles.allAnnouncementTopRow}>
                         <View style={styles.allAnnouncementTitleRow}>
-                          <Text
-                            style={[
-                              styles.allAnnouncementItemTitle,
-                              hasPastOnly &&
-                                styles.allAnnouncementItemTitlePast,
-                            ]}
-                          >
+                          <Text style={styles.allAnnouncementItemTitle}>
                             {operation.title || "Waste Collection"}
                           </Text>
-                          <View
-                            style={[
-                              styles.statusBadge,
-                              isActive
-                                ? styles.statusBadgeActive
-                                : styles.statusBadgePast,
-                            ]}
-                          >
-                            <Text style={styles.statusBadgeText}>
-                              {isActive ? "Active" : "Past"}
-                            </Text>
+                          <View style={styles.announcementBadges}>
+                            <View
+                              style={[
+                                styles.statusBadge,
+                                styles.statusBadgeActive,
+                              ]}
+                            >
+                              <Text style={styles.statusBadgeText}>
+                                Upcoming
+                              </Text>
+                            </View>
+                            {Boolean(recurrenceLabel) && (
+                              <View style={styles.recurrenceDayBadge}>
+                                <Text style={styles.recurrenceDayBadgeText}>
+                                  {recurrenceLabel}
+                                </Text>
+                              </View>
+                            )}
                           </View>
                         </View>
 
@@ -645,34 +735,29 @@ export default function PickupSchedule() {
                           {operation.message}
                         </Text>
                       )}
-                      {Array.isArray(operation.scheduledDateKeys) && (
-                        <Text style={styles.allAnnouncementDates}>
-                          Dates:{" "}
-                          {operation.scheduledDateKeys
-                            .sort()
-                            .slice(0, 5)
-                            .join(", ")}
-                          {operation.scheduledDateKeys.length > 5
-                            ? ` +${operation.scheduledDateKeys.length - 5} more`
-                            : ""}
-                        </Text>
-                      )}
+                      <Text style={styles.allAnnouncementDates}>
+                        Pickup: {formatPickupScheduleDate(operation)}
+                      </Text>
                     </View>
                   );
                 })}
 
                 {/* Batch load-more / load-from-Firestore */}
-                {visibleAllCount < operations.length ? (
+                {visibleAllCount < filteredAnnouncements.length ? (
                   <TouchableOpacity
                     style={styles.loadMoreButton}
                     onPress={() =>
                       setVisibleAllCount((n) =>
-                        Math.min(n + 5, operations.length),
+                        Math.min(n + 5, filteredAnnouncements.length),
                       )
                     }
                   >
                     <Text style={styles.loadMoreText}>
-                      Show {Math.min(5, operations.length - visibleAllCount)}{" "}
+                      Show{" "}
+                      {Math.min(
+                        5,
+                        filteredAnnouncements.length - visibleAllCount,
+                      )}{" "}
                       more
                     </Text>
                   </TouchableOpacity>
@@ -732,7 +817,9 @@ export default function PickupSchedule() {
             </TouchableOpacity>
           </View>
 
-          {selectedDateOperations.map((operation) => (
+          {selectedDateOperations
+            .slice(0, visibleSelectedDateCount)
+            .map((operation) => (
             <View key={operation.id} style={styles.savedScheduleCard}>
               <View style={styles.savedScheduleDetails}>
                 <View style={styles.savedScheduleHeader}>
@@ -774,6 +861,25 @@ export default function PickupSchedule() {
               </View>
             </View>
           ))}
+          {visibleSelectedDateCount < selectedDateOperations.length && (
+            <TouchableOpacity
+              style={styles.loadMoreButton}
+              onPress={() =>
+                setVisibleSelectedDateCount((count) =>
+                  Math.min(count + 5, selectedDateOperations.length),
+                )
+              }
+            >
+              <Text style={styles.loadMoreText}>
+                Show{" "}
+                {Math.min(
+                  5,
+                  selectedDateOperations.length - visibleSelectedDateCount,
+                )}{" "}
+                more for this date
+              </Text>
+            </TouchableOpacity>
+          )}
           {hasMoreOperations && !loadingMoreOperations && (
             <TouchableOpacity
               style={styles.loadMoreButton}
@@ -1306,7 +1412,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "800",
   },
-  recurrenceBadge: {
+  recurrenceDayBadge: {
     color: "#397A51",
     fontSize: 10,
     fontWeight: "800",
@@ -1689,6 +1795,70 @@ const styles = StyleSheet.create({
     backgroundColor: "#FAFCFB",
     padding: 10,
   },
+  announcementFilterSection: {
+    gap: 8,
+    marginBottom: 12,
+  },
+  announcementFilterLabel: {
+    color: "#52675A",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  barangayFilterList: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 6,
+  },
+  barangayFilterChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: "#D8E6DC",
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
+  },
+  barangayFilterChipSelected: {
+    borderColor: "#397A51",
+    backgroundColor: "#397A51",
+  },
+  barangayFilterChipText: {
+    color: "#52675A",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  barangayFilterChipTextSelected: {
+    color: "#FFFFFF",
+  },
+  purokSortRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  sortOrderButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderWidth: 1,
+    borderColor: "#D8E6DC",
+    borderRadius: 8,
+    backgroundColor: "#FFFFFF",
+  },
+  sortOrderButtonSelected: {
+    borderColor: "#397A51",
+    backgroundColor: "#397A51",
+  },
+  sortOrderButtonText: {
+    color: "#397A51",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  sortOrderButtonTextSelected: {
+    color: "#FFFFFF",
+  },
   noAnnouncementsText: {
     color: "#7A8A80",
     fontSize: 14,
@@ -1723,6 +1893,12 @@ const styles = StyleSheet.create({
     gap: 8,
     flexWrap: "wrap",
   },
+  announcementBadges: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 5,
+  },
   allAnnouncementItemTitle: {
     color: "#234B33",
     fontSize: 15,
@@ -1738,6 +1914,17 @@ const styles = StyleSheet.create({
   },
   statusBadgeActive: {
     backgroundColor: "#E7F1EA",
+  },
+  recurrenceBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 5,
+    backgroundColor: "#EAF0FF",
+  },
+  recurrenceDayBadgeText: {
+    color: "#385A9A",
+    fontSize: 10,
+    fontWeight: "700",
   },
   statusBadgePast: {
     backgroundColor: "#F0F0F0",

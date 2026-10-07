@@ -1,9 +1,22 @@
 import { usePathname, useRouter } from "expo-router";
-import { Image, StyleSheet, TouchableOpacity, View } from "react-native";
+import { useEffect, useState } from "react";
+import { Image, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { auth, db } from "../firebaseConfig";
+import { subscribeToUnreadNotifications } from "../utils/notificationHelpers";
 
 export default function Navbar() {
   const router = useRouter();
   const pathname = usePathname();
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+
+  useEffect(() => {
+    const userId = auth.currentUser?.uid;
+    if (!userId) {
+      return undefined;
+    }
+
+    return subscribeToUnreadNotifications(db, userId, setUnreadNotificationCount);
+  }, []);
 
   const tabs = [
     {
@@ -40,7 +53,19 @@ export default function Navbar() {
             disabled={isActive}
             onPress={() => router.replace(tab.route)}
           >
-            <Image source={tab.icon} style={styles.icon} />
+            <View style={styles.iconWrapper}>
+              <Image source={tab.icon} style={styles.icon} />
+              {tab.route === "/notification" &&
+                unreadNotificationCount > 0 && (
+                  <View style={styles.notificationBadge}>
+                    <Text style={styles.notificationBadgeText}>
+                      {unreadNotificationCount > 99
+                        ? "99+"
+                        : unreadNotificationCount}
+                    </Text>
+                  </View>
+                )}
+            </View>
 
             <View
               style={[styles.activeLine, !isActive && styles.inactiveLine]}
@@ -73,6 +98,29 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
     resizeMode: "contain",
+  },
+
+  iconWrapper: {
+    position: "relative",
+  },
+  notificationBadge: {
+    position: "absolute",
+    top: -8,
+    right: -11,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 4,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 9,
+    borderWidth: 1.5,
+    borderColor: "#FFFFFF",
+    backgroundColor: "#E53935",
+  },
+  notificationBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 9,
+    fontWeight: "800",
   },
 
   activeLine: {

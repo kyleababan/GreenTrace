@@ -141,9 +141,7 @@ export default function Login() {
 
       if (!userSnap.exists()) {
         await signOut(auth);
-        setFormError(
-          "This account is incomplete. Contact support or sign up again.",
-        );
+        setFormError("Email or password is incorrect.");
         return;
       }
 
@@ -205,7 +203,7 @@ export default function Login() {
 
             <TextInput
               placeholder="Email"
-              placeholderTextColor="#888"
+              placeholderTextColor={fieldErrors.email ? "#D66A6A" : "#888"}
               style={[styles.input, fieldErrors.email && styles.inputError]}
               value={email}
               onChangeText={(value) => {
@@ -221,7 +219,7 @@ export default function Login() {
 
             <TextInput
               placeholder="Password"
-              placeholderTextColor="#888"
+              placeholderTextColor={fieldErrors.password ? "#D66A6A" : "#888"}
               secureTextEntry
               value={password}
               onChangeText={(value) => {
@@ -283,7 +281,7 @@ export default function Login() {
               Confirm the email address registered to your GreenTrace account.
             </Text>
 
-            <FormError message={resetError} />
+            <FormError message={resetError} textColor="#D66A6A" />
 
             <TextInput
               placeholder="Email address"
@@ -455,7 +453,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   inputError: {
-    borderColor: "#D93025",
+    borderColor: "#E59898",
     borderWidth: 1.5,
   },
   fieldError: {

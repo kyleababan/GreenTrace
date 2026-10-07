@@ -1,19 +1,36 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useState } from "react";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { doc, getDoc } from "firebase/firestore";
+import { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
 import PostDetail from "./assessments/post_view/PostDetail.jsx";
 import VolunteerPostCreate from "./assessments/post_view/VolunteerPostCreate";
 import AssessmentList from "./components/AssessmentList";
+import { db } from "../../firebaseConfig";
+
+const ASSESSMENT_STATUSES = ["critical", "moderate", "ongoing", "cleaned"];
 
 export default function SituationAssessment() {
-  const [activeTab, setActiveTab] = useState("critical");
+  const router = useRouter();
+  const { width } = useWindowDimensions();
+  const isMobile = width < 700;
+  const { status, postId, commentId } = useLocalSearchParams();
+  const requestedStatus = Array.isArray(status) ? status[0] : status;
+  const requestedPostId = Array.isArray(postId) ? postId[0] : postId;
+  const requestedCommentId = Array.isArray(commentId) ? commentId[0] : commentId;
+  const activeTab = ASSESSMENT_STATUSES.includes(requestedStatus)
+    ? requestedStatus
+    : "critical";
   const [selectedPost, setSelectedPost] = useState(null);
+  const [postLoadError, setPostLoadError] = useState(null);
   const [search, setSearch] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
   const [focusedFilter, setFocusedFilter] = useState("");
@@ -26,7 +43,65 @@ export default function SituationAssessment() {
   });
   const [selectedVolunteerPost, setSelectedVolunteerPost] = useState(null);
 
+  useEffect(() => {
+    if (!requestedPostId) return undefined;
+
+    let isActive = true;
+    const loadRequestedPost = async () => {
+      try {
+        const snapshot = await getDoc(doc(db, "posts", requestedPostId));
+        if (!isActive) return;
+        if (!snapshot.exists()) {
+          setPostLoadError({
+            postId: requestedPostId,
+            message: "This report is no longer available.",
+          });
+          return;
+        }
+        setPostLoadError(null);
+        setSelectedPost({ id: snapshot.id, ...snapshot.data() });
+      } catch (error) {
+        console.error("Unable to open requested assessment report:", error);
+        if (isActive) {
+          setPostLoadError({
+            postId: requestedPostId,
+            message: "Unable to load this report.",
+          });
+        }
+      }
+    };
+
+    loadRequestedPost();
+    return () => {
+      isActive = false;
+    };
+  }, [requestedPostId]);
+
+  const closeSelectedPost = () => {
+    setSelectedPost(null);
+    if (requestedPostId) {
+      router.setParams({ postId: undefined, commentId: undefined });
+    }
+  };
+
   const renderContent = () => {
+    if (
+      requestedPostId &&
+      selectedPost?.id !== requestedPostId
+    ) {
+      return (
+        <View style={styles.requestedPostState}>
+          {postLoadError?.postId === requestedPostId ? (
+            <Text style={styles.requestedPostError}>
+              {postLoadError.message}
+            </Text>
+          ) : (
+            <ActivityIndicator size="small" color="#5F9C76" />
+          )}
+        </View>
+      );
+    }
+
     if (selectedVolunteerPost) {
       return (
         <VolunteerPostCreate
@@ -41,9 +116,10 @@ export default function SituationAssessment() {
       return (
         <PostDetail
           post={selectedPost}
-          currentTab={activeTab}
-          setSelectedPost={setSelectedPost}
+          currentTab={selectedPost.status || activeTab}
+          setSelectedPost={closeSelectedPost}
           setSelectedVolunteerPost={setSelectedVolunteerPost}
+          highlightedCommentId={requestedCommentId}
         />
       );
     }
@@ -61,7 +137,7 @@ export default function SituationAssessment() {
 
   return (
     <View style={styles.container}>
-      {!selectedPost && (
+      {!selectedPost && !selectedVolunteerPost && (
         <>
           <View style={styles.cardsRow}>
             <Text
@@ -70,16 +146,16 @@ export default function SituationAssessment() {
                   backgroundColor: "#FF5B5B",
                   color: "#FFFFFF",
                   borderRadius: 5,
-                  width: "24%",
-                  height: "100%",
+                  flex: 1,
                   textAlign: "center",
                   paddingVertical: 10,
+                  fontSize: isMobile ? 12 : 14,
                 },
                 activeTab === "critical" && styles.activeTab,
               ]}
               onPress={() => {
-                setActiveTab("critical");
-                setSelectedPost(null);
+                router.setParams({ status: "critical" });
+                closeSelectedPost();
               }}
             >
               Critical
@@ -90,16 +166,16 @@ export default function SituationAssessment() {
                   backgroundColor: "#ff8c40",
                   color: "#FFFFFF",
                   borderRadius: 5,
-                  width: "24%",
-                  height: "100%",
+                  flex: 1,
                   textAlign: "center",
                   paddingVertical: 10,
+                  fontSize: isMobile ? 12 : 14,
                 },
                 activeTab === "moderate" && styles.activeTab,
               ]}
               onPress={() => {
-                setActiveTab("moderate");
-                setSelectedPost(null);
+                router.setParams({ status: "moderate" });
+                closeSelectedPost();
               }}
             >
               Moderate
@@ -110,16 +186,16 @@ export default function SituationAssessment() {
                   backgroundColor: "#FFC940",
                   color: "#FFFFFF",
                   borderRadius: 5,
-                  width: "24%",
-                  height: "100%",
+                  flex: 1,
                   textAlign: "center",
                   paddingVertical: 10,
+                  fontSize: isMobile ? 12 : 14,
                 },
                 activeTab === "ongoing" && styles.activeTab,
               ]}
               onPress={() => {
-                setActiveTab("ongoing");
-                setSelectedPost(null);
+                router.setParams({ status: "ongoing" });
+                closeSelectedPost();
               }}
             >
               On-going
@@ -130,16 +206,16 @@ export default function SituationAssessment() {
                   backgroundColor: "#34C759",
                   color: "#FFFFFF",
                   borderRadius: 5,
-                  width: "24%",
-                  height: "100%",
+                  flex: 1,
                   textAlign: "center",
                   paddingVertical: 10,
+                  fontSize: isMobile ? 12 : 14,
                 },
                 activeTab === "cleaned" && styles.activeTab,
               ]}
               onPress={() => {
-                setActiveTab("cleaned");
-                setSelectedPost(null);
+                router.setParams({ status: "cleaned" });
+                closeSelectedPost();
               }}
             >
               Cleaned
@@ -285,13 +361,24 @@ export default function SituationAssessment() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 8, backgroundColor: "#F4F8F5" },
+  container: {
+    flex: 1,
+    paddingHorizontal: 8,
+    paddingTop: 8,
+    backgroundColor: "#F4F8F5",
+  },
   cardsRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 20,
+    gap: 6,
+    marginBottom: 14,
   },
-  activeTab: { fontWeight: "800", borderWidth: 2, borderColor: "#234B33" },
+  activeTab: {
+    fontWeight: "800",
+    borderWidth: 2,
+    borderColor: "#234B33",
+    overflow: "hidden",
+  },
   tabContent: { flex: 1 },
   searchContainer: {
     flexDirection: "row",
@@ -360,7 +447,7 @@ const styles = StyleSheet.create({
   filterHint: { color: "#7B8980", fontSize: 12, marginTop: 2 },
   clearText: { color: "#D64C4C", fontSize: 12, fontWeight: "600" },
   filterOptions: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
-  filterOption: { flex: 1, minWidth: 190 },
+  filterOption: { flex: 1, minWidth: 0 },
   filterChoice: {
     flexDirection: "row",
     alignItems: "center",

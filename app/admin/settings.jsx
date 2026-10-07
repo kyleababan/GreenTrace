@@ -24,6 +24,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { auth, db } from "../../firebaseConfig";
@@ -51,6 +52,8 @@ const DEFAULT_APP_CONFIG = {
 
 export default function AdminSettings() {
   const router = useRouter();
+  const { width } = useWindowDimensions();
+  const pagePadding = width < 768 ? 12 : width < 1024 ? 16 : 22;
 
   // ---- Global loading state (initial data fetch) ----
   const [initialLoading, setInitialLoading] = useState(true);
@@ -206,8 +209,8 @@ export default function AdminSettings() {
       setPasswordError("Please enter your current password.");
       return;
     }
-    if (newPassword.length < 6) {
-      setPasswordError("New password must be at least 6 characters.");
+    if (newPassword.length < 8) {
+      setPasswordError("New password must be at least 8 characters.");
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -342,7 +345,7 @@ export default function AdminSettings() {
 
   return (
     <ScrollView
-      contentContainerStyle={styles.container}
+      contentContainerStyle={[styles.container, { padding: pagePadding }]}
       showsVerticalScrollIndicator={false}
       keyboardShouldPersistTaps="handled"
     >
@@ -696,7 +699,7 @@ export default function AdminSettings() {
                 value={newPassword}
                 onChangeText={setNewPassword}
                 secureTextEntry
-                placeholder="At least 6 characters"
+                placeholder="At least 8 characters"
                 placeholderTextColor="#9CA3AF"
               />
 

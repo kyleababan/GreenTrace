@@ -111,6 +111,7 @@ export default function Home() {
 
   // Live lookup for points across feed
   const [authorPoints, setAuthorPoints] = useState({});
+  const [authorProfiles, setAuthorProfiles] = useState({});
   const [authorBadges, setAuthorBadges] = useState({});
   const [reactionLoadingByPost, setReactionLoadingByPost] = useState({});
   const [now, setNow] = useState(() => Date.now());
@@ -184,16 +185,26 @@ export default function Home() {
     }
   };
 
-  /* eslint-disable react-hooks/immutability, react-hooks/set-state-in-effect */
+  /* eslint-disable react-hooks/immutability */
   useEffect(() => {
     loadPosts(true);
-    const unsubscribeUsers = onSnapshot(collection(db, "users"), (snapshot) => {
-      const pointsByUserId = {};
-      snapshot.forEach((userDocument) => {
-        pointsByUserId[userDocument.id] = userDocument.data().points ?? 0;
-      });
-      setAuthorPoints(pointsByUserId);
-    });
+    const unsubscribeUsers = onSnapshot(
+      collection(db, "users"),
+      (snapshot) => {
+        const pointsByUserId = {};
+        const profilesByUserId = {};
+        snapshot.forEach((userDocument) => {
+          const userData = userDocument.data();
+          pointsByUserId[userDocument.id] = userData.points ?? 0;
+          profilesByUserId[userDocument.id] = userData;
+        });
+        setAuthorPoints(pointsByUserId);
+        setAuthorProfiles(profilesByUserId);
+      },
+      (error) => {
+        console.error("Unable to subscribe to user profiles:", error);
+      },
+    );
 
     loadUserReactions();
     loadCurrentUser();
@@ -207,7 +218,7 @@ export default function Home() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  /* eslint-enable react-hooks/immutability, react-hooks/set-state-in-effect */
+  /* eslint-enable react-hooks/immutability */
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30 * 1000);
@@ -583,10 +594,12 @@ export default function Home() {
       (post) =>
         post.caption?.toLowerCase().includes(keyword) ||
         post.locationName?.toLowerCase().includes(keyword) ||
+        authorProfiles[post.userId]?.firstName?.toLowerCase().includes(keyword) ||
+        authorProfiles[post.userId]?.lastName?.toLowerCase().includes(keyword) ||
         post.firstName?.toLowerCase().includes(keyword) ||
         post.lastName?.toLowerCase().includes(keyword),
     );
-  }, [search, posts]);
+  }, [search, posts, authorProfiles]);
 
   const announcementSlides = useMemo(() => {
     const slides = [];
@@ -946,31 +959,33 @@ export default function Home() {
                             : slide.type === "volunteer"
                               ? "VOLUNTEER"
                               : "SCHEDULED DATE";
+                        const SlideContainer =
+                          slide.type === "schedule" ? TouchableOpacity : View;
 
                         return (
-                          <View
+                          <SlideContainer
                             key={`${slide.type}-${index}`}
                             style={[
                               styles.announcementSlide,
                               { width: announcementCardWidth || "100%" },
                             ]}
+                            {...(slide.type === "schedule"
+                              ? {
+                                  activeOpacity: 0.85,
+                                  accessibilityRole: "button",
+                                  accessibilityLabel:
+                                    "View today's scheduled collection",
+                                  onPress: () =>
+                                    handleAnnouncementPress(slide),
+                                }
+                              : {})}
                           >
                             <View style={styles.announcementHeader}>
                               <Text style={styles.announcementLabel}>
                                 {label}
                               </Text>
                               {slide.type === "schedule" ? (
-                                <TouchableOpacity
-                                  activeOpacity={0.7}
-                                  onPress={() => setShowScheduleModal(true)}
-                                  style={styles.seeAllScheduleHeaderBtn}
-                                  hitSlop={{
-                                    top: 8,
-                                    bottom: 8,
-                                    left: 8,
-                                    right: 8,
-                                  }}
-                                >
+                                <View style={styles.seeAllScheduleHeaderBtn}>
                                   <Ionicons
                                     name="calendar-outline"
                                     size={12}
@@ -979,7 +994,7 @@ export default function Home() {
                                   <Text style={styles.seeAllScheduleHeaderText}>
                                     See All
                                   </Text>
-                                </TouchableOpacity>
+                                </View>
                               ) : (
                                 <TouchableOpacity
                                   activeOpacity={0.8}
@@ -1016,7 +1031,7 @@ export default function Home() {
                                 </Text>
                               </TouchableOpacity>
                             )}
-                          </View>
+                          </SlideContainer>
                         );
                       })}
                     </Animated.View>
@@ -1089,7 +1104,7 @@ export default function Home() {
                   <View style={styles.avatar}>
                     <Text style={styles.avatarText}>
                       {getNameInitials(
-                        `${post.firstName || ""} ${post.lastName || ""}`,
+                        `${authorProfiles[post.userId]?.firstName ?? post.firstName ?? ""} ${authorProfiles[post.userId]?.lastName ?? post.lastName ?? ""}`,
                       )}
                     </Text>
                   </View>
@@ -1103,7 +1118,10 @@ export default function Home() {
                           numberOfLines={1}
                           ellipsizeMode="tail"
                         >
-                          {post.firstName} {post.lastName}
+                          {authorProfiles[post.userId]?.firstName ??
+                            post.firstName}{" "}
+                          {authorProfiles[post.userId]?.lastName ??
+                            post.lastName}
                         </Text>
                         <Text style={styles.points} numberOfLines={1}>
                           {` • ${authorPoints[post.userId] ?? post.points ?? 0}\u00A0pts`}

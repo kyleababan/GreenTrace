@@ -12,7 +12,13 @@ import {
     View,
     useWindowDimensions,
 } from "react-native";
+import { BARANGAYS } from "../constants/barangays";
 import { db } from "../firebaseConfig";
+import {
+  formatPickupScheduleDate,
+  getPickupRecurrenceLabel,
+  hasUpcomingPickupDate,
+} from "../utils/formatPickupScheduleDate";
 
 // ---------------------------------------------------------------------------
 // Constants & Date Helpers
@@ -64,10 +70,14 @@ export default function ScheduleCalendarModal({ visible, onClose }) {
     startOfMonth(new Date()),
   );
   const [selectedDate, setSelectedDate] = useState(() => new Date());
+  const [visibleSelectedDateCount, setVisibleSelectedDateCount] = useState(3);
   const [operations, setOperations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAllAnnouncements, setShowAllAnnouncements] = useState(false);
-  const [visibleAllCount, setVisibleAllCount] = useState(6);
+  const [visibleAllCount, setVisibleAllCount] = useState(3);
+  const [announcementBarangayFilter, setAnnouncementBarangayFilter] =
+    useState("");
+  const [purokSortOrder, setPurokSortOrder] = useState("asc");
 
   // Sync visibleMonth and selectedDate when modal opens
   useEffect(() => {
@@ -75,6 +85,7 @@ export default function ScheduleCalendarModal({ visible, onClose }) {
       const now = new Date();
       setVisibleMonth(startOfMonth(now));
       setSelectedDate(now);
+      setVisibleSelectedDateCount(3);
     }
   }, [visible]);
 
@@ -118,6 +129,7 @@ export default function ScheduleCalendarModal({ visible, onClose }) {
     const now = new Date();
     setVisibleMonth(startOfMonth(now));
     setSelectedDate(now);
+    setVisibleSelectedDateCount(3);
   }, []);
 
   const calendarDays = useMemo(
@@ -138,6 +150,30 @@ export default function ScheduleCalendarModal({ visible, onClose }) {
         op.scheduledDateKeys.includes(selectedDateKey),
     );
   }, [operations, selectedDateKey]);
+
+  const filteredAnnouncements = useMemo(() => {
+    const upcomingOperations = operations.filter((operation) =>
+      hasUpcomingPickupDate(operation),
+    );
+    const filtered = upcomingOperations.filter(
+      (operation) =>
+        !announcementBarangayFilter ||
+        operation.barangay?.trim().toLocaleLowerCase() ===
+          announcementBarangayFilter.toLocaleLowerCase(),
+    );
+
+    return filtered.sort((first, second) => {
+      const comparison = String(first.purok || "").localeCompare(
+        String(second.purok || ""),
+        undefined,
+        { numeric: true, sensitivity: "base" },
+      );
+      return purokSortOrder === "asc" ? comparison : -comparison;
+    });
+  }, [operations, announcementBarangayFilter, purokSortOrder]);
+  const upcomingAnnouncementCount = operations.filter((operation) =>
+    hasUpcomingPickupDate(operation),
+  ).length;
 
   return (
     <Modal
@@ -279,7 +315,10 @@ export default function ScheduleCalendarModal({ visible, onClose }) {
                           isSelected && styles.selectedDayCell,
                         ]}
                         activeOpacity={0.75}
-                        onPress={() => setSelectedDate(date)}
+                        onPress={() => {
+                          setSelectedDate(date);
+                          setVisibleSelectedDateCount(3);
+                        }}
                       >
                         <View
                           style={[
@@ -391,7 +430,9 @@ export default function ScheduleCalendarModal({ visible, onClose }) {
 
                   {/* Scheduled Operations List */}
                   {selectedDateOperations.length > 0 ? (
-                    selectedDateOperations.map((operation) => (
+                    selectedDateOperations
+                      .slice(0, visibleSelectedDateCount)
+                      .map((operation) => (
                       <View key={operation.id} style={styles.savedScheduleCard}>
                         <View style={styles.savedScheduleDetails}>
                           <View style={styles.savedScheduleHeader}>
@@ -465,6 +506,27 @@ export default function ScheduleCalendarModal({ visible, onClose }) {
                       </Text>
                     </View>
                   )}
+                  {visibleSelectedDateCount < selectedDateOperations.length && (
+                    <TouchableOpacity
+                      style={styles.loadMoreButton}
+                      onPress={() =>
+                        setVisibleSelectedDateCount((count) =>
+                          Math.min(count + 3, selectedDateOperations.length),
+                        )
+                      }
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.loadMoreText}>
+                        Show{" "}
+                        {Math.min(
+                          3,
+                          selectedDateOperations.length -
+                            visibleSelectedDateCount,
+                        )}{" "}
+                        more
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               )}
 
@@ -476,8 +538,8 @@ export default function ScheduleCalendarModal({ visible, onClose }) {
                       All Announcements
                     </Text>
                     <Text style={styles.allAnnouncementsSubtitle}>
-                      {operations.length} announcement
-                      {operations.length !== 1 ? "s" : ""} on record
+                      {filteredAnnouncements.length} upcoming announcement
+                      {filteredAnnouncements.length !== 1 ? "s" : ""}
                     </Text>
                   </View>
 
@@ -501,54 +563,133 @@ export default function ScheduleCalendarModal({ visible, onClose }) {
 
                 {showAllAnnouncements && (
                   <View style={styles.allAnnouncementsList}>
-                    {operations.length === 0 ? (
+                    <View style={styles.announcementFilterSection}>
+                      <Text style={styles.announcementFilterLabel}>
+                        Filter by Barangay
+                      </Text>
+                      <View style={styles.barangayFilterList}>
+                        {["", ...BARANGAYS].map((name) => {
+                          const isSelected =
+                            announcementBarangayFilter === name;
+                          return (
+                            <TouchableOpacity
+                              key={name || "all-barangays"}
+                              accessibilityRole="button"
+                              accessibilityState={{ selected: isSelected }}
+                              style={[
+                                styles.barangayFilterChip,
+                                isSelected && styles.barangayFilterChipSelected,
+                              ]}
+                              onPress={() => {
+                                setAnnouncementBarangayFilter(name);
+                                setVisibleAllCount(3);
+                              }}
+                              activeOpacity={0.75}
+                            >
+                              <Text
+                                style={[
+                                  styles.barangayFilterChipText,
+                                  isSelected &&
+                                    styles.barangayFilterChipTextSelected,
+                                ]}
+                              >
+                                {name || "All Barangays"}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+
+                      <View style={styles.purokSortRow}>
+                        <Text style={styles.announcementFilterLabel}>
+                          Sort by Purok
+                        </Text>
+                        {["asc", "desc"].map((order) => {
+                          const isSelected = purokSortOrder === order;
+                          return (
+                            <TouchableOpacity
+                              key={order}
+                              accessibilityRole="button"
+                              accessibilityState={{ selected: isSelected }}
+                              style={[
+                                styles.sortOrderButton,
+                                isSelected && styles.sortOrderButtonSelected,
+                              ]}
+                              onPress={() => {
+                                setPurokSortOrder(order);
+                                setVisibleAllCount(3);
+                              }}
+                              activeOpacity={0.75}
+                            >
+                              <Ionicons
+                                name={
+                                  order === "asc"
+                                    ? "arrow-up"
+                                    : "arrow-down"
+                                }
+                                size={13}
+                                color={isSelected ? "#FFFFFF" : "#397A51"}
+                              />
+                              <Text
+                                style={[
+                                  styles.sortOrderButtonText,
+                                  isSelected &&
+                                    styles.sortOrderButtonTextSelected,
+                                ]}
+                              >
+                                {order === "asc" ? "Ascending" : "Descending"}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    </View>
+
+                    {filteredAnnouncements.length === 0 ? (
                       <Text style={styles.noAnnouncementsText}>
-                        No announcements found.
+                        {operations.length === 0
+                          ? "No announcements found."
+                          : upcomingAnnouncementCount === 0
+                            ? "No upcoming announcements found."
+                            : "No upcoming announcements found for this barangay."}
                       </Text>
                     ) : (
-                      operations.slice(0, visibleAllCount).map((op) => {
-                        const todayKey = formatDateKey(new Date());
-                        const hasPastOnly =
-                          Array.isArray(op.scheduledDateKeys) &&
-                          op.scheduledDateKeys.length > 0 &&
-                          op.scheduledDateKeys.every((k) => k < todayKey);
-
+                      filteredAnnouncements
+                        .slice(0, visibleAllCount)
+                        .map((op) => {
+                        const recurrenceLabel = getPickupRecurrenceLabel(op);
                         return (
                           <View
                             key={op.id}
-                            style={[
-                              styles.allAnnouncementCard,
-                              hasPastOnly && styles.allAnnouncementCardPast,
-                            ]}
+                            style={styles.allAnnouncementCard}
                           >
                             <View style={styles.allAnnouncementTopRow}>
-                              <Text
-                                style={[
-                                  styles.allAnnouncementItemTitle,
-                                  hasPastOnly &&
-                                    styles.allAnnouncementItemTitlePast,
-                                ]}
-                              >
+                              <Text style={styles.allAnnouncementItemTitle}>
                                 {op.title || "Waste Collection"}
                               </Text>
-                              <View
-                                style={[
-                                  styles.statusBadge,
-                                  hasPastOnly
-                                    ? styles.statusBadgePast
-                                    : styles.statusBadgeActive,
-                                ]}
-                              >
-                                <Text
+                              <View style={styles.announcementBadges}>
+                                <View
                                   style={[
-                                    styles.statusBadgeText,
-                                    hasPastOnly
-                                      ? styles.statusBadgeTextPast
-                                      : styles.statusBadgeTextActive,
+                                    styles.statusBadge,
+                                    styles.statusBadgeActive,
                                   ]}
                                 >
-                                  {hasPastOnly ? "Past" : "Active"}
-                                </Text>
+                                  <Text
+                                    style={[
+                                      styles.statusBadgeText,
+                                      styles.statusBadgeTextActive,
+                                    ]}
+                                  >
+                                    Upcoming
+                                  </Text>
+                                </View>
+                                {Boolean(recurrenceLabel) && (
+                                  <View style={styles.recurrenceDayBadge}>
+                                    <Text style={styles.recurrenceDayBadgeText}>
+                                      {recurrenceLabel}
+                                    </Text>
+                                  </View>
+                                )}
                               </View>
                             </View>
 
@@ -564,36 +705,30 @@ export default function ScheduleCalendarModal({ visible, onClose }) {
                               </Text>
                             )}
 
-                            {Array.isArray(op.scheduledDateKeys) && (
-                              <Text style={styles.allAnnouncementDates}>
-                                Dates:{" "}
-                                {op.scheduledDateKeys
-                                  .sort()
-                                  .slice(0, 4)
-                                  .join(", ")}
-                                {op.scheduledDateKeys.length > 4
-                                  ? ` +${op.scheduledDateKeys.length - 4} more`
-                                  : ""}
-                              </Text>
-                            )}
+                            <Text style={styles.allAnnouncementDates}>
+                              Pickup: {formatPickupScheduleDate(op)}
+                            </Text>
                           </View>
                         );
                       })
                     )}
 
-                    {visibleAllCount < operations.length && (
+                    {visibleAllCount < filteredAnnouncements.length && (
                       <TouchableOpacity
                         style={styles.loadMoreButton}
                         onPress={() =>
                           setVisibleAllCount((prev) =>
-                            Math.min(prev + 5, operations.length),
+                            Math.min(prev + 3, filteredAnnouncements.length),
                           )
                         }
                         activeOpacity={0.7}
                       >
                         <Text style={styles.loadMoreText}>
                           Show{" "}
-                          {Math.min(5, operations.length - visibleAllCount)}{" "}
+                          {Math.min(
+                            3,
+                            filteredAnnouncements.length - visibleAllCount,
+                          )}{" "}
                           more
                         </Text>
                       </TouchableOpacity>
@@ -957,7 +1092,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "800",
   },
-  recurrenceBadge: {
+  recurrenceDayBadge: {
     color: "#2E5F3E",
     fontSize: 10,
     fontWeight: "800",
@@ -1059,6 +1194,70 @@ const styles = StyleSheet.create({
     marginTop: 14,
     gap: 10,
   },
+  announcementFilterSection: {
+    gap: 8,
+    marginBottom: 2,
+  },
+  announcementFilterLabel: {
+    color: "#52675A",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  barangayFilterList: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 6,
+  },
+  barangayFilterChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: "#D8E6DC",
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
+  },
+  barangayFilterChipSelected: {
+    borderColor: "#397A51",
+    backgroundColor: "#397A51",
+  },
+  barangayFilterChipText: {
+    color: "#52675A",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  barangayFilterChipTextSelected: {
+    color: "#FFFFFF",
+  },
+  purokSortRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  sortOrderButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderWidth: 1,
+    borderColor: "#D8E6DC",
+    borderRadius: 8,
+    backgroundColor: "#FFFFFF",
+  },
+  sortOrderButtonSelected: {
+    borderColor: "#397A51",
+    backgroundColor: "#397A51",
+  },
+  sortOrderButtonText: {
+    color: "#397A51",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  sortOrderButtonTextSelected: {
+    color: "#FFFFFF",
+  },
   allAnnouncementCard: {
     backgroundColor: "#FAFCFB",
     borderRadius: 10,
@@ -1074,6 +1273,14 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    gap: 8,
+  },
+  announcementBadges: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    flexWrap: "wrap",
+    gap: 5,
   },
   allAnnouncementItemTitle: {
     color: "#234B33",
@@ -1103,6 +1310,17 @@ const styles = StyleSheet.create({
   },
   statusBadgeTextPast: {
     color: "#64748B",
+  },
+  recurrenceBadge: {
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    backgroundColor: "#EAF0FF",
+  },
+  recurrenceDayBadgeText: {
+    color: "#385A9A",
+    fontSize: 10,
+    fontWeight: "800",
   },
   allAnnouncementLocation: {
     color: "#52675A",

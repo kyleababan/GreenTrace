@@ -54,15 +54,14 @@ import {
     mergeUniqueById,
 } from "../utils/pagination";
 
-const formatPostedAt = (timestamp) => {
-  if (!timestamp) return "Posted just now";
-
+const formatDateTime = (timestamp) => {
+  if (!timestamp) return null;
   const date =
     typeof timestamp.toDate === "function"
       ? timestamp.toDate()
       : new Date(timestamp);
 
-  if (Number.isNaN(date.getTime())) return "Posted just now";
+  if (Number.isNaN(date.getTime())) return null;
 
   return `${date.toLocaleDateString(undefined, {
     month: "short",
@@ -73,6 +72,9 @@ const formatPostedAt = (timestamp) => {
     minute: "2-digit",
   })}`;
 };
+
+const formatPostedAt = (timestamp) =>
+  `Posted ${formatDateTime(timestamp) || "just now"}`;
 
 const isPostEditLocked = (status) =>
   ["ongoing", "on-going", "cleaned"].includes(
@@ -88,9 +90,12 @@ export default function Post() {
   const router = useRouter();
 
   const [post, setPost] = useState(null);
+  const [authorProfile, setAuthorProfile] = useState(null);
   const [currentUserData, setCurrentUserData] = useState(null);
   const [authorPoints, setAuthorPoints] = useState(null);
   const [comments, setComments] = useState([]);
+  const [commentProfiles, setCommentProfiles] = useState({});
+  const [commentSortOrder, setCommentSortOrder] = useState("asc");
   const [comment, setComment] = useState("");
   const [userReaction, setUserReaction] = useState(null);
   const [reactionScale] = useState(new Animated.Value(1));
@@ -100,6 +105,7 @@ export default function Post() {
   const [deletingPost, setDeletingPost] = useState(false);
   const [reactionLoading, setReactionLoading] = useState(false);
   const [expandedCaption, setExpandedCaption] = useState(false);
+  const [captionHasMore, setCaptionHasMore] = useState(false);
   const [hasMoreComments, setHasMoreComments] = useState(true);
   const [loadingMoreComments, setLoadingMoreComments] = useState(false);
   const [commentError, setCommentError] = useState("");
@@ -112,6 +118,10 @@ export default function Post() {
   const [deletingComment, setDeletingComment] = useState(false);
   const lastCommentDocRef = useRef(null);
   const loadingCommentsRef = useRef(false);
+  const commentsLoadIdRef = useRef(0);
+  const commentUserIdsKey = JSON.stringify(
+    [...new Set(comments.map((item) => item.userId).filter(Boolean))].sort(),
+  );
 
   const currentUser = auth.currentUser;
 
@@ -159,20 +169,40 @@ export default function Post() {
   };
 
   useEffect(() => {
-    loadPost();
-    loadComments(true);
-    loadReaction();
-    loadCurrentUser();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
-
-  useEffect(() => {
     if (!post?.userId) return;
 
-    return onSnapshot(doc(db, "users", post.userId), (snapshot) => {
-      setAuthorPoints(snapshot.exists() ? (snapshot.data().points ?? 0) : null);
-    });
+    return onSnapshot(
+      doc(db, "users", post.userId),
+      (snapshot) => {
+        const profile = snapshot.exists() ? snapshot.data() : null;
+        setAuthorProfile(profile);
+        setAuthorPoints(profile ? (profile.points ?? 0) : null);
+      },
+      (error) => {
+        console.error("Unable to subscribe to post author profile:", error);
+      },
+    );
   }, [post?.userId]);
+
+  useEffect(() => {
+    const userIds = JSON.parse(commentUserIdsKey);
+    const unsubscribeUsers = userIds.map((userId) =>
+      onSnapshot(
+        doc(db, "users", userId),
+        (snapshot) => {
+          setCommentProfiles((current) => ({
+            ...current,
+            [userId]: snapshot.exists() ? snapshot.data() : null,
+          }));
+        },
+        (error) => {
+          console.error(`Unable to subscribe to comment author ${userId}:`, error);
+        },
+      ),
+    );
+
+    return () => unsubscribeUsers.forEach((unsubscribe) => unsubscribe());
+  }, [commentUserIdsKey]);
 
   const loadPost = async () => {
     try {
@@ -211,18 +241,26 @@ export default function Post() {
   };
 
   // FETCH COMMENTS AND DYNAMICALLY ATTACH CURRENT USER POINTS
-  const loadComments = async (reset = false) => {
-    if (loadingCommentsRef.current || (!reset && !hasMoreComments)) return;
+  const loadComments = async (reset = false, sortOrder = commentSortOrder) => {
+    if (
+      (loadingCommentsRef.current && !reset) ||
+      (!reset && !hasMoreComments)
+    ) {
+      return;
+    }
 
+    const requestId = ++commentsLoadIdRef.current;
     loadingCommentsRef.current = true;
     setLoadingMoreComments(true);
     try {
       const constraints = [
         where("postId", "==", id),
-        orderBy("createdAt", "asc"),
+        orderBy("createdAt", sortOrder),
         limit(COMMENTS_PER_PAGE),
       ];
-      if (!reset && lastCommentDocRef.current) {
+      if (reset) {
+        lastCommentDocRef.current = null;
+      } else if (lastCommentDocRef.current) {
         constraints.push(startAfter(lastCommentDocRef.current));
       }
 
@@ -240,6 +278,8 @@ export default function Post() {
         rawComments.map((item) => item.userId),
       );
 
+      if (requestId !== commentsLoadIdRef.current) return;
+
       const enrichedComments = rawComments.map((item) => ({
         ...item,
         comment: hideBadWords(item.comment),
@@ -254,12 +294,24 @@ export default function Post() {
         snapshot.docs[snapshot.docs.length - 1] || null;
       setHasMoreComments(snapshot.docs.length === COMMENTS_PER_PAGE);
     } catch (error) {
-      console.error("Error loading comments:", error);
+      if (requestId === commentsLoadIdRef.current) {
+        console.error("Error loading comments:", error);
+      }
     } finally {
-      loadingCommentsRef.current = false;
-      setLoadingMoreComments(false);
+      if (requestId === commentsLoadIdRef.current) {
+        loadingCommentsRef.current = false;
+        setLoadingMoreComments(false);
+      }
     }
   };
+
+  useEffect(() => {
+    loadPost();
+    loadComments(true);
+    loadReaction();
+    loadCurrentUser();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   const submitComment = async () => {
     if (!comment.trim()) {
@@ -473,6 +525,10 @@ export default function Post() {
     );
   }
 
+  const captionText = hideBadWords(post.caption || "");
+  const showCaptionToggle =
+    captionHasMore || captionText.split(/\r?\n/).length >= 3;
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.wrapper}>
@@ -492,7 +548,9 @@ export default function Post() {
               </TouchableOpacity>
 
               <Text numberOfLines={1} style={styles.headerTitle}>
-                {post.firstName} {post.lastName}'s Post
+                {`${authorProfile?.firstName ?? post.firstName ?? ""} ${
+                  authorProfile?.lastName ?? post.lastName ?? ""
+                }'s Post`}
               </Text>
 
               <View style={{ width: 36 }} />
@@ -504,17 +562,6 @@ export default function Post() {
             style={styles.feed}
             contentContainerStyle={styles.feedContent}
             showsVerticalScrollIndicator={false}
-            scrollEventThrottle={200}
-            onScroll={({ nativeEvent }) => {
-              const { contentOffset, contentSize, layoutMeasurement } =
-                nativeEvent;
-              if (
-                layoutMeasurement.height + contentOffset.y >=
-                contentSize.height - 160
-              ) {
-                loadComments();
-              }
-            }}
           >
             {/* MAIN POST CARD */}
             <View style={styles.card}>
@@ -523,7 +570,7 @@ export default function Post() {
                 <View style={styles.avatar}>
                   <Text style={styles.avatarText}>
                     {getNameInitials(
-                      `${post.firstName || ""} ${post.lastName || ""}`,
+                      `${authorProfile?.firstName ?? post.firstName ?? ""} ${authorProfile?.lastName ?? post.lastName ?? ""}`,
                     )}
                   </Text>
                 </View>
@@ -531,7 +578,8 @@ export default function Post() {
                 <View style={{ flex: 1 }}>
                   <View style={styles.userTopRow}>
                     <Text style={styles.username}>
-                      {post.firstName} {post.lastName}
+                      {authorProfile?.firstName ?? post.firstName}{" "}
+                      {authorProfile?.lastName ?? post.lastName}
                       <Text style={styles.points}>
                         {" "}
                         • {authorPoints ?? post.points ?? 0} pts
@@ -658,14 +706,23 @@ export default function Post() {
                 </Text>
               )}
               {Boolean(post.caption) && (
-                <View>
-                  <Text
-                    style={styles.caption}
-                    numberOfLines={expandedCaption ? undefined : 3}
+                <View style={styles.captionContainer}>
+                  <View
+                    style={[
+                      styles.captionTextWrapper,
+                      !expandedCaption && styles.captionTextWrapperCollapsed,
+                    ]}
                   >
-                    {hideBadWords(post.caption)}
-                  </Text>
-                  {post.caption.length > 140 && (
+                    <Text
+                      style={styles.caption}
+                      onTextLayout={({ nativeEvent }) =>
+                        setCaptionHasMore(nativeEvent.lines.length > 3)
+                      }
+                    >
+                      {captionText}
+                    </Text>
+                  </View>
+                  {showCaptionToggle && (
                     <TouchableOpacity
                       onPress={() => setExpandedCaption((current) => !current)}
                     >
@@ -740,6 +797,31 @@ export default function Post() {
               <Text style={styles.commentLabel}>
                 Comments ({post.commentCount ?? comments.length})
               </Text>
+              <TouchableOpacity
+                activeOpacity={0.7}
+                style={[
+                  styles.commentSortButton,
+                  loadingMoreComments && styles.commentSortButtonDisabled,
+                ]}
+                disabled={loadingMoreComments}
+                accessibilityRole="button"
+                accessibilityLabel={`Sort comments ${
+                  commentSortOrder === "asc" ? "newest" : "oldest"
+                } first`}
+                onPress={() => {
+                  const nextOrder =
+                    commentSortOrder === "asc" ? "desc" : "asc";
+                  setCommentSortOrder(nextOrder);
+                  setComments([]);
+                  setHasMoreComments(true);
+                  loadComments(true, nextOrder);
+                }}
+              >
+                <Ionicons name="swap-vertical" size={15} color="#397A51" />
+                <Text style={styles.commentSortText}>
+                  {commentSortOrder === "asc" ? "Oldest first" : "Newest first"}
+                </Text>
+              </TouchableOpacity>
             </View>
 
             <FormError message={commentError} />
@@ -779,7 +861,7 @@ export default function Post() {
                 <View style={styles.commentAvatar}>
                   <Text style={styles.commentAvatarText}>
                     {getNameInitials(
-                      `${item.firstName || ""} ${item.lastName || ""}`,
+                      `${commentProfiles[item.userId]?.firstName ?? item.firstName ?? ""} ${commentProfiles[item.userId]?.lastName ?? item.lastName ?? ""}`,
                     )}
                   </Text>
                 </View>
@@ -787,7 +869,9 @@ export default function Post() {
                 <View style={styles.commentBody}>
                   <View style={styles.commentUserHeader}>
                     <Text style={styles.commentUsername}>
-                      {item.firstName} {item.lastName}
+                      {commentProfiles[item.userId]?.firstName ??
+                        item.firstName}{" "}
+                      {commentProfiles[item.userId]?.lastName ?? item.lastName}
                     </Text>
                     <View style={styles.commentHeaderRight}>
                       {/* Always displays live/updated user points */}
@@ -816,6 +900,9 @@ export default function Post() {
                   <Text style={styles.commentText}>
                     {hideBadWords(item.comment)}
                   </Text>
+                  <Text style={styles.commentTimestamp}>
+                    {formatDateTime(item.createdAt) || "Just now"}
+                  </Text>
                 </View>
               </View>
             ))}
@@ -825,9 +912,14 @@ export default function Post() {
               <TouchableOpacity
                 activeOpacity={0.7}
                 style={styles.seeMoreBtn}
+                disabled={loadingMoreComments}
                 onPress={() => loadComments()}
               >
-                <Text style={styles.seeMoreText}>See more comments</Text>
+                <Text style={styles.seeMoreText}>
+                  {loadingMoreComments
+                    ? "Loading comments..."
+                    : `Load ${COMMENTS_PER_PAGE} more comments`}
+                </Text>
               </TouchableOpacity>
             )}
             {loadingMoreComments && <ActivityIndicator color="#5F9C76" />}
@@ -1328,6 +1420,15 @@ const styles = StyleSheet.create({
   },
 
   /* Post Caption & Image */
+  captionContainer: {
+    position: "relative",
+  },
+  captionTextWrapper: {
+    overflow: "hidden",
+  },
+  captionTextWrapperCollapsed: {
+    height: 60,
+  },
   caption: {
     fontSize: 14,
     color: "#333",
@@ -1443,12 +1544,32 @@ const styles = StyleSheet.create({
 
   /* Comments Section */
   commentsHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     marginBottom: 8,
   },
   commentLabel: {
     fontSize: 15,
     fontWeight: "700",
     color: "#24352A",
+  },
+  commentSortButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderRadius: 16,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    backgroundColor: "#E8F2EB",
+  },
+  commentSortButtonDisabled: {
+    opacity: 0.55,
+  },
+  commentSortText: {
+    color: "#397A51",
+    fontSize: 11,
+    fontWeight: "600",
   },
   commentRow: {
     flexDirection: "row",
@@ -1550,6 +1671,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#405047",
     lineHeight: 18,
+  },
+  commentTimestamp: {
+    fontSize: 11,
+    color: "#7A8980",
+    marginTop: 4,
   },
 
   /* See More Comments Button */

@@ -6,13 +6,16 @@ import {
     ActivityIndicator,
     Alert,
     Image,
+    KeyboardAvoidingView,
     Modal,
+    Platform,
     ScrollView,
     StyleSheet,
     Text,
     TextInput,
     TouchableOpacity,
     View,
+    useWindowDimensions,
 } from "react-native";
 
 import {
@@ -22,11 +25,13 @@ import {
     getDoc,
     getDocs,
     increment,
+    onSnapshot,
     query,
     runTransaction,
     serverTimestamp,
     updateDoc,
     where,
+    writeBatch,
 } from "firebase/firestore";
 
 import { uploadToCloudinary } from "../../../../cloudinary";
@@ -80,13 +85,41 @@ const formatPostedDate = (timestamp) => {
   })} \u2022 ${elapsed}`;
 };
 
+const getTimestampMillis = (timestamp) => {
+  if (!timestamp) return null;
+  const date =
+    typeof timestamp.toDate === "function"
+      ? timestamp.toDate()
+      : new Date(timestamp);
+  return Number.isNaN(date.getTime()) ? null : date.getTime();
+};
+
+const formatCommentDate = (timestamp) => {
+  const millis = getTimestampMillis(timestamp);
+  if (millis === null) return "Just now";
+
+  const date = new Date(millis);
+  return `${date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  })} at ${date.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  })}`;
+};
+
 export default function PostDetail({
   post: suppliedPost,
   currentTab,
   setSelectedPost,
   setSelectedVolunteerPost,
+  highlightedCommentId,
 }) {
   const router = useRouter();
+  const { width } = useWindowDimensions();
+  const isMobile = width < 700;
+  const isCompactLayout = width < 1100;
   const { postId } = useLocalSearchParams();
   const [loadedPost, setLoadedPost] = useState(null);
   const [loadingPost, setLoadingPost] = useState(!suppliedPost);
@@ -97,15 +130,28 @@ export default function PostDetail({
   const isCleaned = effectiveCurrentTab === "cleaned";
 
   const [comments, setComments] = useState([]);
+  const [commentSortOrder, setCommentSortOrder] = useState("desc");
+  const [visibleCommentsByPost, setVisibleCommentsByPost] = useState({});
   const [commentText, setCommentText] = useState("");
+  const [selectedCommentForMenu, setSelectedCommentForMenu] = useState(null);
+  const [editingComment, setEditingComment] = useState(null);
+  const [editCommentText, setEditCommentText] = useState("");
+  const [savingEditComment, setSavingEditComment] = useState(false);
+  const [commentToDelete, setCommentToDelete] = useState(null);
+  const [deletingComment, setDeletingComment] = useState(false);
+  const [expandedDescription, setExpandedDescription] = useState(false);
+  const [descriptionHasMore, setDescriptionHasMore] = useState(false);
   const [submittingComment, setSubmittingComment] = useState(false);
   const [residentPoints, setResidentPoints] = useState(
     suppliedPost?.points ?? 0,
   );
+  const [residentProfile, setResidentProfile] = useState(null);
   const [residentBadges, setResidentBadges] = useState([]);
+  const [commentProfiles, setCommentProfiles] = useState({});
   const [updating, setUpdating] = useState(false);
   const [showReasonModal, setShowReasonModal] = useState(false);
   const [locationModalVisible, setLocationModalVisible] = useState(false);
+  const [fullImageUrl, setFullImageUrl] = useState(null);
 
   const [showOtherModal, setShowOtherModal] = useState(false);
 
@@ -125,6 +171,9 @@ export default function PostDetail({
   );
   const [uploadingCleanupImage, setUploadingCleanupImage] = useState(false);
   const [pendingAssessmentStatus, setPendingAssessmentStatus] = useState(null);
+  const commentUserIdsKey = JSON.stringify(
+    [...new Set(comments.map((comment) => comment.userId).filter(Boolean))].sort(),
+  );
 
   useEffect(() => {
     if (suppliedPost || !postId) return;
@@ -179,6 +228,42 @@ export default function PostDetail({
 
     loadComments();
   }, [post?.id]);
+
+  useEffect(() => {
+    const userIds = JSON.parse(commentUserIdsKey);
+    const unsubscribeUsers = userIds.map((userId) =>
+      onSnapshot(
+        doc(db, "users", userId),
+        (snapshot) => {
+          setCommentProfiles((current) => ({
+            ...current,
+            [userId]: snapshot.exists() ? snapshot.data() : null,
+          }));
+        },
+        (error) => {
+          console.error(`Unable to subscribe to comment author ${userId}:`, error);
+        },
+      ),
+    );
+
+    return () => unsubscribeUsers.forEach((unsubscribe) => unsubscribe());
+  }, [commentUserIdsKey]);
+
+  useEffect(() => {
+    if (!post?.userId) return;
+
+    return onSnapshot(
+      doc(db, "users", post.userId),
+      (snapshot) => {
+        const profile = snapshot.exists() ? snapshot.data() : null;
+        setResidentProfile(profile);
+        if (profile) setResidentPoints(profile.points ?? post.points ?? 0);
+      },
+      (error) => {
+        console.error("Unable to subscribe to report author profile:", error);
+      },
+    );
+  }, [post?.points, post?.userId]);
 
   useEffect(() => {
     if (!post?.userId) return;
@@ -496,12 +581,74 @@ export default function PostDetail({
         ...current,
         { id: commentSnapshot.id, ...newComment, createdAt: new Date() },
       ]);
+      setVisibleCommentsByPost((current) => ({
+        ...current,
+        [post.id]: Math.max(current[post.id] ?? 5, comments.length + 1),
+      }));
       setCommentText("");
     } catch (error) {
       console.error("Unable to add admin comment:", error);
       Alert.alert("Unable to add comment", "Please try again.");
     } finally {
       setSubmittingComment(false);
+    }
+  };
+
+  const handleSaveEditComment = async () => {
+    if (!editingComment || savingEditComment) return;
+
+    const trimmedComment = editCommentText.trim();
+    if (!trimmedComment) {
+      Alert.alert("Empty Comment", "Comment cannot be empty.");
+      return;
+    }
+
+    try {
+      setSavingEditComment(true);
+      const cleanedComment = hideBadWords(trimmedComment);
+      await updateDoc(doc(db, "comments", editingComment.id), {
+        comment: cleanedComment,
+        updatedAt: serverTimestamp(),
+      });
+
+      setComments((current) =>
+        current.map((item) =>
+          item.id === editingComment.id
+            ? { ...item, comment: cleanedComment }
+            : item,
+        ),
+      );
+      setEditingComment(null);
+      setEditCommentText("");
+    } catch (error) {
+      console.error("Unable to update comment:", error);
+      Alert.alert("Unable to update comment", "Please try again.");
+    } finally {
+      setSavingEditComment(false);
+    }
+  };
+
+  const handleDeleteComment = async () => {
+    if (!commentToDelete || deletingComment || !post?.id) return;
+
+    try {
+      setDeletingComment(true);
+      const batch = writeBatch(db);
+      batch.delete(doc(db, "comments", commentToDelete.id));
+      batch.update(doc(db, "posts", post.id), {
+        commentCount: increment(-1),
+      });
+      await batch.commit();
+
+      setComments((current) =>
+        current.filter((item) => item.id !== commentToDelete.id),
+      );
+      setCommentToDelete(null);
+    } catch (error) {
+      console.error("Unable to delete comment:", error);
+      Alert.alert("Unable to delete comment", "Please try again.");
+    } finally {
+      setDeletingComment(false);
     }
   };
 
@@ -625,9 +772,243 @@ export default function PostDetail({
     );
   }
 
+  const bottomActions = (
+    <View
+      style={[
+        styles.bottomActions,
+        isCompactLayout && styles.bottomActionsCompact,
+      ]}
+    >
+      <TouchableOpacity
+        disabled={openingVolunteerActivity || updating}
+        style={[
+          styles.helpBTN,
+          { flex: 1, backgroundColor: "#599A74" },
+          (openingVolunteerActivity || updating) && styles.disabledButton,
+        ]}
+        onPress={openVolunteerActivity}
+      >
+        {openingVolunteerActivity ? (
+          <View style={styles.actionLoading}>
+            <ActivityIndicator size="small" color="#FFFFFF" />
+            <Text style={styles.helpText}>Opening...</Text>
+          </View>
+        ) : (
+          <Text style={styles.helpText}>
+            {existingVolunteerId ? "Manage Volunteers" : "Help"}
+          </Text>
+        )}
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        disabled={updating || openingVolunteerActivity}
+        style={[
+          styles.helpBTN,
+          {
+            backgroundColor:
+              effectiveCurrentTab === "ongoing" ? "#34C759" : "#A5A5A5",
+            flex: 1,
+          },
+          (updating || openingVolunteerActivity) && styles.disabledButton,
+        ]}
+        onPress={
+          effectiveCurrentTab === "ongoing" ? markAsClean : setToOngoing
+        }
+      >
+        {updating ? (
+          <View style={styles.actionLoading}>
+            <ActivityIndicator size="small" color="#FFFFFF" />
+            <Text style={styles.helpText}>
+              {effectiveCurrentTab === "ongoing"
+                ? "Marking as Clean..."
+                : "Setting to On-Going..."}
+            </Text>
+          </View>
+        ) : (
+          <Text style={styles.helpText}>
+            {effectiveCurrentTab === "ongoing"
+              ? "Mark as Clean"
+              : "Set to On-Going"}
+          </Text>
+        )}
+      </TouchableOpacity>
+    </View>
+  );
+
+  const sortedComments = [...comments].sort((first, second) => {
+    if (first.id === highlightedCommentId) return -1;
+    if (second.id === highlightedCommentId) return 1;
+    const firstTime = getTimestampMillis(first.createdAt);
+    const secondTime = getTimestampMillis(second.createdAt);
+    if (firstTime === null) return secondTime === null ? 0 : 1;
+    if (secondTime === null) return -1;
+    return commentSortOrder === "asc"
+      ? firstTime - secondTime
+      : secondTime - firstTime;
+  });
+
+  const renderComments = () =>
+    sortedComments.length > 0 ? (
+      sortedComments
+        .slice(
+          0,
+          isCompactLayout
+            ? (visibleCommentsByPost[post?.id] ?? 5)
+            : comments.length,
+        )
+        .map((comment) => (
+          <View
+            key={comment.id}
+            style={[
+              styles.commentCard,
+              comment.id === highlightedCommentId &&
+                styles.highlightedCommentCard,
+            ]}
+          >
+            <Image
+              source={require("../../../../assets/images/ProfileIG.png")}
+              style={styles.commentAvatar}
+            />
+
+            <View style={styles.commentContent}>
+              <View style={styles.commentHeader}>
+                <Text style={styles.userName} numberOfLines={2}>
+                  {commentProfiles[comment.userId]?.firstName ??
+                    comment.firstName}{" "}
+                  {commentProfiles[comment.userId]?.lastName ??
+                    comment.lastName}
+                </Text>
+
+                <View style={styles.commentHeaderActions}>
+                  <Text style={styles.commentPoints}>
+                    {comment.points} pts
+                  </Text>
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel={`Options for ${commentProfiles[comment.userId]?.firstName ?? comment.firstName ?? "user"}'s comment`}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    style={styles.commentMenuButton}
+                    onPress={() => setSelectedCommentForMenu(comment)}
+                  >
+                    <Ionicons
+                      name="ellipsis-vertical"
+                      size={16}
+                      color="#52675A"
+                    />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <Text style={styles.commentText} selectable>
+                {hideBadWords(comment.comment)}
+              </Text>
+              <Text style={styles.commentTimestamp}>
+                {formatCommentDate(comment.createdAt)}
+              </Text>
+            </View>
+          </View>
+        ))
+    ) : (
+      <Text style={styles.emptyComments}>No comments yet.</Text>
+    );
+
+  const visibleCommentCount = visibleCommentsByPost[post?.id] ?? 5;
+  const hasMoreComments =
+    isCompactLayout && visibleCommentCount < comments.length;
+
+  const commentsSection = (
+    <View
+      style={[
+        styles.commentSection,
+        isCompactLayout && styles.commentSectionCompact,
+      ]}
+    >
+      <View style={styles.commentsSectionHeader}>
+        <Text style={[styles.sectionTitle, styles.commentsSectionTitle]}>
+          Comments
+        </Text>
+        <TouchableOpacity
+          style={styles.commentSortButton}
+          onPress={() =>
+            setCommentSortOrder((current) =>
+              current === "asc" ? "desc" : "asc",
+            )
+          }
+          accessibilityRole="button"
+          accessibilityLabel={`Sort comments ${
+            commentSortOrder === "asc" ? "newest" : "oldest"
+          } first`}
+        >
+          <Ionicons name="swap-vertical" size={15} color="#397A51" />
+          <Text style={styles.commentSortText}>
+            {commentSortOrder === "asc" ? "Oldest first" : "Newest first"}
+          </Text>
+        </TouchableOpacity>
+      </View>
+      {isCompactLayout ? (
+        <ScrollView
+          style={styles.commentsListCompact}
+          nestedScrollEnabled
+          showsVerticalScrollIndicator
+        >
+          {renderComments()}
+        </ScrollView>
+      ) : (
+        <ScrollView
+          style={styles.commentsList}
+          showsVerticalScrollIndicator={false}
+        >
+          {renderComments()}
+        </ScrollView>
+      )}
+      {hasMoreComments && (
+        <TouchableOpacity
+          style={styles.loadMoreCommentsButton}
+          onPress={() =>
+            setVisibleCommentsByPost((current) => ({
+              ...current,
+              [post.id]: visibleCommentCount + 5,
+            }))
+          }
+          accessibilityRole="button"
+        >
+          <Text style={styles.loadMoreCommentsText}>
+            Load more comments (
+            {Math.min(5, comments.length - visibleCommentCount)} more)
+          </Text>
+        </TouchableOpacity>
+      )}
+      <View style={styles.adminCommentRow}>
+        <TextInput
+          value={commentText}
+          onChangeText={setCommentText}
+          placeholder="Write an admin comment..."
+          placeholderTextColor="#94A3B8"
+          style={styles.adminCommentInput}
+          multiline
+        />
+        <TouchableOpacity
+          style={[
+            styles.adminCommentButton,
+            (!commentText.trim() || submittingComment) &&
+              styles.disabledButton,
+          ]}
+          onPress={submitAdminComment}
+          disabled={!commentText.trim() || submittingComment}
+        >
+          {submittingComment ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Ionicons name="send" size={17} color="#FFFFFF" />
+          )}
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
   return (
     <View style={styles.screen}>
-      <View style={{ alignItems: "center", flexDirection: "row", gap: 10 }}>
+      <View style={styles.detailHeader}>
         <TouchableOpacity onPress={closePostDetail}>
           <Image
             source={require("../../../../assets/images/backG.png")}
@@ -635,37 +1016,58 @@ export default function PostDetail({
           />
         </TouchableOpacity>
 
-        <View
-          style={{
-            alignItems: "center",
-            width: "96%",
-            justifyContent: "space-between",
-            flexDirection: "row",
-          }}
-        >
-          <Text style={styles.title}>Post Details</Text>
+        <View style={styles.detailHeaderContent}>
+          <Text style={styles.title} numberOfLines={1}>
+            Post Details
+          </Text>
           <TouchableOpacity
-            style={{
-              backgroundColor: "#fff",
-              padding: 12,
-              borderRadius: 5,
-            }}
+            style={styles.deletePostAction}
             onPress={() => {
               setShowReasonModal(true);
             }}
           >
-            <Text style={{ color: "#FF6666" }}>Delete Post</Text>
+            <Text style={styles.deletePostActionText}>
+              {isMobile ? "Delete" : "Delete Post"}
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
 
+      <ScrollView
+        style={styles.detailScroll}
+        contentContainerStyle={[
+          styles.detailScrollContent,
+          isCompactLayout && styles.detailScrollContentCompact,
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
       {/* MAIN LAYOUT */}
-      <View style={styles.mainContainer}>
+      <View
+        style={[
+          styles.mainContainer,
+          isCompactLayout && styles.mainContainerCompact,
+        ]}
+      >
         {/* LEFT - POST */}
-        <View style={styles.left}>
-          <View style={styles.card}>
+        <View style={[styles.left, isCompactLayout && styles.leftCompact]}>
+          <View
+            style={[
+              styles.card,
+              highlightedCommentId && styles.highlightedPostCard,
+            ]}
+          >
             {!Boolean(isCleaned && post.afterImageUrl) && (
-              <Image source={{ uri: post.imageUrl }} style={styles.postImage} />
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="View report image full screen"
+                activeOpacity={0.9}
+                onPress={() => setFullImageUrl(post.imageUrl)}
+              >
+                <Image
+                  source={{ uri: post.imageUrl }}
+                  style={styles.postImage}
+                />
+              </TouchableOpacity>
             )}
 
             {Boolean(isCleaned && post.afterImageUrl) && (
@@ -674,17 +1076,31 @@ export default function PostDetail({
                 <View style={styles.beforeAfterRow}>
                   <View style={styles.beforeAfterColumn}>
                     <Text style={styles.beforeAfterLabel}>Before</Text>
-                    <Image
-                      source={{ uri: post.imageUrl }}
-                      style={styles.beforeAfterImage}
-                    />
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityLabel="View before cleanup image full screen"
+                      activeOpacity={0.9}
+                      onPress={() => setFullImageUrl(post.imageUrl)}
+                    >
+                      <Image
+                        source={{ uri: post.imageUrl }}
+                        style={styles.beforeAfterImage}
+                      />
+                    </TouchableOpacity>
                   </View>
                   <View style={styles.beforeAfterColumn}>
                     <Text style={styles.beforeAfterLabel}>After</Text>
-                    <Image
-                      source={{ uri: post.afterImageUrl }}
-                      style={styles.beforeAfterImage}
-                    />
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityLabel="View after cleanup image full screen"
+                      activeOpacity={0.9}
+                      onPress={() => setFullImageUrl(post.afterImageUrl)}
+                    >
+                      <Image
+                        source={{ uri: post.afterImageUrl }}
+                        style={styles.beforeAfterImage}
+                      />
+                    </TouchableOpacity>
                   </View>
                 </View>
                 <Text style={styles.cleanedByText} numberOfLines={1}>
@@ -704,7 +1120,8 @@ export default function PostDetail({
                   <View style={styles.authorHeader}>
                     <View style={styles.authorIdentity}>
                       <Text style={styles.profileName}>
-                        {post.firstName} {post.lastName}
+                        {residentProfile?.firstName ?? post.firstName}{" "}
+                        {residentProfile?.lastName ?? post.lastName}
                         <Text style={styles.pointsText}>
                           {" "}
                           {"\u2022"} {residentPoints} pts
@@ -790,9 +1207,38 @@ export default function PostDetail({
               </View>
 
               {/* DESCRIPTION */}
-              <Text style={styles.description}>
-                {hideBadWords(post.caption)}
-              </Text>
+              {Boolean(post.caption) && (
+                <View style={styles.descriptionContainer}>
+                  <View
+                    style={[
+                      styles.descriptionTextWrapper,
+                      !expandedDescription &&
+                        styles.descriptionTextWrapperCollapsed,
+                    ]}
+                  >
+                    <Text
+                      style={styles.description}
+                      onTextLayout={({ nativeEvent }) =>
+                        setDescriptionHasMore(nativeEvent.lines.length > 3)
+                      }
+                    >
+                      {hideBadWords(post.caption)}
+                    </Text>
+                  </View>
+                  {descriptionHasMore && (
+                    <TouchableOpacity
+                      onPress={() =>
+                        setExpandedDescription((current) => !current)
+                      }
+                      accessibilityRole="button"
+                    >
+                      <Text style={styles.descriptionToggle}>
+                        {expandedDescription ? "See less" : "See more"}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
 
               {/* REACTIONS */}
               <View style={styles.reactions}>
@@ -818,79 +1264,8 @@ export default function PostDetail({
         </View>
 
         {/* RIGHT - COMMENTS + LOCATION */}
-        <View style={styles.right}>
-          {/* COMMENTS */}
-          <View style={styles.commentSection}>
-            <Text style={styles.sectionTitle}>Comments</Text>
-            <ScrollView
-              style={{ flex: 1 }}
-              showsVerticalScrollIndicator={false}
-            >
-              {comments.length > 0 ? (
-                comments.map((comment) => (
-                  <View key={comment.id} style={styles.commentCard}>
-                    <Image
-                      source={require("../../../../assets/images/ProfileIG.png")}
-                      style={styles.profileImage}
-                    />
-
-                    <View style={{ flex: 1 }}>
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          justifyContent: "space-between",
-                        }}
-                      >
-                        <Text style={styles.userName}>
-                          {comment.firstName} {comment.lastName}
-                        </Text>
-
-                        <Text
-                          style={{
-                            color: "#2C5FA5",
-                            fontWeight: "bold",
-                          }}
-                        >
-                          {comment.points} pts
-                        </Text>
-                      </View>
-
-                      <Text style={styles.commentText}>
-                        {hideBadWords(comment.comment)}
-                      </Text>
-                    </View>
-                  </View>
-                ))
-              ) : (
-                <Text>No comments yet.</Text>
-              )}
-            </ScrollView>
-            <View style={styles.adminCommentRow}>
-              <TextInput
-                value={commentText}
-                onChangeText={setCommentText}
-                placeholder="Write an admin comment..."
-                placeholderTextColor="#94A3B8"
-                style={styles.adminCommentInput}
-                multiline
-              />
-              <TouchableOpacity
-                style={[
-                  styles.adminCommentButton,
-                  (!commentText.trim() || submittingComment) &&
-                    styles.disabledButton,
-                ]}
-                onPress={submitAdminComment}
-                disabled={!commentText.trim() || submittingComment}
-              >
-                {submittingComment ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Ionicons name="send" size={17} color="#FFFFFF" />
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
+        <View style={[styles.right, isCompactLayout && styles.rightCompact]}>
+          {!isCompactLayout && commentsSection}
 
           {!isCleaned && (
             <TouchableOpacity
@@ -951,90 +1326,37 @@ export default function PostDetail({
         </View>
       </View>
 
-      {/* BUTTON */}
-      {!isCleaned && (
-        <View
-          style={{
-            flexDirection: "row",
-            justifyContent: "space-between",
-            padding: 20,
-            gap: 5,
-          }}
-        >
-          <TouchableOpacity
-            disabled={openingVolunteerActivity || updating}
-            style={[
-              styles.helpBTN,
-              {
-                flex: 1,
-                backgroundColor: "#599A74",
-              },
-              (openingVolunteerActivity || updating) && styles.disabledButton,
-            ]}
-            onPress={openVolunteerActivity}
-          >
-            {openingVolunteerActivity ? (
-              <View
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 8,
-                }}
-              >
-                <ActivityIndicator size="small" color="#FFFFFF" />
-                <Text style={styles.helpText}>Opening...</Text>
-              </View>
-            ) : (
-              <Text style={styles.helpText}>
-                {existingVolunteerId ? "Manage Volunteers" : "Help"}
-              </Text>
-            )}
-          </TouchableOpacity>
+      {isCompactLayout && !isCleaned && bottomActions}
+      {isCompactLayout && commentsSection}
+      </ScrollView>
 
-          {!isCleaned && (
-            <TouchableOpacity
-              disabled={updating || openingVolunteerActivity}
-              style={[
-                styles.helpBTN,
-                {
-                  backgroundColor:
-                    effectiveCurrentTab === "ongoing" ? "#34C759" : "#A5A5A5",
-                  flex: 1,
-                },
-                (updating || openingVolunteerActivity) && styles.disabledButton,
-              ]}
-              onPress={
-                effectiveCurrentTab === "ongoing" ? markAsClean : setToOngoing
-              }
-            >
-              {updating ? (
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 8,
-                  }}
-                >
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                  <Text style={styles.helpText}>
-                    {effectiveCurrentTab === "ongoing"
-                      ? "Marking as Clean..."
-                      : "Setting to On-Going..."}
-                  </Text>
-                </View>
-              ) : (
-                <Text style={styles.helpText}>
-                  {effectiveCurrentTab === "ongoing"
-                    ? "Mark as Clean"
-                    : "Set to On-Going"}
-                </Text>
-              )}
-            </TouchableOpacity>
+      {/* BUTTON */}
+      {!isCompactLayout && !isCleaned && bottomActions}
+
+      <Modal
+        visible={Boolean(fullImageUrl)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setFullImageUrl(null)}
+      >
+        <View style={styles.fullImageOverlay}>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Close full image"
+            style={styles.fullImageCloseButton}
+            onPress={() => setFullImageUrl(null)}
+          >
+            <Ionicons name="close" size={30} color="#FFFFFF" />
+          </TouchableOpacity>
+          {Boolean(fullImageUrl) && (
+            <Image
+              source={{ uri: fullImageUrl }}
+              style={styles.fullImage}
+              resizeMode="contain"
+            />
           )}
         </View>
-      )}
+      </Modal>
 
       <Modal visible={showReasonModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
@@ -1148,6 +1470,157 @@ export default function PostDetail({
                   </View>
                 ) : (
                   <Text style={styles.confirmButtonText}>Yes</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={Boolean(selectedCommentForMenu)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSelectedCommentForMenu(null)}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          style={styles.modalOverlay}
+          onPress={() => setSelectedCommentForMenu(null)}
+        >
+          <TouchableOpacity
+            activeOpacity={1}
+            style={styles.modal}
+            onPress={(event) => event.stopPropagation?.()}
+          >
+            <Text style={styles.modalTitle}>Comment Options</Text>
+            <TouchableOpacity
+              style={styles.commentOptionButton}
+              onPress={() => {
+                const selectedComment = selectedCommentForMenu;
+                setSelectedCommentForMenu(null);
+                setEditingComment(selectedComment);
+                setEditCommentText(selectedComment?.comment || "");
+              }}
+            >
+              <Ionicons name="pencil-outline" size={18} color="#397A51" />
+              <Text style={styles.commentOptionText}>Edit Comment</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.commentOptionButton}
+              onPress={() => {
+                setCommentToDelete(selectedCommentForMenu);
+                setSelectedCommentForMenu(null);
+              }}
+            >
+              <Ionicons name="trash-outline" size={18} color="#B42318" />
+              <Text style={styles.commentDeleteOptionText}>Delete Comment</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.modalCancelButton}
+              onPress={() => setSelectedCommentForMenu(null)}
+            >
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
+      <Modal
+        visible={Boolean(editingComment)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!savingEditComment) {
+            setEditingComment(null);
+            setEditCommentText("");
+          }
+        }}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={styles.modalOverlay}
+        >
+          <View style={styles.modal}>
+            <Text style={styles.modalEyebrow}>COMMENT</Text>
+            <Text style={styles.modalTitle}>Edit Comment</Text>
+            <TextInput
+              value={editCommentText}
+              onChangeText={setEditCommentText}
+              placeholder="Edit comment..."
+              placeholderTextColor="#94A3B8"
+              style={styles.editCommentInput}
+              multiline
+              maxLength={500}
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                disabled={savingEditComment}
+                onPress={() => {
+                  setEditingComment(null);
+                  setEditCommentText("");
+                }}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.commentSaveButton,
+                  (!editCommentText.trim() || savingEditComment) &&
+                    styles.disabledButton,
+                ]}
+                disabled={!editCommentText.trim() || savingEditComment}
+                onPress={handleSaveEditComment}
+              >
+                {savingEditComment ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.commentSaveButtonText}>Save</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      <Modal
+        visible={Boolean(commentToDelete)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!deletingComment) setCommentToDelete(null);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modal}>
+            <View style={styles.deleteIconCircle}>
+              <Ionicons name="trash-outline" size={24} color="#B42318" />
+            </View>
+            <Text style={styles.modalTitle}>Delete this comment?</Text>
+            <Text style={styles.modalSubtitle}>
+              This action cannot be undone.
+            </Text>
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                disabled={deletingComment}
+                onPress={() => setCommentToDelete(null)}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.confirmButton,
+                  deletingComment && styles.disabledButton,
+                ]}
+                disabled={deletingComment}
+                onPress={handleDeleteComment}
+              >
+                {deletingComment ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.confirmButtonText}>Delete</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -1443,6 +1916,52 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
   },
+  commentOptionButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0F0F0",
+  },
+  commentOptionText: {
+    color: "#334155",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  commentDeleteOptionText: {
+    color: "#B42318",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  editCommentInput: {
+    minHeight: 90,
+    maxHeight: 160,
+    padding: 12,
+    marginTop: 8,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "#D8E2DC",
+    borderRadius: 10,
+    backgroundColor: "#F8FAF9",
+    color: "#1F2937",
+    fontSize: 14,
+    textAlignVertical: "top",
+  },
+  commentSaveButton: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 44,
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    backgroundColor: "#599A74",
+  },
+  commentSaveButtonText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "800",
+  },
 
   reasonInput: {
     height: 120,
@@ -1499,53 +2018,174 @@ const styles = StyleSheet.create({
   },
   commentCard: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
+    minWidth: 0,
     backgroundColor: "#F4F4F4",
     borderRadius: 8,
     padding: 10,
     marginBottom: 10,
   },
+  highlightedCommentCard: {
+    backgroundColor: "#EAF3FF",
+    borderColor: "#3B82F6",
+    borderWidth: 2,
+  },
+  commentAvatar: {
+    width: 40,
+    height: 40,
+    flexShrink: 0,
+    borderRadius: 20,
+    marginRight: 10,
+  },
+  commentContent: {
+    flex: 1,
+    minWidth: 0,
+  },
+  commentHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 8,
+    minWidth: 0,
+  },
+  commentHeaderActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  commentMenuButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    width: 24,
+    height: 24,
+  },
   screen: {
     flex: 1,
-    justifyContent: "space-between",
+    minHeight: 0,
+  },
+  detailHeader: {
+    minHeight: 52,
+    flexDirection: "row",
+    alignItems: "center",
     gap: 10,
+    marginBottom: 10,
+  },
+  detailHeaderContent: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  deletePostAction: {
+    flexShrink: 0,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: "#FFFFFF",
+  },
+  deletePostActionText: {
+    color: "#FF6666",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  detailScroll: {
+    flex: 1,
+    minHeight: 0,
+  },
+  detailScrollContent: {
+    flexGrow: 1,
+  },
+  detailScrollContentCompact: {
+    width: "100%",
+    alignItems: "stretch",
+    paddingBottom: 16,
   },
   title: {
     fontSize: 24,
     fontWeight: "bold",
     color: "#599A74",
-    marginBottom: 10,
-    alignContent: "center",
-    justifyContent: "center",
+    flexShrink: 1,
+    marginBottom: 0,
   },
   mainContainer: {
     flexDirection: "row",
     flex: 1, // take full remaining vertical space
+    minHeight: 0,
+    minWidth: 0,
     gap: 20,
     marginBottom: 0,
   },
+  mainContainerCompact: {
+    flexGrow: 0,
+    flexShrink: 0,
+    flexBasis: "auto",
+    flexDirection: "column",
+    alignItems: "stretch",
+    alignSelf: "stretch",
+    gap: 14,
+  },
   left: {
     flex: 1,
+    minWidth: 0,
+  },
+  leftCompact: {
+    flexGrow: 0,
+    flexShrink: 0,
+    flexBasis: "auto",
+    width: "100%",
+    alignSelf: "stretch",
   },
 
   right: {
     flex: 1,
+    minWidth: 0,
+    minHeight: 0,
     gap: 15,
-    justifyContent: "space-between",
+  },
+  rightCompact: {
+    flexGrow: 0,
+    flexShrink: 0,
+    flexBasis: "auto",
+    width: "100%",
+    alignSelf: "stretch",
+    gap: 12,
   },
 
   card: {
+    width: "100%",
     backgroundColor: "#fff",
     borderRadius: 10,
     padding: 10,
   },
+  highlightedPostCard: {
+    borderColor: "#3B82F6",
+    borderWidth: 3,
+  },
 
   postImage: {
-    width: "auto",
-    height: "auto",
+    width: "100%",
     aspectRatio: 16 / 9,
     borderRadius: 10,
     resizeMode: "cover",
+  },
+  fullImageOverlay: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.92)",
+  },
+  fullImage: {
+    width: "100%",
+    height: "85%",
+  },
+  fullImageCloseButton: {
+    position: "absolute",
+    top: 40,
+    right: 16,
+    zIndex: 1,
+    padding: 10,
   },
 
   beforeAfterSection: {
@@ -1611,6 +2251,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     gap: 10,
+    minWidth: 0,
   },
   authorIdentity: {
     flex: 1,
@@ -1638,11 +2279,13 @@ const styles = StyleSheet.create({
   locationRow: {
     flexDirection: "row",
     alignItems: "center",
+    minWidth: 0,
     marginTop: 5,
     alignSelf: "flex-start",
     cursor: "pointer",
   },
-  locationIcon: { width: 14, height: 14, marginRight: 5 },
+  locationIcon: { width: 14, height: 14, marginRight: 5, flexShrink: 0 },
+  locationText: { flex: 1, minWidth: 0 },
   tagsRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1667,7 +2310,50 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
   description: {
+    lineHeight: 19,
+  },
+  descriptionContainer: {
     marginVertical: 10,
+  },
+  descriptionTextWrapper: {
+    overflow: "hidden",
+  },
+  descriptionTextWrapperCollapsed: {
+    maxHeight: 57,
+  },
+  descriptionToggle: {
+    marginTop: 3,
+    color: "#397A51",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  commentsSectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  commentsSectionTitle: {
+    marginBottom: 0,
+  },
+  commentSortButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderRadius: 16,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    backgroundColor: "#E8F2EB",
+  },
+  commentSortText: {
+    color: "#397A51",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  commentTimestamp: {
+    marginTop: 4,
+    color: "#7A8980",
+    fontSize: 11,
   },
   reactions: {
     flexDirection: "row",
@@ -1704,9 +2390,70 @@ const styles = StyleSheet.create({
   },
   commentSection: {
     flex: 1,
+    minHeight: 0,
+    minWidth: 0,
+    maxHeight: 480,
     backgroundColor: "#fff",
     borderRadius: 10,
     padding: 15,
+  },
+  commentSectionCompact: {
+    flexGrow: 0,
+    flexShrink: 0,
+    flexBasis: "auto",
+    height: 400,
+    maxHeight: 400,
+    padding: 12,
+    overflow: "hidden",
+  },
+  commentsListCompact: {
+    width: "100%",
+    height: 240,
+    flexGrow: 0,
+    flexShrink: 0,
+    flexBasis: "auto",
+  },
+  commentsList: {
+    flex: 1,
+    minHeight: 0,
+  },
+  emptyComments: {
+    paddingVertical: 12,
+    color: "#68746C",
+    fontSize: 13,
+  },
+  loadMoreCommentsButton: {
+    alignSelf: "center",
+    marginTop: 2,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 8,
+    backgroundColor: "#E8F2EB",
+  },
+  loadMoreCommentsText: {
+    color: "#397A51",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  bottomActions: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    padding: 20,
+    gap: 8,
+    backgroundColor: "#F5F6F5",
+  },
+  bottomActionsCompact: {
+    width: "100%",
+    paddingHorizontal: 0,
+    paddingTop: 8,
+    paddingBottom: 12,
+    gap: 8,
+  },
+  actionLoading: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
   },
   adminCommentRow: {
     flexDirection: "row",
@@ -1743,8 +2490,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   userName: {
+    flex: 1,
+    minWidth: 0,
     fontWeight: "bold",
-    fontSize: 16,
+    fontSize: 14,
+    color: "#25332A",
+  },
+  commentPoints: {
+    flexShrink: 0,
+    color: "#2C5FA5",
+    fontWeight: "bold",
+    fontSize: 12,
+    textAlign: "right",
   },
   locationSection: {
     backgroundColor: "#fff",
@@ -1906,17 +2663,25 @@ const styles = StyleSheet.create({
   cleanAssessmentText: { color: "#FFFFFF", fontSize: 14, fontWeight: "800" },
   helpBTN: {
     backgroundColor: "#599A74",
-    padding: 16,
+    minHeight: 48,
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     borderRadius: 8,
     alignItems: "center",
   },
   helpText: {
     color: "#fff",
     fontWeight: "bold",
-    fontSize: 18,
+    fontSize: 16,
+    textAlign: "center",
   },
   commentText: {
+    flexShrink: 1,
+    minWidth: 0,
     color: "#666",
-    marginTop: 2,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 6,
   },
 });

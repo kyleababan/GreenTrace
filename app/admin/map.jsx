@@ -95,7 +95,7 @@ export default function AdminMap() {
   const router = useRouter();
   const { width } = useWindowDimensions();
   const { toggleSidebar, isMobile: sidebarIsMobile } = useAdminSidebar();
-  const isMobile = width < 768 || Boolean(sidebarIsMobile);
+  const isMobile = width < 700 || Boolean(sidebarIsMobile);
 
   const [posts, setPosts] = useState([]);
   const [users, setUsers] = useState({});

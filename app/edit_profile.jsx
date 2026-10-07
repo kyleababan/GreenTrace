@@ -1,6 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { doc, getDoc, updateDoc } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDoc,
+  serverTimestamp,
+  writeBatch,
+} from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -78,12 +84,37 @@ export default function EditProfile() {
 
     setSaving(true);
     try {
-      await updateDoc(doc(db, "users", currentUser.uid), {
+      const userRef = doc(db, "users", currentUser.uid);
+      const userSnapshot = await getDoc(userRef);
+      if (!userSnapshot.exists()) {
+        throw new Error("The user profile no longer exists.");
+      }
+
+      const previousProfile = userSnapshot.data();
+      const nextProfile = {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         email: email.trim(),
         cellNumber: cellNumber.trim(),
+      };
+      const batch = writeBatch(db);
+      batch.update(userRef, nextProfile);
+
+      ["firstName", "lastName", "email"].forEach((field) => {
+        const oldValue = String(previousProfile[field] || "");
+        const newValue = nextProfile[field];
+        if (oldValue !== newValue) {
+          batch.set(doc(collection(userRef, "changeLogs")), {
+            field,
+            oldValue,
+            newValue,
+            source: "profile",
+            changedAt: serverTimestamp(),
+          });
+        }
       });
+
+      await batch.commit();
 
       setEditable({
         firstName: false,

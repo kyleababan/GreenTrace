@@ -1,4 +1,5 @@
 import { Redirect, Slot, usePathname } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { createContext, useContext, useEffect, useState } from "react";
@@ -6,6 +7,7 @@ import {
     ActivityIndicator,
     Modal,
     StyleSheet,
+    Text,
     TouchableOpacity,
     View,
     useWindowDimensions,
@@ -28,16 +30,12 @@ export default function AdminLayout() {
 
   const pathname = usePathname();
   const { width } = useWindowDimensions();
-  const isMobile = width < 768;
+  const isMobile = width < 700;
+  const isTablet = width >= 700 && width < 1024;
   const isMapPage = pathname === "/admin/map";
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const toggleSidebar = () => setSidebarOpen((prev) => !prev);
-
-  // Automatically close drawer when route changes
-  useEffect(() => {
-    setSidebarOpen(false);
-  }, [pathname]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -89,11 +87,9 @@ export default function AdminLayout() {
       }}
     >
       <View style={styles.container}>
-        {/* On non-map pages, or desktop map: regular sidebar */}
-        {(!isMapPage || !isMobile) && <Sidebar />}
+        {!isMobile && <Sidebar />}
 
-        {/* On mobile devices on map page: sidebar in drawer modal */}
-        {isMapPage && isMobile && (
+        {isMobile && (
           <Modal
             visible={sidebarOpen}
             transparent
@@ -121,9 +117,24 @@ export default function AdminLayout() {
         <View
           style={[
             styles.content,
+            isMobile && !isMapPage && styles.contentMobile,
+            isTablet && styles.contentTablet,
             isMapPage && isMobile && styles.contentMobileMap,
           ]}
         >
+          {isMobile && !isMapPage && (
+            <View style={styles.mobileHeader}>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Open admin navigation"
+                style={styles.mobileMenuButton}
+                onPress={toggleSidebar}
+              >
+                <Ionicons name="menu" size={24} color="#315F43" />
+              </TouchableOpacity>
+              <Text style={styles.mobileHeaderTitle}>Admin</Text>
+            </View>
+          )}
           <Slot />
         </View>
       </View>
@@ -143,9 +154,41 @@ const styles = StyleSheet.create({
     padding: 20,
   },
 
+  contentMobile: {
+    padding: 0,
+  },
+
+  contentTablet: {
+    padding: 12,
+  },
+
   contentMobileMap: {
     padding: 10,
     backgroundColor: "#F4F7F5",
+  },
+
+  mobileHeader: {
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 12,
+    backgroundColor: "#F5F6FA",
+  },
+
+  mobileMenuButton: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 10,
+    backgroundColor: "#E8F1EB",
+  },
+
+  mobileHeaderTitle: {
+    color: "#315F43",
+    fontSize: 16,
+    fontWeight: "700",
   },
 
   drawerOverlay: {

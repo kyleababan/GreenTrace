@@ -1,6 +1,6 @@
 import { StyleSheet, Text, View } from "react-native";
 
-export default function FormError({ message, light = false }) {
+export default function FormError({ message, light = false, textColor }) {
   if (!message) return null;
 
   return (
@@ -8,7 +8,15 @@ export default function FormError({ message, light = false }) {
       accessibilityRole="alert"
       style={[styles.box, light && styles.lightBox]}
     >
-      <Text style={[styles.text, light && styles.lightText]}>{message}</Text>
+      <Text
+        style={[
+          styles.text,
+          light && styles.lightText,
+          textColor && { color: textColor },
+        ]}
+      >
+        {message}
+      </Text>
     </View>
   );
 }
@@ -35,6 +43,6 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255, 255, 255, 0.45)",
   },
   lightText: {
-    color: "#FFFFFF",
+    color: "#FFE0DE",
   },
 });
