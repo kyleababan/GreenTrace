@@ -567,6 +567,27 @@ export default function CreateReport() {
                 : {}),
             });
 
+            // Record violation log in changeLogs subcollection
+            try {
+              const cleanedReason = msg.replace(/^Image rejected:\s*/i, "").trim();
+              await addDoc(collection(userRef, "changeLogs"), {
+                type: "violation",
+                field: "nsfw_violation",
+                violationType: "nsfw",
+                warningNumber: newCount,
+                maxWarnings: 3,
+                reason: cleanedReason || "Uploaded inappropriate/NSFW content.",
+                actionTaken: banned
+                  ? "Account Banned (Reached 3 Warnings)"
+                  : `Warning ${newCount} of 3 issued`,
+                source: "create_post",
+                changedAt: serverTimestamp(),
+                createdAt: serverTimestamp(),
+              });
+            } catch (logErr) {
+              console.warn("Could not write violation log:", logErr);
+            }
+
             setWarningsCount(newCount);
             setWarningIsBanned(banned);
             setWarningReason(msg.replace(/^Image rejected:\s*/i, ""));

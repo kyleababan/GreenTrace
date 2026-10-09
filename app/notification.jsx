@@ -58,6 +58,8 @@ export default function Notification() {
     if (type === "reaction" || type === "priority") return "heart";
     if (type === "deleted_post") return "shield-checkmark";
     if (type === "volunteer_kicked") return "person-remove";
+    if (type === "activity_created") return "calendar-outline";
+    if (type === "status_update") return "alert-circle";
     return "notifications";
   };
 
@@ -138,13 +140,27 @@ export default function Notification() {
                 const postSnap = await getDoc(doc(db, "posts", item.postId));
 
                 if (postSnap.exists()) {
-                  item.postImage = postSnap.data().imageUrl;
+                  item.postImage = postSnap.data().imageUrl || item.postImage;
                   item.postAvailable = true;
                 } else {
                   item.postAvailable = false;
                 }
               } catch (_error) {
                 item.postAvailable = false;
+              }
+            } else if (item.volunteerPostId) {
+              item.postAvailable = true;
+              if (!item.postImage) {
+                try {
+                  const volSnap = await getDoc(
+                    doc(db, "volunteer_posts", item.volunteerPostId),
+                  );
+                  if (volSnap.exists()) {
+                    item.postImage = volSnap.data().imageUrl;
+                  }
+                } catch (_error) {
+                  // ignore
+                }
               }
             } else {
               item.postAvailable = false;
@@ -262,7 +278,10 @@ export default function Notification() {
       }
     }
 
-    if (item.type === "volunteer_kicked" && item.volunteerPostId) {
+    if (
+      (item.type === "volunteer_kicked" || item.type === "activity_created") &&
+      item.volunteerPostId
+    ) {
       router.push({
         pathname: "/volunteering",
         params: { volunteerId: item.volunteerPostId },
@@ -369,7 +388,7 @@ export default function Notification() {
                   ]}
                   activeOpacity={0.8}
                   onPress={() => openNotification(item)}
-                  accessibilityLabel={`${item.read === true ? "Read" : "Unread"} notification from ${item.type === "deleted_post" ? "GreenTrace LGU" : getActorText(item)}`}
+                  accessibilityLabel={`${item.read === true ? "Read" : "Unread"} notification from ${item.type === "deleted_post" || item.type === "activity_created" || item.type === "status_update" ? item.title || "GreenTrace LGU" : getActorText(item)}`}
                 >
                   <View style={styles.iconWrapper}>
                     <Ionicons
@@ -382,8 +401,10 @@ export default function Notification() {
                   {/* CENTER: Text Content */}
                   <View style={styles.textContainer}>
                     <Text style={styles.userName}>
-                      {item.type === "deleted_post"
-                        ? "GreenTrace LGU"
+                      {item.type === "deleted_post" ||
+                      item.type === "activity_created" ||
+                      item.type === "status_update"
+                        ? item.title || "GreenTrace LGU"
                         : getActorText(item)}
                     </Text>
 

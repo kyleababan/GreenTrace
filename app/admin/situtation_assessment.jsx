@@ -22,10 +22,11 @@ export default function SituationAssessment() {
   const router = useRouter();
   const { width } = useWindowDimensions();
   const isMobile = width < 700;
-  const { status, postId, commentId } = useLocalSearchParams();
+  const { status, postId, commentId, from } = useLocalSearchParams();
   const requestedStatus = Array.isArray(status) ? status[0] : status;
   const requestedPostId = Array.isArray(postId) ? postId[0] : postId;
   const requestedCommentId = Array.isArray(commentId) ? commentId[0] : commentId;
+  const requestedFrom = Array.isArray(from) ? from[0] : from;
   const activeTab = ASSESSMENT_STATUSES.includes(requestedStatus)
     ? requestedStatus
     : "critical";
@@ -78,9 +79,13 @@ export default function SituationAssessment() {
   }, [requestedPostId]);
 
   const closeSelectedPost = () => {
+    if (requestedFrom === "user_logs") {
+      router.back();
+      return;
+    }
     setSelectedPost(null);
     if (requestedPostId) {
-      router.setParams({ postId: undefined, commentId: undefined });
+      router.setParams({ postId: undefined, commentId: undefined, from: undefined });
     }
   };
 

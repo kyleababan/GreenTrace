@@ -2,7 +2,14 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { signOut } from "firebase/auth";
-import { doc, getDoc, updateDoc } from "firebase/firestore";
+import {
+  addDoc,
+  collection,
+  doc,
+  getDoc,
+  serverTimestamp,
+  updateDoc,
+} from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
     ActivityIndicator,
@@ -633,6 +640,27 @@ export default function EditPost() {
                   }
                 : {}),
             });
+
+            // Record violation log in changeLogs subcollection
+            try {
+              const cleanedReason = msg.replace(/^Image rejected:\s*/i, "").trim();
+              await addDoc(collection(userRef, "changeLogs"), {
+                type: "violation",
+                field: "nsfw_violation",
+                violationType: "nsfw",
+                warningNumber: newCount,
+                maxWarnings: 3,
+                reason: cleanedReason || "Uploaded inappropriate/NSFW content.",
+                actionTaken: banned
+                  ? "Account Banned (Reached 3 Warnings)"
+                  : `Warning ${newCount} of 3 issued`,
+                source: "edit_post",
+                changedAt: serverTimestamp(),
+                createdAt: serverTimestamp(),
+              });
+            } catch (logErr) {
+              console.warn("Could not write violation log:", logErr);
+            }
 
             setWarningsCount(newCount);
             setWarningIsBanned(banned);

@@ -53,6 +53,10 @@ import {
     getUserPointsMap,
     mergeUniqueById,
 } from "../utils/pagination";
+import {
+    openFacebookShareDialog,
+    updatePostHeadMetaTags,
+} from "../utils/shareHelper";
 
 const formatDateTime = (timestamp) => {
   if (!timestamp) return null;
@@ -183,6 +187,12 @@ export default function Post() {
       },
     );
   }, [post?.userId]);
+
+  useEffect(() => {
+    if (post) {
+      updatePostHeadMetaTags(post);
+    }
+  }, [post]);
 
   useEffect(() => {
     const userIds = JSON.parse(commentUserIdsKey);
@@ -611,6 +621,21 @@ export default function Post() {
                       <Text style={styles.reactCount}>
                         {post.reactionCount || 0}
                       </Text>
+
+                      {/* Share to Facebook */}
+                      <TouchableOpacity
+                        style={styles.shareButton}
+                        onPress={() => openFacebookShareDialog(post)}
+                        activeOpacity={0.7}
+                        accessibilityRole="button"
+                        accessibilityLabel="Share to Facebook"
+                      >
+                        <Ionicons
+                          name="logo-facebook"
+                          size={18}
+                          color="#1877F2"
+                        />
+                      </TouchableOpacity>
 
                       {currentUser?.uid === post.userId &&
                         !isPostEditLocked(post.status) && (
@@ -1382,6 +1407,11 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#405047",
     marginRight: 4,
+  },
+  shareButton: {
+    padding: 3,
+    alignItems: "center",
+    justifyContent: "center",
   },
   settingsButtonTrigger: {
     padding: 2,

@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
+    addDoc,
     collection,
     doc,
     getDoc,
@@ -51,8 +52,17 @@ const getChangeLabel = (field) =>
     email: "Email",
   })[field] || field;
 
-const formatChangeTime = (timestamp) =>
-  timestamp?.toDate ? timestamp.toDate().toLocaleString() : "Time unavailable";
+const formatChangeTime = (timestamp) => {
+  if (!timestamp) return "Time unavailable";
+  if (timestamp.toDate) return timestamp.toDate().toLocaleString();
+  if (timestamp.seconds)
+    return new Date(timestamp.seconds * 1000).toLocaleString();
+  if (typeof timestamp === "string" || typeof timestamp === "number") {
+    const d = new Date(timestamp);
+    if (!isNaN(d.getTime())) return d.toLocaleString();
+  }
+  return "Time unavailable";
+};
 
 export default function UserPostDetail() {
   const { userId } = useLocalSearchParams();
@@ -66,6 +76,7 @@ export default function UserPostDetail() {
   const [visibleLogCount, setVisibleLogCount] = useState(6);
   const [logsLoading, setLogsLoading] = useState(true);
   const [logsError, setLogsError] = useState("");
+  const [logsRefreshKey, setLogsRefreshKey] = useState(0);
   const [activeActivityTab, setActiveActivityTab] = useState("reports");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -93,6 +104,7 @@ export default function UserPostDetail() {
           : "critical",
         postId: entry.postId,
         commentId: entry.id,
+        from: "user_logs",
       },
     });
   };
@@ -145,17 +157,14 @@ export default function UserPostDetail() {
       setLogsLoading(true);
       setLogsError("");
       try {
-        const [profileLogsSnapshot, commentsSnapshot] = await Promise.all([
-          getDocs(
-            query(
-              collection(db, "users", userId, "changeLogs"),
-              orderBy("changedAt", "desc"),
+        const [subcollectionLogsSnapshot, commentsSnapshot, userDocSnapshot] =
+          await Promise.all([
+            getDocs(collection(db, "users", userId, "changeLogs")),
+            getDocs(
+              query(collection(db, "comments"), where("userId", "==", userId)),
             ),
-          ),
-          getDocs(
-            query(collection(db, "comments"), where("userId", "==", userId)),
-          ),
-        ]);
+            getDoc(doc(db, "users", userId)),
+          ]);
         const comments = commentsSnapshot.docs.map((comment) => ({
           id: comment.id,
           ...comment.data(),
@@ -185,18 +194,99 @@ export default function UserPostDetail() {
             postExists: Boolean(post),
           };
         });
-        const profileLogs = profileLogsSnapshot.docs.map((entry) => ({
-          id: entry.id,
-          type: "profile",
-          ...entry.data(),
-        }));
-        const sortedLogs = [...profileLogs, ...commentLogs].sort(
+
+        const subcollectionLogs = subcollectionLogsSnapshot.docs.map((entry) => {
+          const data = entry.data();
+          const logType =
+            data.type ||
+            (data.violationType ||
+            String(data.field || "").includes("violation") ||
+            String(data.field || "").includes("ban")
+              ? "violation"
+              : "profile");
+          return {
+            id: entry.id,
+            ...data,
+            type: logType,
+          };
+        });
+
+        // Check if there are user-level warnings/bans without changeLogs records (legacy or pre-existing)
+        const targetUserData = userDocSnapshot.exists()
+          ? userDocSnapshot.data()
+          : {};
+        const fallbackLogs = [];
+        const existingWarnings = targetUserData.nsfwWarnings || 0;
+        const hasNsfwLog = subcollectionLogs.some(
+          (l) => l.violationType === "nsfw" || l.field === "nsfw_violation",
+        );
+
+        if (!hasNsfwLog && existingWarnings > 0) {
+          for (let i = 1; i <= existingWarnings; i++) {
+            fallbackLogs.push({
+              id: `legacy-warning-${i}`,
+              type: "violation",
+              field: "nsfw_violation",
+              violationType: "nsfw",
+              warningNumber: i,
+              maxWarnings: 3,
+              reason:
+                targetUserData.banReason ||
+                "Uploaded inappropriate/NSFW content detected by AI moderation.",
+              actionTaken:
+                i >= 3
+                  ? "Account Banned (Reached 3 Warnings)"
+                  : `Warning ${i} of 3 issued`,
+              source: "content_moderation",
+              changedAt:
+                targetUserData.bannedAt ||
+                targetUserData.updatedAt ||
+                targetUserData.createdAt ||
+                null,
+              isLegacy: true,
+            });
+          }
+        }
+
+        const hasBanLog = subcollectionLogs.some(
+          (l) =>
+            l.field === "account_ban" ||
+            (l.violationType === "nsfw" && l.warningNumber >= 3),
+        );
+        if (!hasBanLog && targetUserData.isBanned && existingWarnings === 0) {
+          fallbackLogs.push({
+            id: `legacy-ban`,
+            type: "violation",
+            field: "account_ban",
+            violationType: "admin_ban",
+            reason:
+              targetUserData.banReason ||
+              "Account suspended by Administrator.",
+            actionTaken: "Account Banned by Admin",
+            source: "admin_action",
+            changedAt:
+              targetUserData.bannedAt ||
+              targetUserData.updatedAt ||
+              targetUserData.createdAt ||
+              null,
+            isLegacy: true,
+          });
+        }
+
+        const allLogs = [
+          ...subcollectionLogs,
+          ...fallbackLogs,
+          ...commentLogs,
+        ];
+        const sortedLogs = allLogs.sort(
           (first, second) =>
             (second.changedAt?.toMillis?.() ??
               second.createdAt?.toMillis?.() ??
+              (second.changedAt?.seconds ? second.changedAt.seconds * 1000 : 0) ??
               0) -
             (first.changedAt?.toMillis?.() ??
               first.createdAt?.toMillis?.() ??
+              (first.changedAt?.seconds ? first.changedAt.seconds * 1000 : 0) ??
               0),
         );
         if (isActive) {
@@ -216,7 +306,7 @@ export default function UserPostDetail() {
     return () => {
       isActive = false;
     };
-  }, [userId]);
+  }, [userId, logsRefreshKey]);
 
   const addPoints = async () => {
     const amount = Number(pointsToAdd);
@@ -266,12 +356,27 @@ export default function UserPostDetail() {
         banReason: reason,
         bannedAt: serverTimestamp(),
       });
+      try {
+        await addDoc(collection(db, "users", user.id, "changeLogs"), {
+          type: "violation",
+          field: "account_ban",
+          violationType: "admin_ban",
+          reason: reason,
+          actionTaken: "Account Banned by Admin",
+          source: "admin_action",
+          changedAt: serverTimestamp(),
+          createdAt: serverTimestamp(),
+        });
+      } catch (logErr) {
+        console.warn("Could not write ban log:", logErr);
+      }
       setUser((currentUser) => ({
         ...currentUser,
         isBanned: true,
         banReason: reason,
       }));
       setShowBanModal(false);
+      setLogsRefreshKey((k) => k + 1);
     } catch (error) {
       console.error("Unable to ban user:", error);
     } finally {
@@ -290,6 +395,20 @@ export default function UserPostDetail() {
         nsfwWarnings: 0,
         unbannedAt: serverTimestamp(),
       });
+      try {
+        await addDoc(collection(db, "users", user.id, "changeLogs"), {
+          type: "violation",
+          field: "account_unban",
+          violationType: "admin_unban",
+          reason: "Account unbanned and warning counter reset.",
+          actionTaken: "Account Unbanned by Admin",
+          source: "admin_action",
+          changedAt: serverTimestamp(),
+          createdAt: serverTimestamp(),
+        });
+      } catch (logErr) {
+        console.warn("Could not write unban log:", logErr);
+      }
       setUser((currentUser) => ({
         ...currentUser,
         isBanned: false,
@@ -297,6 +416,7 @@ export default function UserPostDetail() {
         nsfwWarnings: 0,
       }));
       setShowUnbanModal(false);
+      setLogsRefreshKey((k) => k + 1);
     } catch (error) {
       console.error("Unable to unban user:", error);
       Alert.alert("Error", "Unable to unban user. Please try again.");
@@ -471,7 +591,7 @@ export default function UserPostDetail() {
           <Text style={styles.sectionTitle}>
             {activeActivityTab === "reports"
               ? `${name}'s reports`
-              : `${name}'s profile changes`}
+              : `${name}'s activity & violation logs`}
           </Text>
           {activeActivityTab === "reports" ? (
             <ScrollView
@@ -552,98 +672,226 @@ export default function UserPostDetail() {
               ) : logsError ? (
                 <Text style={styles.logError}>{logsError}</Text>
               ) : changeLogs.length ? (
-                visibleChangeLogs.map((entry) => (
-                  <TouchableOpacity
-                    key={`${entry.type}-${entry.id}`}
-                    style={[
-                      styles.changeLogCard,
-                      entry.type === "comment" && styles.commentLogCard,
-                    ]}
-                    onPress={
-                      entry.type === "comment" && entry.postExists
-                        ? () => openCommentLog(entry)
-                        : undefined
-                    }
-                    disabled={entry.type !== "comment" || !entry.postExists}
-                    activeOpacity={0.75}
-                    accessibilityRole={
-                      entry.type === "comment" && entry.postExists
-                        ? "button"
-                        : undefined
-                    }
-                    accessibilityLabel={
-                      entry.type === "comment" && entry.postExists
-                        ? `Open comment on ${entry.postCaption}`
-                        : undefined
-                    }
-                  >
-                    <View style={styles.changeLogIcon}>
-                      <Ionicons
-                        name={
-                          entry.type === "comment"
-                            ? "chatbubble-outline"
-                            : "create-outline"
-                        }
-                        size={18}
-                        color="#4B7F5F"
-                      />
-                    </View>
-                    <View style={styles.changeLogCopy}>
-                      {entry.type === "comment" ? (
-                        <>
-                          <Text style={styles.changeLogTitle}>
-                            Commented on a report
-                          </Text>
-                          <Text style={styles.changeLogValues}>
-                            Report: {hideBadWords(entry.postCaption)}
-                          </Text>
-                          <Text style={styles.changeLogValues}>
-                            Comment: {hideBadWords(entry.comment || "")}
-                          </Text>
-                          {entry.postExists ? (
-                            <Text style={styles.commentLogHint}>
-                              Tap to view the highlighted comment
+                visibleChangeLogs.map((entry) => {
+                  const isComment = entry.type === "comment";
+                  const isViolation = entry.type === "violation";
+                  const isUnban =
+                    isViolation &&
+                    (entry.violationType === "admin_unban" ||
+                      entry.field === "account_unban");
+                  const isNsfw =
+                    isViolation &&
+                    (entry.violationType === "nsfw" ||
+                      entry.field === "nsfw_violation");
+                  const isAdminBan =
+                    isViolation &&
+                    (entry.violationType === "admin_ban" ||
+                      entry.field === "account_ban");
+
+                  return (
+                    <TouchableOpacity
+                      key={`${entry.type}-${entry.id}`}
+                      style={[
+                        styles.changeLogCard,
+                        isComment && styles.commentLogCard,
+                        isViolation &&
+                          (isUnban
+                            ? styles.unbanLogCard
+                            : styles.violationLogCard),
+                      ]}
+                      onPress={
+                        isComment && entry.postExists
+                          ? () => openCommentLog(entry)
+                          : undefined
+                      }
+                      disabled={!isComment || !entry.postExists}
+                      activeOpacity={0.75}
+                      accessibilityRole={
+                        isComment && entry.postExists ? "button" : undefined
+                      }
+                      accessibilityLabel={
+                        isComment && entry.postExists
+                          ? `Open comment on ${entry.postCaption}`
+                          : undefined
+                      }
+                    >
+                      <View
+                        style={[
+                          styles.changeLogIcon,
+                          isViolation &&
+                            (isUnban
+                              ? styles.unbanIconWrapper
+                              : isAdminBan
+                              ? styles.banIconWrapper
+                              : styles.violationIconWrapper),
+                        ]}
+                      >
+                        <Ionicons
+                          name={
+                            isComment
+                              ? "chatbubble-outline"
+                              : isUnban
+                              ? "shield-checkmark-outline"
+                              : isNsfw
+                              ? "alert-circle-outline"
+                              : isAdminBan
+                              ? "ban-outline"
+                              : "create-outline"
+                          }
+                          size={18}
+                          color={
+                            isComment
+                              ? "#4B7F5F"
+                              : isUnban
+                              ? "#166534"
+                              : isNsfw
+                              ? "#b42318"
+                              : isAdminBan
+                              ? "#b45309"
+                              : "#4B7F5F"
+                          }
+                        />
+                      </View>
+                      <View style={styles.changeLogCopy}>
+                        {isComment ? (
+                          <>
+                            <Text style={styles.changeLogTitle}>
+                              Commented on a report
                             </Text>
-                          ) : (
-                            <Text style={styles.changeLogTime}>
-                              The report is no longer available.
+                            <Text style={styles.changeLogValues}>
+                              Report: {hideBadWords(entry.postCaption)}
                             </Text>
-                          )}
-                        </>
-                      ) : (
-                        <>
-                          <Text style={styles.changeLogTitle}>
-                            {getChangeLabel(entry.field)} changed
-                          </Text>
-                          <Text style={styles.changeLogValues}>
-                            From: {entry.oldValue || "Not set"}
-                          </Text>
-                          <Text style={styles.changeLogValues}>
-                            To: {entry.newValue || "Not set"}
-                          </Text>
-                        </>
-                      )}
-                      <Text style={styles.changeLogTime}>
-                        {formatChangeTime(
-                          entry.type === "comment"
-                            ? entry.createdAt
-                            : entry.changedAt,
+                            <Text style={styles.changeLogValues}>
+                              Comment: {hideBadWords(entry.comment || "")}
+                            </Text>
+                            {entry.postExists ? (
+                              <Text style={styles.commentLogHint}>
+                                Tap to view the highlighted comment
+                              </Text>
+                            ) : (
+                              <Text style={styles.changeLogTime}>
+                                The report is no longer available.
+                              </Text>
+                            )}
+                          </>
+                        ) : isViolation ? (
+                          <>
+                            <View style={styles.violationHeaderRow}>
+                              <Text
+                                style={
+                                  isUnban
+                                    ? styles.unbanLogTitle
+                                    : isAdminBan
+                                    ? styles.banLogTitle
+                                    : styles.violationLogTitle
+                                }
+                              >
+                                {isUnban
+                                  ? "Account Unbanned"
+                                  : isNsfw
+                                  ? "Policy Violation: Inappropriate Content"
+                                  : "Account Suspension"}
+                              </Text>
+                              <View style={styles.violationBadgeRow}>
+                                {isUnban && (
+                                  <View style={styles.unbanBadge}>
+                                    <Text style={styles.unbanBadgeText}>
+                                      Restored
+                                    </Text>
+                                  </View>
+                                )}
+                                {Boolean(entry.warningNumber) && (
+                                  <View
+                                    style={
+                                      entry.warningNumber >= 3
+                                        ? styles.violationBannedBadge
+                                        : styles.violationWarningBadge
+                                    }
+                                  >
+                                    <Text
+                                      style={
+                                        entry.warningNumber >= 3
+                                          ? styles.violationBannedBadgeText
+                                          : styles.violationWarningBadgeText
+                                      }
+                                    >
+                                      Warning {entry.warningNumber} /{" "}
+                                      {entry.maxWarnings || 3}
+                                    </Text>
+                                  </View>
+                                )}
+                                {(isAdminBan ||
+                                  (isNsfw && entry.warningNumber >= 3) ||
+                                  entry.actionTaken?.includes("Banned")) && (
+                                  <View style={styles.violationBannedBadge}>
+                                    <Text
+                                      style={styles.violationBannedBadgeText}
+                                    >
+                                      Banned
+                                    </Text>
+                                  </View>
+                                )}
+                              </View>
+                            </View>
+                            <Text style={styles.violationReason}>
+                              <Text style={styles.violationLabel}>
+                                Reason:{" "}
+                              </Text>
+                              {hideBadWords(entry.reason || "Terms violation")}
+                            </Text>
+                            {Boolean(entry.actionTaken) && (
+                              <Text style={styles.violationAction}>
+                                <Text style={styles.violationLabel}>
+                                  Action:{" "}
+                                </Text>
+                                {entry.actionTaken}
+                              </Text>
+                            )}
+                            {Boolean(entry.source) && (
+                              <Text style={styles.violationSource}>
+                                Source:{" "}
+                                {entry.source === "create_post"
+                                  ? "Create Post Upload"
+                                  : entry.source === "edit_post"
+                                  ? "Edit Post Upload"
+                                  : entry.source === "admin_action"
+                                  ? "Admin Management"
+                                  : "Content Moderation"}
+                              </Text>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <Text style={styles.changeLogTitle}>
+                              {getChangeLabel(entry.field)} changed
+                            </Text>
+                            <Text style={styles.changeLogValues}>
+                              From: {entry.oldValue || "Not set"}
+                            </Text>
+                            <Text style={styles.changeLogValues}>
+                              To: {entry.newValue || "Not set"}
+                            </Text>
+                          </>
                         )}
-                      </Text>
-                    </View>
-                    {entry.type === "comment" && entry.postExists ? (
-                      <Ionicons
-                        name="chevron-forward"
-                        size={18}
-                        color="#4B7F5F"
-                      />
-                    ) : null}
-                  </TouchableOpacity>
-                ))
+                        <Text style={styles.changeLogTime}>
+                          {formatChangeTime(
+                            isComment ? entry.createdAt : entry.changedAt,
+                          )}
+                        </Text>
+                      </View>
+                      {isComment && entry.postExists ? (
+                        <Ionicons
+                          name="chevron-forward"
+                          size={18}
+                          color="#4B7F5F"
+                        />
+                      ) : null}
+                    </TouchableOpacity>
+                  );
+                })
               ) : (
                 <Text style={styles.emptyText}>
-                  No profile changes have been logged yet. Changes made before
-                  logging was added are not available.
+                  No activity, violations, or profile changes have been logged yet.
                 </Text>
               )}
               {!logsLoading &&
@@ -1144,6 +1392,115 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700",
     marginTop: 6,
+  },
+  violationLogCard: {
+    borderColor: "#fecdd3",
+    backgroundColor: "#fff5f5",
+  },
+  unbanLogCard: {
+    borderColor: "#bbf7d0",
+    backgroundColor: "#f0fdf4",
+  },
+  violationIconWrapper: {
+    backgroundColor: "#fee2e2",
+  },
+  unbanIconWrapper: {
+    backgroundColor: "#dcfce7",
+  },
+  banIconWrapper: {
+    backgroundColor: "#fef3c7",
+  },
+  violationHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    marginBottom: 4,
+    flexWrap: "wrap",
+  },
+  violationLogTitle: {
+    color: "#b42318",
+    fontSize: 14,
+    fontWeight: "700",
+    flexShrink: 1,
+  },
+  unbanLogTitle: {
+    color: "#166534",
+    fontSize: 14,
+    fontWeight: "700",
+    flexShrink: 1,
+  },
+  banLogTitle: {
+    color: "#92400e",
+    fontSize: 14,
+    fontWeight: "700",
+    flexShrink: 1,
+  },
+  violationBadgeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  violationWarningBadge: {
+    backgroundColor: "#fef3c7",
+    borderWidth: 1,
+    borderColor: "#fde68a",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+  },
+  violationWarningBadgeText: {
+    color: "#92400e",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  violationBannedBadge: {
+    backgroundColor: "#fee2e2",
+    borderWidth: 1,
+    borderColor: "#fca5a5",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+  },
+  violationBannedBadgeText: {
+    color: "#991b1b",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  unbanBadge: {
+    backgroundColor: "#dcfce7",
+    borderWidth: 1,
+    borderColor: "#86efac",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+  },
+  unbanBadgeText: {
+    color: "#166534",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  violationLabel: {
+    fontWeight: "700",
+    color: "#374151",
+  },
+  violationReason: {
+    color: "#4b5563",
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 2,
+  },
+  violationAction: {
+    color: "#4b5563",
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 2,
+  },
+  violationSource: {
+    color: "#6b7280",
+    fontSize: 11,
+    marginTop: 3,
+    fontStyle: "italic",
   },
   logError: {
     color: "#b42318",

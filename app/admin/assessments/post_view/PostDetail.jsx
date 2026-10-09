@@ -1,10 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
+    Animated,
     Image,
     KeyboardAvoidingView,
     Modal,
@@ -49,6 +50,10 @@ import {
 import { auth, db } from "../../../../firebaseConfig";
 import { deleteRelatedDocuments } from "../../../../utils/deletePostHelper";
 import { hideBadWords } from "../../../../utils/hideBadWords";
+import {
+  notifyPostModerated,
+  notifyPostStatusUpdated,
+} from "../../../../utils/notificationHelpers";
 
 const STATUS_DETAILS = {
   pending: { label: "Pending", color: "#A5A5A5" },
@@ -120,7 +125,37 @@ export default function PostDetail({
   const { width } = useWindowDimensions();
   const isMobile = width < 700;
   const isCompactLayout = width < 1100;
-  const { postId } = useLocalSearchParams();
+  const { postId, commentId } = useLocalSearchParams();
+  const effectiveHighlightedCommentId =
+    highlightedCommentId ||
+    (Array.isArray(commentId) ? commentId[0] : commentId);
+
+  const highlightFadeAnim = useRef(new Animated.Value(1)).current;
+  const [isHighlighted, setIsHighlighted] = useState(
+    Boolean(effectiveHighlightedCommentId),
+  );
+
+  useEffect(() => {
+    if (effectiveHighlightedCommentId) {
+      setIsHighlighted(true);
+      highlightFadeAnim.setValue(1);
+      const timer = setTimeout(() => {
+        Animated.timing(highlightFadeAnim, {
+          toValue: 0,
+          duration: 500,
+          useNativeDriver: false,
+        }).start(() => {
+          setIsHighlighted(false);
+        });
+      }, 2300);
+
+      return () => clearTimeout(timer);
+    } else {
+      setIsHighlighted(false);
+      highlightFadeAnim.setValue(0);
+    }
+  }, [effectiveHighlightedCommentId]);
+
   const [loadedPost, setLoadedPost] = useState(null);
   const [loadingPost, setLoadingPost] = useState(!suppliedPost);
   const [postLoadError, setPostLoadError] = useState("");
@@ -139,8 +174,6 @@ export default function PostDetail({
   const [savingEditComment, setSavingEditComment] = useState(false);
   const [commentToDelete, setCommentToDelete] = useState(null);
   const [deletingComment, setDeletingComment] = useState(false);
-  const [expandedDescription, setExpandedDescription] = useState(false);
-  const [descriptionHasMore, setDescriptionHasMore] = useState(false);
   const [submittingComment, setSubmittingComment] = useState(false);
   const [residentPoints, setResidentPoints] = useState(
     suppliedPost?.points ?? 0,
@@ -653,23 +686,10 @@ export default function PostDetail({
   };
 
   const sendDeleteNotification = async () => {
-    await addDoc(
-      collection(db, "notifications"),
-
-      {
-        userId: post.userId,
-
-        title: "Report Removed",
-
-        message: `Your waste report was removed by the LGU.\n\nReason: ${selectedReason}`,
-
-        type: "deleted_post",
-
-        read: false,
-
-        createdAt: serverTimestamp(),
-      },
-    );
+    await notifyPostModerated({
+      post,
+      reason: selectedReason,
+    });
   };
 
   const deletePost = async () => {
@@ -708,6 +728,11 @@ export default function PostDetail({
         status: "ongoing",
       });
 
+      await notifyPostStatusUpdated({
+        post,
+        newStatus: "ongoing",
+      });
+
       Alert.alert("Post has been set to On-going.");
 
       closePostDetail();
@@ -737,6 +762,13 @@ export default function PostDetail({
         assessedBy: auth.currentUser?.uid || null,
         assessmentUpdatedAt: serverTimestamp(),
       });
+
+      if (nextStatus === "critical" || nextStatus === "ongoing") {
+        await notifyPostStatusUpdated({
+          post,
+          newStatus: nextStatus,
+        });
+      }
 
       setShowAssessmentModal(false);
       Alert.alert(
@@ -836,8 +868,8 @@ export default function PostDetail({
   );
 
   const sortedComments = [...comments].sort((first, second) => {
-    if (first.id === highlightedCommentId) return -1;
-    if (second.id === highlightedCommentId) return 1;
+    if (first.id === effectiveHighlightedCommentId) return -1;
+    if (second.id === effectiveHighlightedCommentId) return 1;
     const firstTime = getTimestampMillis(first.createdAt);
     const secondTime = getTimestampMillis(second.createdAt);
     if (firstTime === null) return secondTime === null ? 0 : 1;
@@ -856,58 +888,72 @@ export default function PostDetail({
             ? (visibleCommentsByPost[post?.id] ?? 5)
             : comments.length,
         )
-        .map((comment) => (
-          <View
-            key={comment.id}
-            style={[
-              styles.commentCard,
-              comment.id === highlightedCommentId &&
-                styles.highlightedCommentCard,
-            ]}
-          >
-            <Image
-              source={require("../../../../assets/images/ProfileIG.png")}
-              style={styles.commentAvatar}
-            />
+        .map((comment) => {
+          const isThisCommentHighlighted =
+            comment.id === effectiveHighlightedCommentId && isHighlighted;
 
-            <View style={styles.commentContent}>
-              <View style={styles.commentHeader}>
-                <Text style={styles.userName} numberOfLines={2}>
-                  {commentProfiles[comment.userId]?.firstName ??
-                    comment.firstName}{" "}
-                  {commentProfiles[comment.userId]?.lastName ??
-                    comment.lastName}
-                </Text>
+          return (
+            <Animated.View
+              key={comment.id}
+              style={[
+                styles.commentCard,
+                isThisCommentHighlighted && {
+                  backgroundColor: highlightFadeAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: ["#F4F4F4", "#EAF3FF"],
+                  }),
+                  borderColor: highlightFadeAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: ["transparent", "#3B82F6"],
+                  }),
+                  borderWidth: 2,
+                },
+              ]}
+            >
+              <Image
+                source={require("../../../../assets/images/ProfileIG.png")}
+                style={styles.commentAvatar}
+              />
 
-                <View style={styles.commentHeaderActions}>
-                  <Text style={styles.commentPoints}>
-                    {comment.points} pts
+              <View style={styles.commentContent}>
+                <View style={styles.commentHeader}>
+                  <Text style={styles.userName} numberOfLines={2}>
+                    {commentProfiles[comment.userId]?.firstName ??
+                      comment.firstName}{" "}
+                    {commentProfiles[comment.userId]?.lastName ??
+                      comment.lastName}
                   </Text>
-                  <TouchableOpacity
-                    accessibilityRole="button"
-                    accessibilityLabel={`Options for ${commentProfiles[comment.userId]?.firstName ?? comment.firstName ?? "user"}'s comment`}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    style={styles.commentMenuButton}
-                    onPress={() => setSelectedCommentForMenu(comment)}
-                  >
-                    <Ionicons
-                      name="ellipsis-vertical"
-                      size={16}
-                      color="#52675A"
-                    />
-                  </TouchableOpacity>
-                </View>
-              </View>
 
-              <Text style={styles.commentText} selectable>
-                {hideBadWords(comment.comment)}
-              </Text>
-              <Text style={styles.commentTimestamp}>
-                {formatCommentDate(comment.createdAt)}
-              </Text>
-            </View>
-          </View>
-        ))
+                  <View style={styles.commentHeaderActions}>
+                    <Text style={styles.commentPoints}>
+                      {comment.points} pts
+                    </Text>
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityLabel={`Options for ${commentProfiles[comment.userId]?.firstName ?? comment.firstName ?? "user"}'s comment`}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      style={styles.commentMenuButton}
+                      onPress={() => setSelectedCommentForMenu(comment)}
+                    >
+                      <Ionicons
+                        name="ellipsis-vertical"
+                        size={16}
+                        color="#52675A"
+                      />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                <Text style={styles.commentText} selectable>
+                  {hideBadWords(comment.comment)}
+                </Text>
+                <Text style={styles.commentTimestamp}>
+                  {formatCommentDate(comment.createdAt)}
+                </Text>
+              </View>
+            </Animated.View>
+          );
+        })
     ) : (
       <Text style={styles.emptyComments}>No comments yet.</Text>
     );
@@ -1050,10 +1096,17 @@ export default function PostDetail({
       >
         {/* LEFT - POST */}
         <View style={[styles.left, isCompactLayout && styles.leftCompact]}>
-          <View
+          <Animated.View
             style={[
               styles.card,
-              highlightedCommentId && styles.highlightedPostCard,
+              effectiveHighlightedCommentId &&
+                isHighlighted && {
+                  borderColor: highlightFadeAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: ["transparent", "#3B82F6"],
+                  }),
+                  borderWidth: 3,
+                },
             ]}
           >
             {!Boolean(isCleaned && post.afterImageUrl) && (
@@ -1209,34 +1262,9 @@ export default function PostDetail({
               {/* DESCRIPTION */}
               {Boolean(post.caption) && (
                 <View style={styles.descriptionContainer}>
-                  <View
-                    style={[
-                      styles.descriptionTextWrapper,
-                      !expandedDescription &&
-                        styles.descriptionTextWrapperCollapsed,
-                    ]}
-                  >
-                    <Text
-                      style={styles.description}
-                      onTextLayout={({ nativeEvent }) =>
-                        setDescriptionHasMore(nativeEvent.lines.length > 3)
-                      }
-                    >
-                      {hideBadWords(post.caption)}
-                    </Text>
-                  </View>
-                  {descriptionHasMore && (
-                    <TouchableOpacity
-                      onPress={() =>
-                        setExpandedDescription((current) => !current)
-                      }
-                      accessibilityRole="button"
-                    >
-                      <Text style={styles.descriptionToggle}>
-                        {expandedDescription ? "See less" : "See more"}
-                      </Text>
-                    </TouchableOpacity>
-                  )}
+                  <Text style={styles.description}>
+                    {hideBadWords(post.caption)}
+                  </Text>
                 </View>
               )}
 
@@ -1260,7 +1288,7 @@ export default function PostDetail({
                 </View>
               </View>
             </View>
-          </View>
+          </Animated.View>
         </View>
 
         {/* RIGHT - COMMENTS + LOCATION */}

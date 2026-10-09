@@ -29,6 +29,10 @@ import {
 import PostLocationModal from "../../../../components/PostLocationModal";
 import { db } from "../../../../firebaseConfig";
 import { hideBadWords } from "../../../../utils/hideBadWords";
+import {
+  notifyAllResidentsOnActivityCreated,
+  notifyPostStatusUpdated,
+} from "../../../../utils/notificationHelpers";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => {
@@ -283,7 +287,7 @@ export default function VolunteerPostCreate({
         return;
       }
 
-      await addDoc(collection(db, "volunteer_posts"), {
+      const newVolDoc = await addDoc(collection(db, "volunteer_posts"), {
         postId: targetPost.id,
         title: hideBadWords(title.trim()),
         description: hideBadWords(desc.trim()),
@@ -315,6 +319,19 @@ export default function VolunteerPostCreate({
       });
 
       await updateDoc(doc(db, "posts", targetPost.id), { status: "ongoing" });
+
+      await notifyAllResidentsOnActivityCreated({
+        activityId: newVolDoc.id,
+        title: hideBadWords(title.trim()),
+        meetingDate: formatDateKey(meetingDate),
+        meetingTime: meetingTime.trim(),
+        imageUrl: targetPost.imageUrl || "",
+      });
+
+      await notifyPostStatusUpdated({
+        post: targetPost,
+        newStatus: "ongoing",
+      });
 
       Alert.alert("Volunteer activity created!");
       router.replace("/admin/VolunteerList");

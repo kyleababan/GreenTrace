@@ -33,6 +33,7 @@ import {
     getWasteCategoryColor,
 } from "../constants/wasteCategories";
 import { hideBadWords } from "../utils/hideBadWords";
+import { openFacebookShareDialog } from "../utils/shareHelper";
 
 import {
     addDoc,
@@ -1376,6 +1377,21 @@ export default function Home() {
                       </Text>
                     </View>
                   </TouchableOpacity>
+
+                  {/* Share to Facebook */}
+                  <TouchableOpacity
+                    style={styles.shareButton}
+                    activeOpacity={0.7}
+                    onPress={() => openFacebookShareDialog(post)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Share to Facebook"
+                  >
+                    <Ionicons
+                      name="logo-facebook"
+                      size={18}
+                      color="#1877F2"
+                    />
+                  </TouchableOpacity>
                 </View>
               </View>
             )}
@@ -1853,6 +1869,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
+  },
+  shareButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    backgroundColor: "#F0F2F5",
+    height: 32,
+    minWidth: 38,
   },
 
   /* Bottom Navbar Wrapper */

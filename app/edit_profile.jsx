@@ -31,7 +31,7 @@ export default function EditProfile() {
 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
-  const [email, setEmail] = useState("");
+  const [userEmail, setUserEmail] = useState("");
   const [cellNumber, setcellNumber] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -39,7 +39,6 @@ export default function EditProfile() {
   const [editable, setEditable] = useState({
     firstName: false,
     lastName: false,
-    email: false,
     cellNumber: false,
   });
 
@@ -55,7 +54,7 @@ export default function EditProfile() {
         const data = snapshot.data();
         setFirstName(data.firstName || "");
         setLastName(data.lastName || "");
-        setEmail(data.email || "");
+        setUserEmail(data.email || currentUser.email || "");
         setcellNumber(data.cellNumber || "");
       }
     } catch (error) {
@@ -94,13 +93,12 @@ export default function EditProfile() {
       const nextProfile = {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
-        email: email.trim(),
         cellNumber: cellNumber.trim(),
       };
       const batch = writeBatch(db);
       batch.update(userRef, nextProfile);
 
-      ["firstName", "lastName", "email"].forEach((field) => {
+      ["firstName", "lastName", "cellNumber"].forEach((field) => {
         const oldValue = String(previousProfile[field] || "");
         const newValue = nextProfile[field];
         if (oldValue !== newValue) {
@@ -119,7 +117,6 @@ export default function EditProfile() {
       setEditable({
         firstName: false,
         lastName: false,
-        email: false,
         cellNumber: false,
       });
 
@@ -188,7 +185,7 @@ export default function EditProfile() {
                       : "GreenTrace User"}
                   </Text>
                   <Text style={styles.avatarEmail}>
-                    {email || "No email address provided"}
+                    {userEmail || "No email address provided"}
                   </Text>
                 </View>
 
@@ -276,46 +273,6 @@ export default function EditProfile() {
                     </View>
                   </View>
 
-                  {/* EMAIL */}
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.label}>Email Address</Text>
-                    <View
-                      style={[
-                        styles.inputWrapper,
-                        editable.email && styles.inputWrapperActive,
-                      ]}
-                    >
-                      <TextInput
-                        style={styles.input}
-                        value={email}
-                        onChangeText={setEmail}
-                        editable={editable.email}
-                        placeholder="Enter email"
-                        placeholderTextColor="#94A3B8"
-                        keyboardType="email-address"
-                        autoCapitalize="none"
-                        selectionColor="#5F9C76"
-                        cursorColor="#5F9C76"
-                        underlineColorAndroid="transparent"
-                      />
-                      <TouchableOpacity
-                        style={styles.fieldActionBtn}
-                        onPress={() =>
-                          setEditable((prev) => ({
-                            ...prev,
-                            email: !prev.email,
-                          }))
-                        }
-                        activeOpacity={0.7}
-                      >
-                        <Ionicons
-                          name={editable.email ? "checkmark" : "pencil"}
-                          size={16}
-                          color={editable.email ? "#2E7D32" : "#5F9C76"}
-                        />
-                      </TouchableOpacity>
-                    </View>
-                  </View>
 
                   {/* PHONE NUMBER */}
                   <View style={styles.inputGroup}>

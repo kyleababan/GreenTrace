@@ -19,6 +19,7 @@ import { uploadToCloudinary } from "../../cloudinary";
 import PostLocationModal from "../../components/PostLocationModal";
 import { auth, db } from "../../firebaseConfig";
 import { hideBadWords } from "../../utils/hideBadWords";
+import { notifyAllResidentsOnActivityCreated } from "../../utils/notificationHelpers";
 
 const INITIAL_REQUIREMENTS = [""];
 const BARANGAYS = [
@@ -241,7 +242,7 @@ export default function AddEvent() {
         skipAi: true,
       });
 
-      await addDoc(collection(db, "volunteer_posts"), {
+      const newEventRef = await addDoc(collection(db, "volunteer_posts"), {
         title: hideBadWords(title.trim()),
         description: hideBadWords(description.trim()),
         requirements: cleanedRequirements.map((item) => hideBadWords(item)),
@@ -267,6 +268,14 @@ export default function AddEvent() {
         eventType: "nature_cleanup",
         createdBy: currentUser.uid,
         createdAt: serverTimestamp(),
+      });
+
+      await notifyAllResidentsOnActivityCreated({
+        activityId: newEventRef.id,
+        title: hideBadWords(title.trim()),
+        meetingDate: date.trim(),
+        meetingTime: time.trim(),
+        imageUrl,
       });
 
       router.replace("/admin/VolunteerList");

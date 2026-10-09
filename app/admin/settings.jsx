@@ -43,7 +43,6 @@ const DEFAULT_ECOPOINTS = {
 // ---------------------------------------------------------------------------
 const DEFAULT_APP_CONFIG = {
   pushNotificationsEnabled: true,
-  emailAlertsEnabled: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -84,7 +83,6 @@ export default function AdminSettings() {
 
   // ---- Notifications ----
   const [pushEnabled, setPushEnabled] = useState(true);
-  const [emailAlertsEnabled, setEmailAlertsEnabled] = useState(false);
 
   // ---------------------------------------------------------------------------
   // On mount — load settings + admin profile in parallel
@@ -128,9 +126,6 @@ export default function AdminSettings() {
         setPushEnabled(
           data.pushNotificationsEnabled ??
             DEFAULT_APP_CONFIG.pushNotificationsEnabled,
-        );
-        setEmailAlertsEnabled(
-          data.emailAlertsEnabled ?? DEFAULT_APP_CONFIG.emailAlertsEnabled,
         );
       }
 
@@ -317,19 +312,6 @@ export default function AdminSettings() {
     }
   };
 
-  const toggleEmailAlerts = async (value) => {
-    setEmailAlertsEnabled(value);
-    try {
-      await setDoc(
-        doc(db, "settings", "appConfig"),
-        { emailAlertsEnabled: value, updatedAt: serverTimestamp() },
-        { merge: true },
-      );
-    } catch (error) {
-      console.error("Failed to save email alerts setting:", error);
-      setEmailAlertsEnabled(!value); // revert on failure
-    }
-  };
 
   // ---------------------------------------------------------------------------
   // Render helpers
@@ -509,12 +491,12 @@ export default function AdminSettings() {
           Control how the app communicates with residents.
         </Text>
 
-        <View style={[styles.toggleRow, styles.rowSeparator]}>
+        <View style={styles.toggleRow}>
           <View style={styles.toggleRowText}>
             <Text style={styles.toggleLabel}>Push Notifications</Text>
             <Text style={styles.toggleDescription}>
-              Send push alerts to residents for new announcements and status
-              updates.
+              Send push notifications to residents for new activities, status
+              updates (critical or on-going), and post moderation.
             </Text>
           </View>
           <Switch
@@ -522,21 +504,6 @@ export default function AdminSettings() {
             onValueChange={togglePushNotifications}
             trackColor={{ false: "#D1D5DB", true: "#86EFAC" }}
             thumbColor={pushEnabled ? "#599A74" : "#F3F4F6"}
-          />
-        </View>
-
-        <View style={styles.toggleRow}>
-          <View style={styles.toggleRowText}>
-            <Text style={styles.toggleLabel}>Email Alerts</Text>
-            <Text style={styles.toggleDescription}>
-              Send email notifications to residents for important updates.
-            </Text>
-          </View>
-          <Switch
-            value={emailAlertsEnabled}
-            onValueChange={toggleEmailAlerts}
-            trackColor={{ false: "#D1D5DB", true: "#86EFAC" }}
-            thumbColor={emailAlertsEnabled ? "#599A74" : "#F3F4F6"}
           />
         </View>
       </View>

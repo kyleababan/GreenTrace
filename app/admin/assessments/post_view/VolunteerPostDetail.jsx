@@ -25,6 +25,7 @@ import {
 import PostLocationModal from "../../../../components/PostLocationModal";
 import { auth, db } from "../../../../firebaseConfig";
 import { hideBadWords } from "../../../../utils/hideBadWords";
+import { notifyPostStatusUpdated } from "../../../../utils/notificationHelpers";
 
 const getMemberId = (member) =>
   typeof member === "string"
@@ -273,6 +274,10 @@ export default function VolunteerPostDetail({
     try {
       if (post.postId) {
         await updateDoc(doc(db, "posts", post.postId), { status: "ongoing" });
+        await notifyPostStatusUpdated({
+          postId: post.postId,
+          newStatus: "ongoing",
+        });
         router.replace({
           pathname: "/admin/assessments/post_view/PostDetail",
           params: { postId: post.postId },

@@ -3,6 +3,21 @@
   "cleanUrls": true,
   "rewrites": [
     {
+      "source": "/post",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": ".*(facebookexternalhit|Facebot|Twitterbot|Pinterest|LinkedInBot|WhatsApp|TelegramBot|Discordbot).*"
+        }
+      ],
+      "destination": "/api/og"
+    },
+    {
+      "source": "/share",
+      "destination": "/api/og"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
