@@ -55,7 +55,7 @@ module.exports = async function handler(req, res) {
     let appRedirectUrl = `${baseUrl}/home`;
 
     if (postId) {
-      postCanonicalUrl = `${baseUrl}/post?id=${encodeURIComponent(postId)}`;
+      postCanonicalUrl = `${baseUrl}/api/og?id=${encodeURIComponent(postId)}`;
       appRedirectUrl = `${baseUrl}/post?id=${encodeURIComponent(postId)}`;
 
       try {

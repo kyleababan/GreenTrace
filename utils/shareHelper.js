@@ -31,7 +31,7 @@ export const getBaseAppUrl = () => {
 export const getPostShareUrl = (postId) => {
   if (!postId) return getBaseAppUrl();
   const baseUrl = getBaseAppUrl();
-  return `${baseUrl}/post?id=${encodeURIComponent(postId)}`;
+  return `${baseUrl}/api/og?id=${encodeURIComponent(postId)}`;
 };
 
 /**

@@ -121,6 +121,8 @@ export default function Post() {
   const [commentToDelete, setCommentToDelete] = useState(null);
   const [deletingComment, setDeletingComment] = useState(false);
   const lastCommentDocRef = useRef(null);
+  const fallbackCommentsRef = useRef(null);
+  const fallbackOffsetRef = useRef(0);
   const loadingCommentsRef = useRef(false);
   const commentsLoadIdRef = useRef(0);
   const commentUserIdsKey = JSON.stringify(
@@ -263,25 +265,79 @@ export default function Post() {
     loadingCommentsRef.current = true;
     setLoadingMoreComments(true);
     try {
-      const constraints = [
-        where("postId", "==", id),
-        orderBy("createdAt", sortOrder),
-        limit(COMMENTS_PER_PAGE),
-      ];
+      let rawComments = [];
+      let nextHasMore = false;
+
       if (reset) {
         lastCommentDocRef.current = null;
-      } else if (lastCommentDocRef.current) {
-        constraints.push(startAfter(lastCommentDocRef.current));
+        fallbackCommentsRef.current = null;
+        fallbackOffsetRef.current = 0;
       }
 
-      const q = query(collection(db, "comments"), ...constraints);
+      try {
+        const constraints = [
+          where("postId", "==", id),
+          orderBy("createdAt", sortOrder),
+          limit(COMMENTS_PER_PAGE),
+        ];
+        if (!reset && lastCommentDocRef.current) {
+          constraints.push(startAfter(lastCommentDocRef.current));
+        }
 
-      const snapshot = await getDocs(q);
+        const q = query(collection(db, "comments"), ...constraints);
+        const snapshot = await getDocs(q);
 
-      const rawComments = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
+        rawComments = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        lastCommentDocRef.current =
+          snapshot.docs[snapshot.docs.length - 1] || null;
+        nextHasMore = snapshot.docs.length === COMMENTS_PER_PAGE;
+      } catch (queryErr) {
+        // Fallback gracefully if Firestore composite index is missing for this sort order
+        console.warn(
+          "Firestore orderBy query failed, using in-memory sort:",
+          queryErr.message,
+        );
+
+        if (reset || !fallbackCommentsRef.current) {
+          const fallbackQuery = query(
+            collection(db, "comments"),
+            where("postId", "==", id),
+          );
+          const allSnap = await getDocs(fallbackQuery);
+          const all = allSnap.docs.map((doc) => ({
+            id: doc.id,
+            ...doc.data(),
+          }));
+
+          all.sort((a, b) => {
+            const aTime =
+              a.createdAt?.toMillis?.() ??
+              (a.createdAt?.seconds ? a.createdAt.seconds * 1000 : 0) ??
+              0;
+            const bTime =
+              b.createdAt?.toMillis?.() ??
+              (b.createdAt?.seconds ? b.createdAt.seconds * 1000 : 0) ??
+              0;
+            return sortOrder === "desc" ? bTime - aTime : aTime - bTime;
+          });
+
+          fallbackCommentsRef.current = all;
+          fallbackOffsetRef.current = 0;
+        }
+
+        const startIdx = fallbackOffsetRef.current;
+        const sliced = (fallbackCommentsRef.current || []).slice(
+          startIdx,
+          startIdx + COMMENTS_PER_PAGE,
+        );
+        rawComments = sliced;
+        fallbackOffsetRef.current = startIdx + sliced.length;
+        nextHasMore =
+          fallbackOffsetRef.current < (fallbackCommentsRef.current?.length || 0);
+      }
 
       const pointsMap = await getUserPointsMap(
         db,
@@ -300,9 +356,7 @@ export default function Post() {
         if (reset) return enrichedComments;
         return mergeUniqueById(currentComments, enrichedComments);
       });
-      lastCommentDocRef.current =
-        snapshot.docs[snapshot.docs.length - 1] || null;
-      setHasMoreComments(snapshot.docs.length === COMMENTS_PER_PAGE);
+      setHasMoreComments(nextHasMore);
     } catch (error) {
       if (requestId === commentsLoadIdRef.current) {
         console.error("Error loading comments:", error);
@@ -433,6 +487,7 @@ export default function Post() {
         prevComments.filter((c) => c.id !== commentToDelete.id),
       );
 
+      fallbackCommentsRef.current = null;
       setCommentToDelete(null);
     } catch (error) {
       console.error("Error deleting comment:", error);
@@ -837,8 +892,6 @@ export default function Post() {
                   const nextOrder =
                     commentSortOrder === "asc" ? "desc" : "asc";
                   setCommentSortOrder(nextOrder);
-                  setComments([]);
-                  setHasMoreComments(true);
                   loadComments(true, nextOrder);
                 }}
               >
