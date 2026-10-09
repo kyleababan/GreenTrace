@@ -99,6 +99,12 @@ module.exports = async function handler(req, res) {
       }
     }
 
+    const userAgent = req.headers["user-agent"] || "";
+    const isCrawler =
+      /facebookexternalhit|Facebot|Twitterbot|Pinterest|LinkedInBot|WhatsApp|TelegramBot|Discordbot/i.test(
+        userAgent,
+      );
+
     const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -123,14 +129,17 @@ module.exports = async function handler(req, res) {
   <meta name="twitter:title" content="${escapeHtml(title)}">
   <meta name="twitter:description" content="${escapeHtml(description)}">
   <meta name="twitter:image" content="${escapeHtml(imageUrl)}">
-
-  <!-- Human visitor client-side redirect to the interactive post -->
+${
+  !isCrawler
+    ? `  <!-- Human visitor client-side redirect to the interactive post -->
   <meta http-equiv="refresh" content="0;url=${escapeHtml(appRedirectUrl)}">
   <script>
     if (typeof window !== 'undefined') {
       window.location.replace(${JSON.stringify(appRedirectUrl)});
     }
-  </script>
+  </script>`
+    : ""
+}
 </head>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #F4FAF6; color: #1D2B21; margin: 0; padding: 32px; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 80vh; text-align: center;">
   <div style="max-width: 560px; background: #FFFFFF; border-radius: 16px; padding: 24px; box-shadow: 0 4px 16px rgba(0,0,0,0.08); border: 1px solid #D8E6DC;">
