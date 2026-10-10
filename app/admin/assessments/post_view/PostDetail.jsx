@@ -1170,8 +1170,18 @@ export default function PostDetail({
                   style={styles.authorImage}
                 />
                 <View style={styles.authorDetails}>
-                  <View style={styles.authorHeader}>
-                    <View style={styles.authorIdentity}>
+                  <View
+                    style={[
+                      styles.authorHeader,
+                      isMobile && styles.authorHeaderMobile,
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.authorIdentity,
+                        isMobile && styles.authorIdentityMobile,
+                      ]}
+                    >
                       <Text style={styles.profileName}>
                         {residentProfile?.firstName ?? post.firstName}{" "}
                         {residentProfile?.lastName ?? post.lastName}
@@ -1196,7 +1206,12 @@ export default function PostDetail({
                         )}
                       </View>
                     </View>
-                    <Text style={styles.postedDate}>
+                    <Text
+                      style={[
+                        styles.postedDate,
+                        isMobile && styles.postedDateMobile,
+                      ]}
+                    >
                       {formatPostedDate(post.createdAt)}
                     </Text>
                   </View>
@@ -1269,8 +1284,18 @@ export default function PostDetail({
               )}
 
               {/* REACTIONS */}
-              <View style={styles.reactions}>
-                <View style={styles.reactBox}>
+              <View
+                style={[
+                  styles.reactions,
+                  isMobile && styles.reactionsMobile,
+                ]}
+              >
+                <View
+                  style={[
+                    styles.reactBox,
+                    isMobile && styles.reactBoxMobile,
+                  ]}
+                >
                   <Image
                     source={require("../../../../assets/images/priorityreact.png")}
                     style={styles.smallIcon}
@@ -1279,7 +1304,12 @@ export default function PostDetail({
                     {post.reactionCount || 0}
                   </Text>
                 </View>
-                <View style={styles.commentBox}>
+                <View
+                  style={[
+                    styles.commentBox,
+                    isMobile && styles.commentBoxMobile,
+                  ]}
+                >
                   <Image
                     source={require("../../../../assets/images/comment.png")}
                     style={styles.smallIcon}
@@ -2281,12 +2311,21 @@ const styles = StyleSheet.create({
     gap: 10,
     minWidth: 0,
   },
+  authorHeaderMobile: {
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: 3,
+  },
   authorIdentity: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
     flexWrap: "wrap",
     gap: 7,
+  },
+  authorIdentityMobile: {
+    flex: 0,
+    width: "100%",
   },
   pointsText: { color: "#2E7D32", fontSize: 12, fontWeight: "700" },
   badgeRow: { flexDirection: "row", alignItems: "center", gap: 5 },
@@ -2304,6 +2343,7 @@ const styles = StyleSheet.create({
   badgeIcon: { fontSize: 14 },
   badgeMore: { color: "#5F9C76", fontSize: 10, fontWeight: "800" },
   postedDate: { color: "#7B8580", fontSize: 11 },
+  postedDateMobile: { alignSelf: "flex-start" },
   locationRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -2388,6 +2428,12 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginTop: 12,
   },
+  reactionsMobile: {
+    width: "100%",
+    backgroundColor: "#E4E4E4",
+    borderRadius: 5,
+    overflow: "hidden",
+  },
   count: {
     fontWeight: "bold",
   },
@@ -2398,6 +2444,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     padding: 10,
   },
+  reactBoxMobile: {
+    flex: 1,
+    width: "50%",
+    borderRightWidth: 1,
+    borderRightColor: "#FFFFFF",
+  },
   commentBox: {
     flexDirection: "row",
     alignItems: "center",
@@ -2406,6 +2458,11 @@ const styles = StyleSheet.create({
     width: "90%",
     justifyContent: "center",
     padding: 10,
+  },
+  commentBoxMobile: {
+    flex: 1,
+    width: "50%",
+    backgroundColor: "transparent",
   },
   smallIcon: {
     width: 20,

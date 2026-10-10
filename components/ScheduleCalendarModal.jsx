@@ -62,7 +62,7 @@ const getCalendarDays = (month) => {
 };
 
 export default function ScheduleCalendarModal({ visible, onClose }) {
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const isMobile = width < 640;
 
   const today = useMemo(() => new Date(), []);
@@ -184,17 +184,31 @@ export default function ScheduleCalendarModal({ visible, onClose }) {
     >
       <View style={styles.modalOverlay}>
         <View
-          style={[styles.modalContainer, { width: isMobile ? "94%" : 720 }]}
+          style={[
+            styles.modalContainer,
+            {
+              width: Math.min(width - 32, 720),
+              maxHeight: Math.min(height * 0.92, 900),
+            },
+            isMobile && styles.modalContainerMobile,
+          ]}
         >
           {/* Modal Header */}
-          <View style={styles.modalHeader}>
+          <View
+            style={[
+              styles.modalHeader,
+              isMobile && styles.modalHeaderMobile,
+            ]}
+          >
             <View style={styles.modalHeaderLeft}>
               <View style={styles.headerIconBadge}>
                 <Ionicons name="calendar" size={20} color="#FFFFFF" />
               </View>
-              <View>
-                <Text style={styles.modalTitle}>LGU Scheduled Dates</Text>
-                <Text style={styles.modalSubtitle}>
+              <View style={styles.headerText}>
+                <Text style={styles.modalTitle} numberOfLines={1}>
+                  LGU Scheduled Dates
+                </Text>
+                <Text style={styles.modalSubtitle} numberOfLines={2}>
                   Waste collection & community cleanup schedule
                 </Text>
               </View>
@@ -211,7 +225,12 @@ export default function ScheduleCalendarModal({ visible, onClose }) {
           </View>
 
           {/* Read-Only Notice Banner */}
-          <View style={styles.readOnlyNotice}>
+          <View
+            style={[
+              styles.readOnlyNotice,
+              isMobile && styles.readOnlyNoticeMobile,
+            ]}
+          >
             <Ionicons name="information-circle" size={18} color="#2A6440" />
             <Text style={styles.readOnlyNoticeText}>
               Official schedule managed by LGU administration. View-only for
@@ -229,14 +248,27 @@ export default function ScheduleCalendarModal({ visible, onClose }) {
           ) : (
             <ScrollView
               style={styles.modalScroll}
-              contentContainerStyle={styles.scrollContent}
+              contentContainerStyle={[
+                styles.scrollContent,
+                isMobile && styles.scrollContentMobile,
+              ]}
               showsVerticalScrollIndicator={true}
               keyboardShouldPersistTaps="handled"
             >
               {/* Calendar Card */}
-              <View style={styles.calendarCard}>
+              <View
+                style={[
+                  styles.calendarCard,
+                  isMobile && styles.calendarCardMobile,
+                ]}
+              >
                 {/* Calendar Toolbar */}
-                <View style={styles.calendarToolbar}>
+                <View
+                  style={[
+                    styles.calendarToolbar,
+                    isMobile && styles.calendarToolbarMobile,
+                  ]}
+                >
                   <View>
                     <Text style={styles.monthTitle}>
                       {visibleMonth.toLocaleDateString(undefined, {
@@ -249,7 +281,12 @@ export default function ScheduleCalendarModal({ visible, onClose }) {
                     </Text>
                   </View>
 
-                  <View style={styles.calendarControls}>
+                  <View
+                    style={[
+                      styles.calendarControls,
+                      isMobile && styles.calendarControlsMobile,
+                    ]}
+                  >
                     <TouchableOpacity
                       style={styles.todayButton}
                       onPress={selectToday}
@@ -774,6 +811,9 @@ const styles = StyleSheet.create({
       },
     }),
   },
+  modalContainerMobile: {
+    borderRadius: 16,
+  },
   modalHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -785,11 +825,21 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#E7EFEA",
   },
+  modalHeaderMobile: {
+    paddingHorizontal: 14,
+    paddingTop: 14,
+    paddingBottom: 12,
+  },
   modalHeaderLeft: {
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
     flex: 1,
+    minWidth: 0,
+  },
+  headerText: {
+    flex: 1,
+    minWidth: 0,
   },
   headerIconBadge: {
     width: 38,
@@ -803,11 +853,13 @@ const styles = StyleSheet.create({
     color: "#1E3B29",
     fontSize: 17,
     fontWeight: "800",
+    flexShrink: 1,
   },
   modalSubtitle: {
     color: "#64748B",
     fontSize: 12,
     marginTop: 1,
+    flexShrink: 1,
   },
   closeButton: {
     width: 34,
@@ -827,6 +879,9 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: "#D6ECDB",
+  },
+  readOnlyNoticeMobile: {
+    paddingHorizontal: 14,
   },
   readOnlyNoticeText: {
     color: "#1E5030",
@@ -853,6 +908,10 @@ const styles = StyleSheet.create({
     paddingBottom: 26,
     gap: 16,
   },
+  scrollContentMobile: {
+    padding: 12,
+    paddingBottom: 20,
+  },
 
   // Calendar Card
   calendarCard: {
@@ -862,11 +921,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E3EBE6",
   },
+  calendarCardMobile: {
+    padding: 10,
+  },
   calendarToolbar: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 12,
+  },
+  calendarToolbarMobile: {
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: 8,
   },
   monthTitle: {
     color: "#234B33",
@@ -882,6 +949,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
+  },
+  calendarControlsMobile: {
+    alignSelf: "flex-end",
   },
   todayButton: {
     paddingHorizontal: 10,

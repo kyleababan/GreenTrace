@@ -67,8 +67,16 @@ const formatChangeTime = (timestamp) => {
 export default function UserPostDetail() {
   const { userId } = useLocalSearchParams();
   const router = useRouter();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const isMobile = width < 700;
+  const ContentWrapper = isMobile ? ScrollView : View;
+  const mobileActivityHeight = Math.max(height, 600);
+  const contentWrapperProps = isMobile
+    ? {
+        contentContainerStyle: styles.mobileContent,
+        showsVerticalScrollIndicator: false,
+      }
+    : {};
   const [user, setUser] = useState(null);
   const [posts, setPosts] = useState([]);
   const [visibleReportCount, setVisibleReportCount] = useState(6);
@@ -463,7 +471,7 @@ export default function UserPostDetail() {
   const name = getFullName(user);
 
   return (
-    <View style={styles.page}>
+    <View style={[styles.page, isMobile && styles.pageMobile]}>
       <View style={styles.topBar}>
         <TouchableOpacity
           style={styles.backIconButton}
@@ -475,8 +483,13 @@ export default function UserPostDetail() {
         <Text style={styles.topTitle}>User information</Text>
       </View>
 
-      <View
-        style={[styles.content, { flexDirection: isMobile ? "column" : "row" }]}
+      <ContentWrapper
+        style={[
+          styles.content,
+          { flexDirection: isMobile ? "column" : "row" },
+          isMobile && styles.mobileContentWrapper,
+        ]}
+        {...contentWrapperProps}
       >
         <View style={[styles.userPanel, isMobile && styles.mobileUserPanel]}>
           <View style={styles.profileAvatar}>
@@ -548,7 +561,18 @@ export default function UserPostDetail() {
           </View>
         </View>
 
-        <View style={styles.postsPanel}>
+        <View
+          style={[
+            styles.postsPanel,
+            isMobile && {
+              flex: 0,
+              flexShrink: 0,
+              height: mobileActivityHeight,
+              minHeight: mobileActivityHeight,
+              width: "100%",
+            },
+          ]}
+        >
           <View style={styles.activityTabs}>
             <TouchableOpacity
               style={[
@@ -912,7 +936,7 @@ export default function UserPostDetail() {
             </ScrollView>
           )}
         </View>
-      </View>
+      </ContentWrapper>
 
       <Modal
         visible={showPointsModal}
@@ -1145,6 +1169,7 @@ export default function UserPostDetail() {
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: "#f5f6f5", padding: 20 },
+  pageMobile: { padding: 12 },
   stateContainer: {
     flex: 1,
     alignItems: "center",
@@ -1176,6 +1201,12 @@ const styles = StyleSheet.create({
   },
   topTitle: { fontSize: 22, fontWeight: "700", color: "#1d2b21" },
   content: { flex: 1, minHeight: 0, gap: 20 },
+  mobileContentWrapper: { minHeight: 0 },
+  mobileContent: {
+    flexGrow: 0,
+    gap: 12,
+    paddingBottom: 12,
+  },
   userPanel: {
     width: 250,
     backgroundColor: "#fff",

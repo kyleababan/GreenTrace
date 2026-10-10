@@ -62,6 +62,8 @@ export default function VolunteerPostDetail({
   const router = useRouter();
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
+  const isCompactMobile = width < 480;
+  const mobileImageHeight = Math.min(Math.max(width - 24, 0) * 0.75, 360);
 
   const [post, setPost] = useState(suppliedPost || null);
   const [imageAspectRatio, setImageAspectRatio] = useState(4 / 3);
@@ -656,11 +658,20 @@ export default function VolunteerPostDetail({
   return (
     <View style={styles.page}>
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[
+          styles.content,
+          isMobile && styles.contentMobile,
+        ]}
         showsVerticalScrollIndicator={false}
       >
         {/* TOP BAR / ACTIONS */}
-        <View style={styles.topBar}>
+        <View
+          style={[
+            styles.topBar,
+            isMobile && styles.topBarMobile,
+            isCompactMobile && styles.topBarCompactMobile,
+          ]}
+        >
           <TouchableOpacity
             style={styles.backBtn}
             onPress={goBack}
@@ -672,10 +683,16 @@ export default function VolunteerPostDetail({
               style={styles.backIcon}
             />
           </TouchableOpacity>
-          <View style={styles.adminActions}>
+          <View
+            style={[
+              styles.adminActions,
+              isMobile && styles.adminActionsMobile,
+            ]}
+          >
             <TouchableOpacity
               style={[
                 styles.lockButton,
+                isMobile && styles.lockButtonMobile,
                 post.isLocked && styles.lockedButton,
                 updatingLock && styles.disabledAction,
               ]}
@@ -696,7 +713,10 @@ export default function VolunteerPostDetail({
               />
             </TouchableOpacity>
             <TouchableOpacity
-              style={styles.editButton}
+              style={[
+                styles.editButton,
+                isMobile && styles.actionButtonMobile,
+              ]}
               onPress={editVolunteerActivity}
               activeOpacity={0.8}
             >
@@ -706,6 +726,7 @@ export default function VolunteerPostDetail({
             <TouchableOpacity
               style={[
                 styles.deleteButton,
+                isMobile && styles.actionButtonMobile,
                 deletingActivity && styles.disabledAction,
               ]}
               onPress={deleteVolunteerActivity}
@@ -723,27 +744,59 @@ export default function VolunteerPostDetail({
         </View>
 
         <View
-          style={[styles.row, { flexDirection: isMobile ? "column" : "row" }]}
+          style={[
+            styles.row,
+            { flexDirection: isMobile ? "column" : "row" },
+            isMobile && styles.rowMobile,
+          ]}
         >
           {/* LEFT COLUMN: IMAGE, TITLE & DESCRIPTION */}
-          <View style={[styles.leftColumn, { flex: isMobile ? 0 : 1 }]}>
+          <View
+            style={[
+              styles.leftColumn,
+              !isMobile && styles.desktopColumn,
+            ]}
+          >
             {post.imageUrl ? (
-              <Image
-                source={{ uri: post.imageUrl }}
-                style={[styles.cardImage, { aspectRatio: imageAspectRatio }]}
-                resizeMode="contain"
-                onLoad={({ nativeEvent }) => {
-                  const imageWidth =
-                    nativeEvent?.source?.width ?? nativeEvent?.width;
-                  const imageHeight =
-                    nativeEvent?.source?.height ?? nativeEvent?.height;
-                  if (imageWidth > 0 && imageHeight > 0) {
-                    setImageAspectRatio(imageWidth / imageHeight);
-                  }
-                }}
-              />
+              isMobile ? (
+                <View
+                  style={[
+                    styles.mobileImageFrame,
+                    { height: mobileImageHeight },
+                  ]}
+                >
+                  <Image
+                    source={{ uri: post.imageUrl }}
+                    style={StyleSheet.absoluteFillObject}
+                    resizeMode="cover"
+                  />
+                </View>
+              ) : (
+                <Image
+                  source={{ uri: post.imageUrl }}
+                  style={[styles.cardImage, { aspectRatio: imageAspectRatio }]}
+                  resizeMode="contain"
+                  onLoad={({ nativeEvent }) => {
+                    const imageWidth =
+                      nativeEvent?.source?.width ?? nativeEvent?.width;
+                    const imageHeight =
+                      nativeEvent?.source?.height ?? nativeEvent?.height;
+                    if (imageWidth > 0 && imageHeight > 0) {
+                      setImageAspectRatio(imageWidth / imageHeight);
+                    }
+                  }}
+                />
+              )
             ) : (
-              <View style={[styles.imagePlaceholder, { aspectRatio: 4 / 3 }]}>
+              <View
+                style={[
+                  styles.imagePlaceholder,
+                  isMobile && styles.mobileImageFrame,
+                  isMobile
+                    ? { height: mobileImageHeight }
+                    : { aspectRatio: 4 / 3 },
+                ]}
+              >
                 <Ionicons name="image-outline" size={42} color="#71907d" />
                 <Text style={styles.placeholderText}>No image available</Text>
               </View>
@@ -789,7 +842,13 @@ export default function VolunteerPostDetail({
           </View>
 
           {/* RIGHT COLUMN: MEMBERS, SCHEDULE, REQUIREMENTS, LOCATION & ACTION */}
-          <View style={[styles.detailsColumn, { flex: isMobile ? 0 : 1 }]}>
+          <View
+            style={[
+              styles.detailsColumn,
+              isMobile && styles.detailsColumnMobile,
+              !isMobile && styles.desktopColumn,
+            ]}
+          >
             {/* MEMBERS SUMMARY */}
             <TouchableOpacity
               style={styles.membersSummary}
@@ -837,30 +896,56 @@ export default function VolunteerPostDetail({
             )}
 
             {/* REQUIREMENTS */}
-            <View style={styles.requirementBox}>
+            <View
+              style={[
+                styles.requirementBox,
+                isMobile && styles.requirementBoxMobile,
+              ]}
+            >
               <Text style={styles.sectionLabel}>Requirements</Text>
-              <ScrollView
-                style={styles.requirementList}
-                contentContainerStyle={styles.requirementListContent}
-                nestedScrollEnabled
-                keyboardShouldPersistTaps="handled"
-                showsVerticalScrollIndicator={Boolean(post.requirements?.length)}
-              >
-                {post.requirements?.length ? (
-                  post.requirements.map((item, index) => (
-                    <Text
-                      key={`${item}-${index}`}
-                      style={styles.requirementText}
-                    >
-                      • {hideBadWords(item)}
+              {isMobile ? (
+                <View style={styles.requirementListMobile}>
+                  {post.requirements?.length ? (
+                    post.requirements.map((item, index) => (
+                      <Text
+                        key={`${item}-${index}`}
+                        style={styles.requirementText}
+                      >
+                        • {hideBadWords(item)}
+                      </Text>
+                    ))
+                  ) : (
+                    <Text style={styles.mutedText}>
+                      No requirements listed.
                     </Text>
-                  ))
-                ) : (
-                  <Text style={styles.mutedText}>
-                    No requirements listed.
-                  </Text>
-                )}
-              </ScrollView>
+                  )}
+                </View>
+              ) : (
+                <ScrollView
+                  style={styles.requirementList}
+                  contentContainerStyle={styles.requirementListContent}
+                  nestedScrollEnabled
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={Boolean(
+                    post.requirements?.length,
+                  )}
+                >
+                  {post.requirements?.length ? (
+                    post.requirements.map((item, index) => (
+                      <Text
+                        key={`${item}-${index}`}
+                        style={styles.requirementText}
+                      >
+                        • {hideBadWords(item)}
+                      </Text>
+                    ))
+                  ) : (
+                    <Text style={styles.mutedText}>
+                      No requirements listed.
+                    </Text>
+                  )}
+                </ScrollView>
+              )}
             </View>
 
             {/* LOCATION */}
@@ -1344,6 +1429,7 @@ export default function VolunteerPostDetail({
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: "#f5f6f5" },
   content: { padding: 20, gap: 20 },
+  contentMobile: { padding: 12, gap: 12 },
   stateContainer: {
     flex: 1,
     alignItems: "center",
@@ -1364,9 +1450,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
+  topBarMobile: {
+    justifyContent: "flex-start",
+    gap: 10,
+  },
+  topBarCompactMobile: { alignItems: "center", flexWrap: "wrap" },
   backBtn: { alignSelf: "flex-start" },
   backIcon: { width: 45, height: 45 },
   adminActions: { flexDirection: "row", alignItems: "center", gap: 10 },
+  adminActionsMobile: { gap: 6 },
   lockButton: {
     width: 42,
     height: 42,
@@ -1377,6 +1469,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  lockButtonMobile: { width: 38, height: 38 },
   lockedButton: { backgroundColor: "#bf3030", borderColor: "#bf3030" },
   disabledAction: { opacity: 0.6 },
   disabledButton: { opacity: 0.7 },
@@ -1389,6 +1482,7 @@ const styles = StyleSheet.create({
     paddingVertical: 11,
     borderRadius: 8,
   },
+  actionButtonMobile: { gap: 4, paddingHorizontal: 10, paddingVertical: 9 },
   editButtonText: { color: "#fff", fontWeight: "700" },
   deleteButton: {
     flexDirection: "row",
@@ -1403,12 +1497,21 @@ const styles = StyleSheet.create({
   },
   deleteButtonText: { color: "#B42318", fontWeight: "700" },
   row: { gap: 24 },
+  rowMobile: { gap: 12 },
   leftColumn: { gap: 12 },
   detailsColumn: { gap: 14 },
+  desktopColumn: { flex: 1 },
+  detailsColumnMobile: { gap: 10 },
   cardImage: {
     width: "100%",
     borderRadius: 10,
     backgroundColor: "#dfe8e2",
+  },
+  mobileImageFrame: {
+    width: "100%",
+    borderRadius: 10,
+    backgroundColor: "#dfe8e2",
+    overflow: "hidden",
   },
   imagePlaceholder: {
     width: "100%",
@@ -1426,7 +1529,13 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: 10,
   },
-  titleText: { flex: 1, fontSize: 22, fontWeight: "700", color: "#172119" },
+  titleText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 22,
+    fontWeight: "700",
+    color: "#172119",
+  },
   eventStatusBadge: {
     paddingHorizontal: 10,
     paddingVertical: 5,
@@ -1454,6 +1563,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     gap: 12,
   },
+  requirementBoxMobile: { padding: 12 },
   sectionLabel: { fontSize: 15, fontWeight: "700", color: "#1d2b21" },
   membersHint: { marginTop: 3, color: "#63756a", fontSize: 12 },
   countBadge: {
@@ -1478,6 +1588,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   scheduleText: {
+    flex: 1,
+    flexShrink: 1,
     fontSize: 14,
     color: "#243129",
     fontWeight: "600",
@@ -1495,6 +1607,10 @@ const styles = StyleSheet.create({
   requirementListContent: {
     gap: 5,
     paddingBottom: 2,
+  },
+  requirementListMobile: {
+    marginTop: 8,
+    gap: 3,
   },
   requirementText: { color: "#304036" },
   mutedText: { color: "#728078" },
