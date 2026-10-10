@@ -111,6 +111,7 @@ const getCalendarDays = (month) => {
 
 export default function PickupSchedule() {
   const { width } = useWindowDimensions();
+  const isMobile = width < 640;
   const pagePadding = width < 768 ? 12 : width < 1024 ? 16 : 20;
   const today = new Date();
   const [visibleMonth, setVisibleMonth] = useState(() => startOfMonth(today));
@@ -414,19 +415,39 @@ export default function PickupSchedule() {
         Select a date to view or add a collection schedule.
       </Text>
 
-      <View style={styles.calendarCard}>
-        <View style={styles.calendarToolbar}>
+      <View style={[styles.calendarCard, isMobile && styles.calendarCardMobile]}>
+        <View
+          style={[
+            styles.calendarToolbar,
+            isMobile && styles.calendarToolbarMobile,
+          ]}
+        >
           <View>
-            <Text style={styles.monthTitle}>
+            <Text
+              style={[
+                styles.monthTitle,
+                isMobile && styles.monthTitleMobile,
+              ]}
+            >
               {visibleMonth.toLocaleDateString(undefined, {
                 month: "long",
                 year: "numeric",
               })}
             </Text>
-            <Text style={styles.monthHint}>Collection schedule calendar</Text>
+            <Text
+              style={styles.monthHint}
+              numberOfLines={isMobile ? 2 : 1}
+            >
+              Collection schedule calendar
+            </Text>
           </View>
 
-          <View style={styles.calendarControls}>
+          <View
+            style={[
+              styles.calendarControls,
+              isMobile && styles.calendarControlsMobile,
+            ]}
+          >
             <TouchableOpacity style={styles.todayButton} onPress={selectToday}>
               <Text style={styles.todayButtonText}>Today</Text>
             </TouchableOpacity>
@@ -449,8 +470,13 @@ export default function PickupSchedule() {
 
         <View style={styles.weekRow}>
           {WEEK_DAYS.map((day) => (
-            <View key={day} style={styles.weekCell}>
-              <Text style={styles.weekText}>{day}</Text>
+            <View
+              key={day}
+              style={[styles.weekCell, isMobile && styles.weekCellMobile]}
+            >
+              <Text style={[styles.weekText, isMobile && styles.weekTextMobile]}>
+                {day}
+              </Text>
             </View>
           ))}
         </View>
@@ -469,6 +495,7 @@ export default function PickupSchedule() {
                 key={date.toISOString()}
                 style={[
                   styles.dayCell,
+                  isMobile && styles.dayCellMobile,
                   !isCurrentMonth && styles.outsideMonthCell,
                   isSelected && styles.selectedDayCell,
                 ]}
@@ -493,7 +520,9 @@ export default function PickupSchedule() {
                     {date.getDate()}
                   </Text>
                 </View>
-                {dateOperations.length > 0 && dateOperations.length <= 2 && (
+                {!isMobile &&
+                  dateOperations.length > 0 &&
+                  dateOperations.length <= 2 && (
                   <View style={styles.operationLabels}>
                     {dateOperations.map((operation, index) => (
                       <View
@@ -516,7 +545,28 @@ export default function PickupSchedule() {
                     ))}
                   </View>
                 )}
-                {dateOperations.length > 2 && (
+                {isMobile && dateOperations.length > 0 && (
+                  <View style={styles.compactDotRowMobile}>
+                    {dateOperations.slice(0, 3).map((operation, index) => (
+                      <View
+                        key={operation.id}
+                        style={[
+                          styles.compactOperationDot,
+                          {
+                            backgroundColor:
+                              EVENT_COLORS[index % EVENT_COLORS.length],
+                          },
+                        ]}
+                      />
+                    ))}
+                    {dateOperations.length > 3 && (
+                      <Text style={styles.operationCountMobile}>
+                        +{dateOperations.length - 3}
+                      </Text>
+                    )}
+                  </View>
+                )}
+                {!isMobile && dateOperations.length > 2 && (
                   <View style={styles.compactDotRow}>
                     {dateOperations.slice(0, 5).map((operation, index) => (
                       <View
@@ -1169,16 +1219,28 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E3EBE6",
   },
+  calendarCardMobile: {
+    padding: 10,
+  },
   calendarToolbar: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: 18,
   },
+  calendarToolbarMobile: {
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: 8,
+    marginBottom: 12,
+  },
   monthTitle: {
     color: "#234B33",
     fontSize: 22,
     fontWeight: "800",
+  },
+  monthTitleMobile: {
+    fontSize: 20,
   },
   monthHint: {
     color: "#7A8A80",
@@ -1189,6 +1251,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+  },
+  calendarControlsMobile: {
+    alignSelf: "flex-end",
+    gap: 6,
   },
   todayButton: {
     height: 38,
@@ -1230,11 +1296,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 11,
   },
+  weekCellMobile: {
+    paddingVertical: 8,
+  },
   weekText: {
     color: "#397A51",
     fontSize: 12,
     fontWeight: "800",
     textTransform: "uppercase",
+  },
+  weekTextMobile: {
+    fontSize: 10,
   },
   calendarGrid: {
     flexDirection: "row",
@@ -1251,6 +1323,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderColor: "#E5ECE8",
     backgroundColor: "#FFFFFF",
+  },
+  dayCellMobile: {
+    minHeight: 58,
+    padding: 3,
   },
   outsideMonthCell: {
     backgroundColor: "#FAFCFB",
@@ -1320,6 +1396,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 4,
     marginTop: 10,
+  },
+  compactDotRowMobile: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 3,
+    marginTop: 4,
+  },
+  operationCountMobile: {
+    color: "#64748B",
+    fontSize: 8,
+    fontWeight: "800",
   },
   compactOperationDot: {
     width: 7,

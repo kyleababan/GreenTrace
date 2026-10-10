@@ -366,6 +366,25 @@ export default function VolunteerPostCreate({
   }
 
   const imageUrl = volunteerPost?.imageUrl || suppliedPost?.imageUrl;
+  const saveButton = (
+    <TouchableOpacity
+      disabled={saving}
+      style={[styles.saveBtn, saving && styles.disabledButton]}
+      onPress={saveVolunteerPost}
+      activeOpacity={0.85}
+    >
+      {saving ? (
+        <View style={styles.savingContent}>
+          <ActivityIndicator size="small" color="#fff" />
+          <Text style={styles.saveText}>Saving...</Text>
+        </View>
+      ) : (
+        <Text style={styles.saveText}>
+          {isEditing ? "Save changes" : "Create activity"}
+        </Text>
+      )}
+    </TouchableOpacity>
+  );
 
   return (
     <View style={styles.page}>
@@ -384,14 +403,20 @@ export default function VolunteerPostCreate({
 
       <ScrollView
         style={styles.formScroll}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[
+          styles.content,
+          isMobile && styles.contentMobile,
+        ]}
         showsVerticalScrollIndicator={false}
       >
         <View
-          style={[styles.row, { flexDirection: isMobile ? "column" : "row" }]}
+          style={[
+            styles.row,
+            { flexDirection: isMobile ? "column" : "row" },
+          ]}
         >
           {/* LEFT COLUMN: IMAGE & MEETING SCHEDULE */}
-          <View style={[styles.card, { flex: isMobile ? 0 : 1 }]}>
+          <View style={[styles.card, !isMobile && styles.desktopColumn]}>
             {imageUrl ? (
               <Image
                 source={{ uri: imageUrl }}
@@ -513,7 +538,7 @@ export default function VolunteerPostCreate({
           </View>
 
           {/* RIGHT COLUMN: EDIT SECTION */}
-          <View style={[styles.editSection, { flex: isMobile ? 0 : 1 }]}>
+          <View style={[styles.editSection, !isMobile && styles.desktopColumn]}>
             <Text style={styles.heading}>
               {isEditing
                 ? "Edit volunteer activity"
@@ -643,34 +668,12 @@ export default function VolunteerPostCreate({
             {errors.maxVolunteers && (
               <Text style={styles.fieldError}>{errors.maxVolunteers}</Text>
             )}
+            {isMobile && saveButton}
           </View>
         </View>
 
         {/* SAVE BUTTON */}
-        <TouchableOpacity
-          disabled={saving}
-          style={[styles.saveBtn, saving && styles.disabledButton]}
-          onPress={saveVolunteerPost}
-          activeOpacity={0.85}
-        >
-          {saving ? (
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 6,
-              }}
-            >
-              <ActivityIndicator size="small" color="#fff" />
-              <Text style={styles.saveText}>Saving...</Text>
-            </View>
-          ) : (
-            <Text style={styles.saveText}>
-              {isEditing ? "Save changes" : "Create activity"}
-            </Text>
-          )}
-        </TouchableOpacity>
+        {!isMobile && saveButton}
       </ScrollView>
 
       {/* CALENDAR MODAL */}
@@ -914,9 +917,11 @@ const styles = StyleSheet.create({
   loading: { flex: 1, alignItems: "center", justifyContent: "center" },
   formScroll: { flex: 1 },
   content: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 24, gap: 20 },
+  contentMobile: { paddingHorizontal: 12, paddingTop: 12, paddingBottom: 18, gap: 12 },
   backBtn: { alignSelf: "flex-start", marginTop: 20, marginLeft: 20 },
   backIcon: { width: 45, height: 45 },
   row: { gap: 20 },
+  desktopColumn: { flex: 1 },
   card: { borderRadius: 10, overflow: "hidden" },
   cardImage: { width: "100%", borderRadius: 10, backgroundColor: "#dfe8e2" },
   imagePlaceholder: {
@@ -1079,6 +1084,12 @@ const styles = StyleSheet.create({
     padding: 15,
     borderRadius: 8,
     alignItems: "center",
+  },
+  savingContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
   },
   disabledButton: { opacity: 0.6 },
   saveText: { color: "#fff", fontWeight: "700", fontSize: 16 },
