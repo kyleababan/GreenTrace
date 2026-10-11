@@ -631,7 +631,7 @@ export default function Home() {
         type: "volunteer",
         title: openVolunteerActivity.title || "Volunteer opportunity",
         details:
-          openVolunteerActivity.locationName || "Open volunteer activity",
+          formatLocationWithPurok(openVolunteerActivity) || "Open volunteer activity",
         message: `${openVolunteerActivity.joinedCount || 0}/${openVolunteerActivity.maxVolunteers || 0} volunteers joined`,
         actionText: "Join now",
         activityId: openVolunteerActivity.id,
@@ -1174,7 +1174,7 @@ export default function Home() {
                         style={styles.locationIcon}
                       />
                       <Text style={styles.locationText}>
-                        {formatLocationWithPurok(post.locationName, post.purok)}
+                        {formatLocationWithPurok(post)}
                       </Text>
                     </TouchableOpacity>
 
@@ -1225,6 +1225,39 @@ export default function Home() {
                             {formatWasteLabel(post.wasteClassification)}
                           </Text>
                         </View>
+                      )}
+
+                      {Boolean(post.isDuplicate || post.isPointEligible === false) && (
+                        <View style={[styles.statusTag, styles.duplicateTag]}>
+                          <Ionicons
+                            name="copy-outline"
+                            size={10}
+                            color="#FFFFFF"
+                            style={{ marginRight: 3 }}
+                          />
+                          <Text style={styles.statusText}>Duplicate Report</Text>
+                        </View>
+                      )}
+
+                      {Boolean(post.linkedReportId) && (
+                        <TouchableOpacity
+                          style={[styles.statusTag, styles.linkedTag]}
+                          activeOpacity={0.7}
+                          onPress={() =>
+                            router.push({
+                              pathname: "/post",
+                              params: { id: post.linkedReportId },
+                            })
+                          }
+                        >
+                          <Ionicons
+                            name="link-outline"
+                            size={10}
+                            color="#FFFFFF"
+                            style={{ marginRight: 3 }}
+                          />
+                          <Text style={styles.statusText}>Linked Report</Text>
+                        </TouchableOpacity>
                       )}
                     </View>
                   </View>
@@ -1827,6 +1860,16 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 10,
     fontWeight: "700",
+  },
+  duplicateTag: {
+    backgroundColor: "#DC2626",
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  linkedTag: {
+    backgroundColor: "#2563EB",
+    flexDirection: "row",
+    alignItems: "center",
   },
 
   /* Actions */

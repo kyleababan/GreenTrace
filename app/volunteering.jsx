@@ -1,10 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { doc, getDoc, runTransaction } from "firebase/firestore";
+import { doc, getDoc, onSnapshot, runTransaction } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   Image,
   Modal,
   ScrollView,
@@ -16,6 +17,7 @@ import {
 
 import Navbar from "../components/navbar";
 import PostLocationModal from "../components/PostLocationModal";
+import { formatLocationWithPurok } from "../constants/locationFormat";
 import { auth, db } from "../firebaseConfig";
 
 const getMemberId = (member) =>
@@ -58,6 +60,7 @@ export default function Volunteering() {
   const { volunteerId } = useLocalSearchParams();
   const activityId = Array.isArray(volunteerId) ? volunteerId[0] : volunteerId;
   const router = useRouter();
+
   const [activity, setActivity] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(Boolean(activityId));
@@ -68,19 +71,44 @@ export default function Volunteering() {
   const [imageAspectRatio, setImageAspectRatio] = useState(null);
   const [showLockedModal, setShowLockedModal] = useState(false);
   const [locationModalVisible, setLocationModalVisible] = useState(false);
+  const [showLateJoinModal, setShowLateJoinModal] = useState(false);
+  const [showEmergencyLeaveModal, setShowEmergencyLeaveModal] = useState(false);
+
+  const [pulseAnim] = useState(() => new Animated.Value(1));
 
   useEffect(() => {
-    const loadActivity = async () => {
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 1.35,
+          duration: 750,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 750,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    pulse.start();
+    return () => pulse.stop();
+  }, [pulseAnim]);
+
+  useEffect(() => {
+    if (!activityId) return;
+
+    queueMicrotask(() => {
       setLoading(true);
       setImageAspectRatio(null);
-      try {
-        const signedInUser = auth.currentUser;
-        const activitySnapshot = await getDoc(
-          doc(db, "volunteer_posts", activityId),
-        );
+    });
 
+    const unsubscribe = onSnapshot(
+      doc(db, "volunteer_posts", activityId),
+      async (activitySnapshot) => {
         if (!activitySnapshot.exists()) {
           setLoadError("This volunteer activity is no longer available.");
+          setLoading(false);
           return;
         }
 
@@ -118,6 +146,12 @@ export default function Volunteering() {
               ) {
                 activityData.wasteClassification = postData.wasteClassification;
               }
+              if (
+                !activityData.afterImageUrl &&
+                postData.afterImageUrl
+              ) {
+                activityData.afterImageUrl = postData.afterImageUrl;
+              }
             }
           } catch (postErr) {
             console.error("Unable to load linked post coordinates:", postErr);
@@ -125,25 +159,30 @@ export default function Volunteering() {
         }
 
         setActivity(activityData);
+        setLoading(false);
+      },
+      (error) => {
+        console.error("Unable to load volunteer activity:", error);
+        setLoadError("Unable to load this volunteer activity.");
+        setLoading(false);
+      },
+    );
 
-        if (signedInUser) {
-          const userSnapshot = await getDoc(doc(db, "users", signedInUser.uid));
+    const signedInUser = auth.currentUser;
+    if (signedInUser) {
+      getDoc(doc(db, "users", signedInUser.uid))
+        .then((userSnapshot) => {
           setCurrentUser({
             id: signedInUser.uid,
             ...(userSnapshot.exists() ? userSnapshot.data() : {}),
           });
-        } else {
-          setCurrentUser(null);
-        }
-      } catch (error) {
-        console.error("Unable to load volunteer activity:", error);
-        setLoadError("Unable to load this volunteer activity.");
-      } finally {
-        setLoading(false);
-      }
-    };
+        })
+        .catch(() => setCurrentUser(null));
+    } else {
+      queueMicrotask(() => setCurrentUser(null));
+    }
 
-    if (activityId) loadActivity();
+    return () => unsubscribe();
   }, [activityId]);
 
   const members = Array.isArray(activity?.volunteers)
@@ -157,15 +196,56 @@ export default function Volunteering() {
   const joinedCount = Number.isFinite(Number(activity?.joinedCount))
     ? Number(activity.joinedCount)
     : members.length;
-  const isFull = !isJoined && joinedCount >= maxVolunteers;
+  const isFull = !isJoined && maxVolunteers > 0 && joinedCount >= maxVolunteers;
   const isLocked = activity?.isLocked === true;
 
-  const toggleVolunteer = async () => {
+  const statusNormalized = String(activity?.status || "open").toLowerCase().trim();
+  const isOngoing = ["ongoing", "on-going"].includes(statusNormalized);
+  const isCompleted = ["completed", "cleaned"].includes(statusNormalized);
+  const isCancelled = statusNormalized === "cancelled";
+  const hasEarnedEcoPoints = Boolean(
+    isCompleted &&
+      currentUser?.id &&
+      (Array.isArray(activity?.rewardedVolunteerIds)
+        ? activity.rewardedVolunteerIds.includes(currentUser.id)
+        : isJoined),
+  );
+
+  const handleVolunteerAction = () => {
     if (joining || !activity || !currentUser) return;
-    if (isLocked && !isJoined) {
+    if (isCompleted || isCancelled) return;
+
+    if (isJoined) {
+      if (isOngoing) {
+        setShowEmergencyLeaveModal(true);
+      } else {
+        executeVolunteerToggle(false);
+      }
+      return;
+    }
+
+    if (isLocked && !isOngoing) {
       setShowLockedModal(true);
       return;
     }
+
+    if (isFull) {
+      Alert.alert("Activity Full", "All volunteer spots have been filled.");
+      return;
+    }
+
+    if (isOngoing) {
+      setShowLateJoinModal(true);
+      return;
+    }
+
+    executeVolunteerToggle(false);
+  };
+
+  const executeVolunteerToggle = async (isLateArrival = false) => {
+    if (joining || !activity || !currentUser) return;
+    setShowLateJoinModal(false);
+    setShowEmergencyLeaveModal(false);
 
     setJoining(true);
     try {
@@ -189,13 +269,17 @@ export default function Volunteering() {
             (member) => getMemberId(member) !== currentUser.id,
           );
         } else {
-          if (data.status !== "open")
+          const ongoingCheck = ["ongoing", "on-going"].includes(
+            String(data.status || "").toLowerCase(),
+          );
+          if (data.status !== "open" && !ongoingCheck)
             throw new Error("This activity is closed.");
-          if (data.isLocked === true)
+          if (data.isLocked === true && !ongoingCheck)
             throw new Error("This activity is locked.");
 
-          const capacity = Number(data.maxVolunteers) || 0;
-          if (currentMembers.length >= capacity)
+          const capacity =
+            Number(data.maxVolunteers ?? data.maxParticipants) || 0;
+          if (capacity > 0 && currentMembers.length >= capacity)
             throw new Error("This activity is already full.");
 
           updatedMembers = [
@@ -205,6 +289,8 @@ export default function Volunteering() {
               firstName: currentUser.firstName || "",
               lastName: currentUser.lastName || "",
               email: currentUser.email || "",
+              joinedLate: isLateArrival || ongoingCheck,
+              joinedAt: new Date().toISOString(),
             },
           ];
         }
@@ -233,6 +319,8 @@ export default function Volunteering() {
                 firstName: currentUser.firstName || "",
                 lastName: currentUser.lastName || "",
                 email: currentUser.email || "",
+                joinedLate: isLateArrival || isOngoing,
+                joinedAt: new Date().toISOString(),
               },
             ];
 
@@ -300,6 +388,32 @@ export default function Volunteering() {
           contentContainerStyle={styles.feedContent}
           showsVerticalScrollIndicator={false}
         >
+          {/* STATUS PILL HEADER (LIVE / COMPLETED / CANCELLED) */}
+          {isOngoing ? (
+            <View style={styles.liveBadgeRow}>
+              <View style={styles.livePulseContainer}>
+                <Animated.View
+                  style={[
+                    styles.livePulseDotRing,
+                    { transform: [{ scale: pulseAnim }] },
+                  ]}
+                />
+                <View style={styles.livePulseDot} />
+              </View>
+              <Text style={styles.liveBadgeText}>LIVE CLEANUP IN PROGRESS</Text>
+            </View>
+          ) : isCompleted ? (
+            <View style={styles.completedBadgeRow}>
+              <Ionicons name="checkmark-circle" size={14} color="#15803D" />
+              <Text style={styles.completedBadgeText}>ACTIVITY COMPLETED</Text>
+            </View>
+          ) : isCancelled ? (
+            <View style={styles.cancelledBadgeRow}>
+              <Ionicons name="close-circle" size={14} color="#DC2626" />
+              <Text style={styles.cancelledBadgeText}>ACTIVITY CANCELLED</Text>
+            </View>
+          ) : null}
+
           {/* TITLE & DESCRIPTION */}
           <View style={styles.titleSection}>
             <Text style={styles.title}>
@@ -309,6 +423,57 @@ export default function Volunteering() {
               {activity.description || "No description provided."}
             </Text>
           </View>
+
+          {/* DYNAMIC CONTEXTUAL BANNER CARDS */}
+          {isOngoing ? (
+            <View style={styles.liveBannerCard}>
+              <View style={styles.liveBannerHeader}>
+                <Ionicons name="flash" size={18} color="#D97706" />
+                <Text style={styles.liveBannerTitle}>
+                  Cleanup Happening Right Now!
+                </Text>
+              </View>
+              <Text style={styles.liveBannerDesc}>
+                {isJoined
+                  ? "You are registered! Head to the location and check in with the LGU coordinator on-site for attendance."
+                  : "This cleanup has already started. Late arrivals are welcome to join—please report to the on-site coordinator."}
+              </Text>
+            </View>
+          ) : isCompleted ? (
+            <View style={styles.completedBannerCard}>
+              <View style={styles.completedBannerHeader}>
+                <Ionicons name="trophy" size={20} color="#15803D" />
+                <Text style={styles.completedBannerTitle}>
+                  Cleanup Successfully Completed!
+                </Text>
+              </View>
+              <Text style={styles.completedBannerDesc}>
+                {activity.completionSummary ||
+                  "Thank you to all volunteers who participated in keeping our municipality clean and green!"}
+              </Text>
+              {hasEarnedEcoPoints && (
+                <View style={styles.rewardPill}>
+                  <Ionicons name="gift" size={15} color="#15803D" />
+                  <Text style={styles.rewardPillText}>
+                    +{activity.eventRewardPoints || 8} EcoPoints Credited
+                  </Text>
+                </View>
+              )}
+            </View>
+          ) : isCancelled ? (
+            <View style={styles.cancelledBannerCard}>
+              <Ionicons name="alert-circle" size={20} color="#DC2626" />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cancelledBannerTitle}>
+                  Activity Cancelled / Postponed
+                </Text>
+                <Text style={styles.cancelledBannerDesc}>
+                  {activity.cancellationReason ||
+                    "This volunteer activity was postponed or cancelled by the municipal administrator."}
+                </Text>
+              </View>
+            </View>
+          ) : null}
 
           {/* MAIN IMAGE */}
           {activity.imageUrl ? (
@@ -331,6 +496,37 @@ export default function Volunteering() {
             </View>
           )}
 
+          {/* BEFORE & AFTER PHOTO GALLERY (IF COMPLETED) */}
+          {isCompleted && Boolean(activity.afterImageUrl) && (
+            <View style={styles.infoCard}>
+              <Text style={styles.cardLabel}>Cleanup Results</Text>
+              <View style={styles.beforeAfterRow}>
+                <View style={styles.beforeAfterCol}>
+                  <Text style={styles.beforeAfterLabel}>Before</Text>
+                  {activity.imageUrl ? (
+                    <Image
+                      source={{ uri: activity.imageUrl }}
+                      style={styles.beforeAfterImg}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View style={[styles.beforeAfterImg, styles.beforeAfterPlaceholder]}>
+                      <Text style={styles.placeholderText}>No photo</Text>
+                    </View>
+                  )}
+                </View>
+                <View style={styles.beforeAfterCol}>
+                  <Text style={styles.beforeAfterLabel}>After Cleanup</Text>
+                  <Image
+                    source={{ uri: activity.afterImageUrl }}
+                    style={styles.beforeAfterImg}
+                    resizeMode="cover"
+                  />
+                </View>
+              </View>
+            </View>
+          )}
+
           {/* LOCATION */}
           <TouchableOpacity
             style={styles.locationRow}
@@ -339,12 +535,21 @@ export default function Volunteering() {
             hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
           >
             <View style={styles.locationLeft}>
-              <Ionicons name="location-outline" size={18} color="#2E7D32" />
-              <Text style={styles.locationText} numberOfLines={2}>
-                {activity.meetingLocation ||
-                  activity.locationName ||
-                  "Location not specified"}
-              </Text>
+              <View style={styles.locationIconWrap}>
+                <Ionicons name="location-outline" size={18} color="#2E7D32" />
+              </View>
+              <View style={styles.locationCopy}>
+                <Text style={styles.locationLabel}>LOCATION</Text>
+                <Text style={styles.locationText} numberOfLines={2}>
+                  {formatLocationWithPurok(
+                    activity.meetingLocation || activity
+                  ) || "Location not specified"}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.viewMapBadge}>
+              <Ionicons name="map-outline" size={13} color="#2E7D32" />
+              <Text style={styles.viewMapBadgeText}>View Map</Text>
             </View>
           </TouchableOpacity>
 
@@ -433,39 +638,145 @@ export default function Volunteering() {
             </ScrollView>
           </View>
 
-          {/* JOIN / LEAVE BUTTON */}
+          {/* SAFETY & GEAR CHECKLIST CARD */}
+          <View style={styles.infoCard}>
+            <View style={styles.cardHeader}>
+              <Text style={styles.cardLabel}>Safety & What to Bring</Text>
+              <View style={styles.gearBadge}>
+                <Ionicons
+                  name="shield-checkmark-outline"
+                  size={12}
+                  color="#166534"
+                />
+                <Text style={styles.gearBadgeText}>Safety First</Text>
+              </View>
+            </View>
+            <View style={styles.gearGrid}>
+              <View style={styles.gearItem}>
+                <Ionicons name="hand-left-outline" size={18} color="#276344" />
+                <View style={styles.gearTextCol}>
+                  <Text style={styles.gearTitle}>Heavy-Duty Gloves</Text>
+                  <Text style={styles.gearDesc}>
+                    Protect hands from glass & debris
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.gearItem}>
+                <Ionicons name="footsteps-outline" size={18} color="#276344" />
+                <View style={styles.gearTextCol}>
+                  <Text style={styles.gearTitle}>Closed-Toe Shoes</Text>
+                  <Text style={styles.gearDesc}>
+                    Wear sturdy shoes (no slippers)
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.gearItem}>
+                <Ionicons name="water-outline" size={18} color="#276344" />
+                <View style={styles.gearTextCol}>
+                  <Text style={styles.gearTitle}>Reusable Water Bottle</Text>
+                  <Text style={styles.gearDesc}>
+                    Stay hydrated; avoid single-use cups
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.gearItem}>
+                <Ionicons name="sunny-outline" size={18} color="#276344" />
+                <View style={styles.gearTextCol}>
+                  <Text style={styles.gearTitle}>Sun Protection</Text>
+                  <Text style={styles.gearDesc}>
+                    Cap, hat, or sunscreen for outdoors
+                  </Text>
+                </View>
+              </View>
+            </View>
+          </View>
+
+          {/* OUTDOOR & WEATHER ADVISORY */}
+          <View style={styles.advisoryCard}>
+            <View style={styles.advisoryHeader}>
+              <Ionicons name="partly-sunny-outline" size={18} color="#D97706" />
+              <Text style={styles.advisoryTitle}>Outdoor Clean-up Advisory</Text>
+            </View>
+            <Text style={styles.advisoryText}>
+              Hydrate well before and during the activity. In the event of sudden severe weather or heavy rain, the LGU coordinator may adjust the rendezvous schedule.
+            </Text>
+          </View>
+
+          {/* LGU / COORDINATOR HOTLINE CARD */}
+          <View style={styles.coordinatorCard}>
+            <View style={styles.coordinatorHeader}>
+              <Ionicons name="shield-checkmark-outline" size={16} color="#1E3A8A" />
+              <Text style={styles.coordinatorTitle}>LGU Coordinator & Assistance</Text>
+            </View>
+            <Text style={styles.coordinatorText}>
+              Need directions, arriving late, or require assistance on-site? Report to the MENRO / Barangay response desk upon arrival.
+            </Text>
+            <View style={styles.coordinatorHotlineRow}>
+              <Ionicons name="call" size={12} color="#2563EB" />
+              <Text style={styles.coordinatorHotlineText}>
+                Official GreenTrace Municipal Field Desk
+              </Text>
+            </View>
+          </View>
+
+          {/* JOIN / LEAVE / STATUS BUTTON */}
           <TouchableOpacity
-            disabled={joining || (isFull && !isLocked)}
+            disabled={
+              joining ||
+              isCompleted ||
+              isCancelled ||
+              (isFull && !isJoined && !isOngoing)
+            }
             style={[
               styles.mainButton,
               isJoined && styles.joinedButton,
-              isFull && styles.disabledButton,
-              isLocked && !isJoined && styles.lockedButton,
+              !isJoined && isOngoing && styles.joinLateButton,
+              isCompleted && styles.completedButton,
+              (isCancelled || (isFull && !isJoined && !isOngoing)) &&
+                styles.disabledButton,
+              isLocked && !isJoined && !isOngoing && styles.lockedButton,
             ]}
-            onPress={toggleVolunteer}
+            onPress={handleVolunteerAction}
             activeOpacity={0.8}
           >
-            {isLocked && !isJoined ? (
+            {isLocked && !isJoined && !isOngoing ? (
               <Ionicons name="lock-closed-outline" size={18} color="#EF4444" />
+            ) : !isJoined && isOngoing ? (
+              <Ionicons name="flash-outline" size={18} color="#FFFFFF" />
+            ) : isCompleted ? (
+              <Ionicons
+                name="checkmark-done-circle-outline"
+                size={18}
+                color="#FFFFFF"
+              />
             ) : null}
+
             <Text
               style={[
                 styles.buttonText,
                 isJoined && styles.joinedButtonText,
-                isLocked && !isJoined && styles.lockedButtonText,
+                isLocked && !isJoined && !isOngoing && styles.lockedButtonText,
               ]}
             >
               {joining
                 ? "Updating..."
-                : isJoined
-                  ? "Leave activity"
-                  : isLocked
-                    ? "Activity locked"
-                    : isFull
-                      ? "Activity full"
-                      : activity.eventType
-                        ? "Join Event"
-                        : "Volunteer Now"}
+                : isCompleted
+                  ? "Activity Completed"
+                  : isCancelled
+                    ? "Activity Cancelled"
+                    : isJoined
+                      ? isOngoing
+                        ? "Leave Activity (In-Progress)"
+                        : "Leave Activity"
+                      : isOngoing
+                        ? "Join In Progress (Late Arrival)"
+                        : isLocked
+                          ? "Activity Locked"
+                          : isFull
+                            ? "Activity Full"
+                            : activity.eventType
+                              ? "Join Event"
+                              : "Volunteer Now"}
             </Text>
           </TouchableOpacity>
         </ScrollView>
@@ -499,6 +810,82 @@ export default function Volunteering() {
             >
               <Text style={styles.modalButtonText}>Got it</Text>
             </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* LATE JOIN NOTICE MODAL */}
+      <Modal
+        visible={showLateJoinModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowLateJoinModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.lockedModal} accessibilityRole="alert">
+            <View style={styles.lateJoinModalIcon}>
+              <Ionicons name="flash" size={26} color="#D97706" />
+            </View>
+            <Text style={styles.lockedTitle}>Join In-Progress Cleanup?</Text>
+            <Text style={styles.lockedMessage}>
+              This cleanup has already started! Head directly to the location (
+              {formatLocationWithPurok(
+                activity?.meetingLocation || activity
+              ) || "the site"}
+              ) and report to the on-site LGU coordinator upon arrival so they can mark your attendance for EcoPoints.
+            </Text>
+            <View style={styles.modalActionButtonsRow}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setShowLateJoinModal(false)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.modalCancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalConfirmLateButton}
+                onPress={() => executeVolunteerToggle(true)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.modalButtonText}>Confirm & Join</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* EMERGENCY LEAVE MODAL */}
+      <Modal
+        visible={showEmergencyLeaveModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowEmergencyLeaveModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.lockedModal} accessibilityRole="alert">
+            <View style={styles.leaveModalIcon}>
+              <Ionicons name="exit-outline" size={26} color="#DC2626" />
+            </View>
+            <Text style={styles.lockedTitle}>Leave In-Progress Activity?</Text>
+            <Text style={styles.lockedMessage}>
+              This event is currently in progress. If you leave now, your volunteer slot will be released and you will not receive attendance EcoPoints.
+            </Text>
+            <View style={styles.modalActionButtonsRow}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setShowEmergencyLeaveModal(false)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.modalCancelButtonText}>Stay in Activity</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalConfirmLeaveButton}
+                onPress={() => executeVolunteerToggle(false)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.modalButtonText}>Leave Event</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -627,13 +1014,32 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 10,
+  },
+  locationIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: "#E1F0E5",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  locationCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  locationLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#5C7A68",
+    letterSpacing: 0.5,
   },
   locationText: {
-    flex: 1,
     fontSize: 13,
-    fontWeight: "500",
-    color: "#0F172A",
+    fontWeight: "600",
+    color: "#183B24",
+    marginTop: 2,
+    lineHeight: 18,
   },
   viewMapBadge: {
     flexDirection: "row",
@@ -641,7 +1047,7 @@ const styles = StyleSheet.create({
     gap: 4,
     backgroundColor: "#EAF9EE",
     paddingHorizontal: 8,
-    paddingVertical: 5,
+    paddingVertical: 6,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: "#D1E7D8",
@@ -691,6 +1097,65 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
     lineHeight: 18,
+  },
+
+  /* ADVISORY & COORDINATOR CARDS */
+  advisoryCard: {
+    backgroundColor: "#FFFBEB",
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+    gap: 6,
+  },
+  advisoryHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  advisoryTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#92400E",
+  },
+  advisoryText: {
+    fontSize: 12,
+    color: "#B45309",
+    lineHeight: 17,
+  },
+  coordinatorCard: {
+    backgroundColor: "#EFF6FF",
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    gap: 6,
+  },
+  coordinatorHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  coordinatorTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#1E40AF",
+  },
+  coordinatorText: {
+    fontSize: 12,
+    color: "#1E3A8A",
+    lineHeight: 17,
+  },
+  coordinatorHotlineRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginTop: 2,
+  },
+  coordinatorHotlineText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#2563EB",
   },
 
   /* CARDS */
@@ -863,5 +1328,308 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontWeight: "600",
     fontSize: 14,
+  },
+
+  /* LIVE PULSING BADGE */
+  liveBadgeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 8,
+    backgroundColor: "#FEF3C7",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "#FCD34D",
+  },
+  livePulseContainer: {
+    width: 14,
+    height: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+  livePulseDotRing: {
+    position: "absolute",
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: "rgba(217, 119, 6, 0.35)",
+  },
+  livePulseDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#D97706",
+  },
+  liveBadgeText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#B45309",
+    letterSpacing: 0.5,
+  },
+
+  /* STATUS BADGE ROWS */
+  completedBadgeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 6,
+    backgroundColor: "#DCFCE7",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "#86EFAC",
+  },
+  completedBadgeText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#15803D",
+    letterSpacing: 0.5,
+  },
+  cancelledBadgeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 6,
+    backgroundColor: "#FEE2E2",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "#FCA5A5",
+  },
+  cancelledBadgeText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#DC2626",
+    letterSpacing: 0.5,
+  },
+
+  /* CONTEXTUAL BANNER CARDS */
+  liveBannerCard: {
+    backgroundColor: "#FFFBEB",
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  liveBannerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 4,
+  },
+  liveBannerTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#92400E",
+  },
+  liveBannerDesc: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: "#78350F",
+  },
+
+  completedBannerCard: {
+    backgroundColor: "#F0FDF4",
+    borderWidth: 1,
+    borderColor: "#BBF7D0",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  completedBannerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 4,
+  },
+  completedBannerTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#166534",
+  },
+  completedBannerDesc: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: "#14532D",
+  },
+  rewardPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#DCFCE7",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    alignSelf: "flex-start",
+    marginTop: 8,
+  },
+  rewardPillText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#15803D",
+  },
+
+  cancelledBannerCard: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  cancelledBannerTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#991B1B",
+    marginBottom: 2,
+  },
+  cancelledBannerDesc: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: "#7F1D1D",
+  },
+
+  /* BEFORE & AFTER PHOTO GALLERY */
+  beforeAfterRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 6,
+  },
+  beforeAfterCol: {
+    flex: 1,
+  },
+  beforeAfterLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#64748B",
+    marginBottom: 4,
+  },
+  beforeAfterImg: {
+    width: "100%",
+    aspectRatio: 4 / 3,
+    borderRadius: 8,
+    backgroundColor: "#E2E8F0",
+  },
+  beforeAfterPlaceholder: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  /* SAFETY & GEAR CHECKLIST */
+  gearBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#DCFCE7",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  gearBadgeText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#166534",
+  },
+  gearGrid: {
+    gap: 10,
+    marginTop: 4,
+  },
+  gearItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#F8FAFC",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  gearTextCol: {
+    flex: 1,
+  },
+  gearTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#1E293B",
+  },
+  gearDesc: {
+    fontSize: 11,
+    color: "#64748B",
+    marginTop: 1,
+  },
+
+  /* BUTTON VARIANTS */
+  joinLateButton: {
+    backgroundColor: "#D97706",
+  },
+  completedButton: {
+    backgroundColor: "#16A34A",
+    opacity: 0.9,
+  },
+
+  /* MODAL ICONS & ACTIONS */
+  lateJoinModalIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#FEF3C7",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  leaveModalIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#FEE2E2",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalActionButtonsRow: {
+    flexDirection: "row",
+    gap: 10,
+    width: "100%",
+    marginTop: 18,
+  },
+  modalCancelButton: {
+    flex: 1,
+    paddingVertical: 11,
+    borderRadius: 10,
+    backgroundColor: "#F1F5F9",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalCancelButtonText: {
+    color: "#475569",
+    fontWeight: "600",
+    fontSize: 13,
+  },
+  modalConfirmLateButton: {
+    flex: 1.2,
+    paddingVertical: 11,
+    borderRadius: 10,
+    backgroundColor: "#D97706",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalConfirmLeaveButton: {
+    flex: 1.2,
+    paddingVertical: 11,
+    borderRadius: 10,
+    backgroundColor: "#DC2626",
+    alignItems: "center",
+    justifyContent: "center",
   },
 });

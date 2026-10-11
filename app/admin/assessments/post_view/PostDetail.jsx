@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -42,7 +42,10 @@ import {
     getUserContributionStats,
     isBadgeEarned,
 } from "../../../../constants/badges";
-import { formatLocationWithPurok } from "../../../../constants/locationFormat";
+import {
+  formatLocationWithPurok,
+  normalizePurok,
+} from "../../../../constants/locationFormat";
 import {
     formatWasteLabel,
     getWasteCategoryColor,
@@ -51,8 +54,12 @@ import { auth, db } from "../../../../firebaseConfig";
 import { deleteRelatedDocuments } from "../../../../utils/deletePostHelper";
 import { hideBadWords } from "../../../../utils/hideBadWords";
 import {
+  notifyCommentModerated,
   notifyPostModerated,
   notifyPostStatusUpdated,
+  notifyUserEcoPointsAwarded,
+  notifyVolunteersOnActivityCancelled,
+  notifyVolunteersOnActivityRevertedToOpen,
 } from "../../../../utils/notificationHelpers";
 
 const STATUS_DETAILS = {
@@ -124,45 +131,101 @@ export default function PostDetail({
   const router = useRouter();
   const { width } = useWindowDimensions();
   const isMobile = width < 700;
+  const isTablet = width >= 700 && width < 1024;
+  const isDesktop = width >= 1024;
   const isCompactLayout = width < 1100;
   const { postId, commentId } = useLocalSearchParams();
   const effectiveHighlightedCommentId =
     highlightedCommentId ||
     (Array.isArray(commentId) ? commentId[0] : commentId);
 
-  const highlightFadeAnim = useRef(new Animated.Value(1)).current;
+  const [highlightFadeAnim] = useState(() => new Animated.Value(1));
   const [isHighlighted, setIsHighlighted] = useState(
     Boolean(effectiveHighlightedCommentId),
   );
 
   useEffect(() => {
-    if (effectiveHighlightedCommentId) {
-      setIsHighlighted(true);
-      highlightFadeAnim.setValue(1);
-      const timer = setTimeout(() => {
-        Animated.timing(highlightFadeAnim, {
-          toValue: 0,
-          duration: 500,
-          useNativeDriver: false,
-        }).start(() => {
-          setIsHighlighted(false);
-        });
-      }, 2300);
-
-      return () => clearTimeout(timer);
-    } else {
-      setIsHighlighted(false);
-      highlightFadeAnim.setValue(0);
+    if (!effectiveHighlightedCommentId) {
+      return undefined;
     }
-  }, [effectiveHighlightedCommentId]);
+
+    highlightFadeAnim.setValue(1);
+    const timer = setTimeout(() => {
+      Animated.timing(highlightFadeAnim, {
+        toValue: 0,
+        duration: 500,
+        useNativeDriver: false,
+      }).start(() => {
+        setIsHighlighted(false);
+      });
+    }, 2300);
+
+    return () => clearTimeout(timer);
+  }, [effectiveHighlightedCommentId, highlightFadeAnim]);
 
   const [loadedPost, setLoadedPost] = useState(null);
   const [loadingPost, setLoadingPost] = useState(!suppliedPost);
   const [postLoadError, setPostLoadError] = useState("");
   const [existingVolunteerId, setExistingVolunteerId] = useState("");
-  const post = suppliedPost || loadedPost;
+  const [existingVolunteerActivity, setExistingVolunteerActivity] = useState(null);
+  const [showCancelCleanupModal, setShowCancelCleanupModal] = useState(false);
+  const [cancelCleanupReason, setCancelCleanupReason] = useState("");
+  const [cancellingCleanup, setCancellingCleanup] = useState(false);
+  const [localLocationOverrides, setLocalLocationOverrides] = useState({});
+  const post = {
+    ...(suppliedPost || loadedPost),
+    ...localLocationOverrides,
+  };
   const effectiveCurrentTab = currentTab || post?.status;
   const isCleaned = effectiveCurrentTab === "cleaned";
+
+  const [linkedPostsCount, setLinkedPostsCount] = useState(0);
+
+  useEffect(() => {
+    if (!post?.id) return;
+    const q = query(
+      collection(db, "posts"),
+      where("linkedReportId", "==", post.id),
+    );
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        setLinkedPostsCount(snapshot.size);
+      },
+      (err) => console.log("Error loading linked posts count:", err),
+    );
+    return () => unsubscribe();
+  }, [post?.id]);
+
+  const handleSaveLocation = async ({
+    locationName,
+    street,
+    purok,
+    barangay,
+    municipality,
+    coordinates,
+  }) => {
+    if (!post?.id) return;
+    try {
+      const updates = {
+        locationName,
+        street: street || null,
+        purok: normalizePurok(purok) || null,
+        barangay: barangay || null,
+        municipality: municipality || "Pinamungajan",
+      };
+      if (coordinates) {
+        updates.coordinates = coordinates;
+      }
+      await updateDoc(doc(db, "posts", post.id), updates);
+      setLocalLocationOverrides(updates);
+      setLocationModalVisible(false);
+      Alert.alert("Success", "Report location updated successfully.");
+    } catch (err) {
+      console.error("Error updating location:", err);
+      Alert.alert("Error", "Could not update location. Please try again.");
+    }
+  };
 
   const [comments, setComments] = useState([]);
   const [commentSortOrder, setCommentSortOrder] = useState("desc");
@@ -174,6 +237,11 @@ export default function PostDetail({
   const [savingEditComment, setSavingEditComment] = useState(false);
   const [commentToDelete, setCommentToDelete] = useState(null);
   const [deletingComment, setDeletingComment] = useState(false);
+  const [showCommentReasonModal, setShowCommentReasonModal] = useState(false);
+  const [showCommentOtherModal, setShowCommentOtherModal] = useState(false);
+  const [showCommentConfirmModal, setShowCommentConfirmModal] = useState(false);
+  const [selectedCommentReason, setSelectedCommentReason] = useState("");
+  const [customCommentReason, setCustomCommentReason] = useState("");
   const [submittingComment, setSubmittingComment] = useState(false);
   const [residentPoints, setResidentPoints] = useState(
     suppliedPost?.points ?? 0,
@@ -204,6 +272,18 @@ export default function PostDetail({
   );
   const [uploadingCleanupImage, setUploadingCleanupImage] = useState(false);
   const [pendingAssessmentStatus, setPendingAssessmentStatus] = useState(null);
+
+  // QoL: Reschedule cleanup drive
+  const [showRescheduleModal, setShowRescheduleModal] = useState(false);
+  const [rescheduleDate, setRescheduleDate] = useState("");
+  const [rescheduleTime, setRescheduleTime] = useState("");
+  const [rescheduleReason, setRescheduleReason] = useState("");
+  const [reschedulingCleanup, setReschedulingCleanup] = useState(false);
+
+
+  // QoL: Reporter contact details modal
+  const [showReporterModal, setShowReporterModal] = useState(false);
+
   const commentUserIdsKey = JSON.stringify(
     [...new Set(comments.map((comment) => comment.userId).filter(Boolean))].sort(),
   );
@@ -232,11 +312,16 @@ export default function PostDetail({
 
   const deleteReasons = [
     "Inappropriate Content",
-
     "Issue Already Resolved",
-
     "Duplicate Report",
+    "Other Reason",
+  ];
 
+  const commentDeleteReasons = [
+    "Inappropriate or Offensive Language",
+    "Spam or Irrelevant Content",
+    "Harassment or Disrespectful Behavior",
+    "False or Misleading Information",
     "Other Reason",
   ];
 
@@ -344,7 +429,16 @@ export default function PostDetail({
             where("postId", "==", post.id),
           ),
         );
-        setExistingVolunteerId(snapshot.empty ? "" : snapshot.docs[0].id);
+        if (!snapshot.empty) {
+          setExistingVolunteerId(snapshot.docs[0].id);
+          setExistingVolunteerActivity({
+            id: snapshot.docs[0].id,
+            ...snapshot.docs[0].data(),
+          });
+        } else {
+          setExistingVolunteerId("");
+          setExistingVolunteerActivity(null);
+        }
       } catch (error) {
         console.error("Unable to check volunteer activity:", error);
       }
@@ -380,6 +474,21 @@ export default function PostDetail({
         ),
       );
 
+      const linkedReportsSnapshot = await getDocs(
+        query(
+          collection(db, "posts"),
+          where("linkedReportId", "==", post.id),
+        ),
+      );
+
+      const settingsSnapshot = await getDoc(doc(db, "settings", "ecopoints"));
+      const ecoConfig = settingsSnapshot.exists() ? settingsSnapshot.data() : {};
+      const reportCleanedPoints = Number(ecoConfig.reportCleaned) || 5;
+      const linkedReportCleanedPoints = Number(ecoConfig.linkedReportCleaned) || 5;
+      const volunteerCleanupPoints = Number(ecoConfig.volunteerCleanup) || 10;
+
+      const eligibleLinkedUsers = [];
+
       const rewardsApplied = await runTransaction(db, async (transaction) => {
         const postRef = doc(db, "posts", post.id);
         const postSnapshot = await transaction.get(postRef);
@@ -396,8 +505,34 @@ export default function PostDetail({
 
         const rewardsByUserId = new Map();
         const volunteerIds = new Set();
-        const ownerId = postSnapshot.data().userId;
-        if (ownerId) rewardsByUserId.set(ownerId, 5);
+        const postData = postSnapshot.data();
+        const ownerId = postData.userId;
+        const isPointEligible = postData.isPointEligible !== false; // Duplicate check: if duplicate from same user, no points!
+
+        // Award configured points to the main report owner ONLY if point-eligible (not duplicate)
+        if (ownerId && isPointEligible && !postData.isDuplicate) {
+          rewardsByUserId.set(ownerId, reportCleanedPoints);
+        }
+
+        // Award configured linkedReportCleaned points to each unique linked reporter who reported in the same vicinity and is eligible (NOT duplicate)
+        const linkedDocuments = [];
+        for (const linkedDoc of linkedReportsSnapshot.docs) {
+          const lSnap = await transaction.get(linkedDoc.ref);
+          if (lSnap.exists() && lSnap.data().status !== "cleaned") {
+            linkedDocuments.push(lSnap);
+            const lData = lSnap.data();
+            if (lData.userId && lData.isPointEligible !== false && !lData.isDuplicate) {
+              if (!rewardsByUserId.has(lData.userId)) {
+                rewardsByUserId.set(lData.userId, linkedReportCleanedPoints);
+                eligibleLinkedUsers.push({
+                  userId: lData.userId,
+                  title: lData.title || lData.locationName || post.title || post.locationName,
+                  postId: linkedDoc.id,
+                });
+              }
+            }
+          }
+        }
 
         volunteerDocuments.forEach((volunteerDocument) => {
           const volunteers = Array.isArray(volunteerDocument.data().volunteers)
@@ -418,7 +553,7 @@ export default function PostDetail({
         volunteerIds.forEach((volunteerId) => {
           rewardsByUserId.set(
             volunteerId,
-            (rewardsByUserId.get(volunteerId) || 0) + 10,
+            (rewardsByUserId.get(volunteerId) || 0) + volunteerCleanupPoints,
           );
         });
 
@@ -441,6 +576,15 @@ export default function PostDetail({
           cleanedByName: adminName,
           cleanedAt: serverTimestamp(),
         });
+        linkedDocuments.forEach((linkedDoc) => {
+          transaction.update(linkedDoc.ref, {
+            status: "cleaned",
+            ...cleanupFields,
+            cleanedBy: auth.currentUser?.uid || null,
+            cleanedByName: adminName,
+            cleanedAt: serverTimestamp(),
+          });
+        });
         volunteerDocuments.forEach((volunteerDocument) => {
           transaction.update(volunteerDocument.ref, { status: "cleaned" });
         });
@@ -451,7 +595,7 @@ export default function PostDetail({
           transaction.set(doc(collection(db, "point_transactions")), {
             userId: userRef.id,
             amount: reward,
-            source: "cleanup_reward",
+            source: userRef.id === ownerId ? "cleanup_reward" : "linked_cleanup_reward",
             postId: post.id,
             createdAt: serverTimestamp(),
           });
@@ -465,6 +609,26 @@ export default function PostDetail({
         closePostDetail();
         return;
       }
+
+      if (post?.userId && post.isPointEligible !== false && !post.isDuplicate) {
+        notifyUserEcoPointsAwarded({
+          userId: post.userId,
+          amount: reportCleanedPoints,
+          source: "cleanup_reward",
+          title: post.title || post.locationName,
+          postId: post.id,
+        });
+      }
+
+      eligibleLinkedUsers.forEach((u) => {
+        notifyUserEcoPointsAwarded({
+          userId: u.userId,
+          amount: linkedReportCleanedPoints,
+          source: "linked_cleanup_reward",
+          title: u.title,
+          postId: u.postId,
+        });
+      });
 
       Alert.alert("Post marked as cleaned.");
 
@@ -547,6 +711,203 @@ export default function PostDetail({
     }
   };
 
+  const handleRevertCleanupToModerate = async () => {
+    if (!post?.id || cancellingCleanup) return;
+    setCancellingCleanup(true);
+    try {
+      await updateDoc(doc(db, "posts", post.id), {
+        status: "moderate",
+        assessmentUpdatedAt: serverTimestamp(),
+      });
+      await notifyPostStatusUpdated({
+        postId: post.id,
+        newStatus: "moderate",
+      });
+
+      if (existingVolunteerId) {
+        await updateDoc(doc(db, "volunteer_posts", existingVolunteerId), {
+          status: "open",
+          cancellationReason: null,
+        });
+
+        if (existingVolunteerActivity) {
+          await notifyVolunteersOnActivityRevertedToOpen({
+            activityId: existingVolunteerId,
+            title: existingVolunteerActivity.title,
+            reason: cancelCleanupReason?.trim() || "",
+            volunteers: existingVolunteerActivity.volunteers,
+            ownerId:
+              existingVolunteerActivity.userId ||
+              existingVolunteerActivity.ownerId,
+            imageUrl: existingVolunteerActivity.imageUrl,
+          });
+        }
+      }
+
+      setLoadedPost((prev) => (prev ? { ...prev, status: "moderate" } : null));
+      setExistingVolunteerActivity((prev) =>
+        prev ? { ...prev, status: "open", cancellationReason: null } : null,
+      );
+      setShowCancelCleanupModal(false);
+      setCancelCleanupReason("");
+      Alert.alert(
+        "Operation Reverted",
+        "The report status is back to Moderate and volunteer registration is open.",
+      );
+    } catch (error) {
+      console.error("Unable to revert operation:", error);
+      Alert.alert("Failed to revert operation. Please try again.");
+    } finally {
+      setCancellingCleanup(false);
+    }
+  };
+
+  const handleCancelCleanupPermanently = async () => {
+    if (!post?.id || cancellingCleanup) return;
+    setCancellingCleanup(true);
+    try {
+      const reason =
+        hideBadWords(cancelCleanupReason.trim()) ||
+        "Cancelled by LGU administrator";
+
+      await updateDoc(doc(db, "posts", post.id), {
+        status: "moderate",
+        assessmentUpdatedAt: serverTimestamp(),
+      });
+      await notifyPostStatusUpdated({
+        postId: post.id,
+        newStatus: "moderate",
+      });
+
+      if (existingVolunteerId) {
+        await updateDoc(doc(db, "volunteer_posts", existingVolunteerId), {
+          status: "cancelled",
+          cancellationReason: reason,
+          cancelledAt: serverTimestamp(),
+        });
+
+        if (existingVolunteerActivity) {
+          await notifyVolunteersOnActivityCancelled({
+            activityId: existingVolunteerId,
+            title: existingVolunteerActivity.title,
+            reason,
+            volunteers: existingVolunteerActivity.volunteers,
+            ownerId:
+              existingVolunteerActivity.userId ||
+              existingVolunteerActivity.ownerId,
+            imageUrl: existingVolunteerActivity.imageUrl,
+          });
+        }
+      }
+
+      setLoadedPost((prev) => (prev ? { ...prev, status: "moderate" } : null));
+      setExistingVolunteerActivity((prev) =>
+        prev
+          ? { ...prev, status: "cancelled", cancellationReason: reason }
+          : null,
+      );
+      setShowCancelCleanupModal(false);
+      setCancelCleanupReason("");
+      Alert.alert(
+        "Operation Cancelled",
+        "The cleanup operation was cancelled and volunteers have been notified.",
+      );
+    } catch (error) {
+      console.error("Unable to cancel operation:", error);
+      Alert.alert("Failed to cancel operation. Please try again.");
+    } finally {
+      setCancellingCleanup(false);
+    }
+  };
+
+  const handleRescheduleCleanup = async () => {
+    if (!existingVolunteerId || !rescheduleDate.trim() || reschedulingCleanup)
+      return;
+    setReschedulingCleanup(true);
+    try {
+      await updateDoc(doc(db, "volunteer_posts", existingVolunteerId), {
+        meetingDate: rescheduleDate.trim(),
+        meetingTime:
+          rescheduleTime.trim() ||
+          existingVolunteerActivity?.meetingTime ||
+          "",
+        rescheduledReason: rescheduleReason.trim() || null,
+        updatedAt: serverTimestamp(),
+      });
+
+      if (existingVolunteerActivity) {
+        await notifyVolunteersOnActivityRevertedToOpen({
+          activityId: existingVolunteerId,
+          title: existingVolunteerActivity.title,
+          reason: `Cleanup operation rescheduled to ${rescheduleDate.trim()} at ${
+            rescheduleTime.trim() ||
+            existingVolunteerActivity?.meetingTime ||
+            "scheduled time"
+          }. ${rescheduleReason.trim() ? `Note: ${rescheduleReason.trim()}` : ""}`,
+          volunteers: existingVolunteerActivity.volunteers,
+          ownerId:
+            existingVolunteerActivity.userId ||
+            existingVolunteerActivity.ownerId,
+          imageUrl: existingVolunteerActivity.imageUrl,
+        });
+      }
+
+      setExistingVolunteerActivity((prev) =>
+        prev
+          ? {
+              ...prev,
+              meetingDate: rescheduleDate.trim(),
+              meetingTime:
+                rescheduleTime.trim() || prev.meetingTime || "",
+            }
+          : null,
+      );
+      setShowRescheduleModal(false);
+      setRescheduleReason("");
+      Alert.alert(
+        "Operation Rescheduled",
+        `Cleanup drive rescheduled to ${rescheduleDate.trim()} and registered volunteers have been notified.`,
+      );
+    } catch (error) {
+      console.error("Unable to reschedule operation:", error);
+      Alert.alert("Error", "Failed to reschedule cleanup drive. Please try again.");
+    } finally {
+      setReschedulingCleanup(false);
+    }
+  };
+
+
+  const handleCopyReporterEmail = () => {
+    const email = residentProfile?.email;
+    if (!email) {
+      Alert.alert("No Email", "Resident has not provided an email address.");
+      return;
+    }
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(email);
+    }
+    Alert.alert("Copied", "Reporter email copied to clipboard.");
+  };
+
+  const reporterPhone =
+    residentProfile?.cellNumber ||
+    residentProfile?.phoneNumber ||
+    residentProfile?.phone ||
+    post?.cellNumber ||
+    post?.phoneNumber ||
+    "";
+
+  const handleCopyReporterPhone = () => {
+    if (!reporterPhone) {
+      Alert.alert("No Phone", "Resident has not provided a phone number.");
+      return;
+    }
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(reporterPhone);
+    }
+    Alert.alert("Copied", "Reporter phone number copied to clipboard.");
+  };
+
   const chooseReason = (reason) => {
     if (reason === "Other Reason") {
       setShowReasonModal(false);
@@ -575,6 +936,29 @@ export default function PostDetail({
     setShowOtherModal(false);
 
     setShowConfirmModal(true);
+  };
+
+  const chooseCommentReason = (reason) => {
+    if (reason === "Other Reason") {
+      setShowCommentReasonModal(false);
+      setShowCommentOtherModal(true);
+      return;
+    }
+
+    setSelectedCommentReason(reason);
+    setShowCommentReasonModal(false);
+    setShowCommentConfirmModal(true);
+  };
+
+  const continueCustomCommentReason = () => {
+    if (customCommentReason.trim() === "") {
+      Alert.alert("Please enter a reason.");
+      return;
+    }
+
+    setSelectedCommentReason(customCommentReason.trim());
+    setShowCommentOtherModal(false);
+    setShowCommentConfirmModal(true);
   };
 
   const submitAdminComment = async () => {
@@ -673,10 +1057,26 @@ export default function PostDetail({
       });
       await batch.commit();
 
+      if (commentToDelete.userId) {
+        await notifyCommentModerated({
+          userId: commentToDelete.userId,
+          postTitle: post.title || post.locationName || "Waste Report",
+          reason: selectedCommentReason,
+          postId: post.id,
+        });
+      }
+
       setComments((current) =>
         current.filter((item) => item.id !== commentToDelete.id),
       );
       setCommentToDelete(null);
+      setShowCommentConfirmModal(false);
+      setSelectedCommentReason("");
+      setCustomCommentReason("");
+      Alert.alert(
+        "Comment Deleted",
+        "The comment was removed and the resident was notified.",
+      );
     } catch (error) {
       console.error("Unable to delete comment:", error);
       Alert.alert("Unable to delete comment", "Please try again.");
@@ -763,7 +1163,11 @@ export default function PostDetail({
         assessmentUpdatedAt: serverTimestamp(),
       });
 
-      if (nextStatus === "critical" || nextStatus === "ongoing") {
+      if (
+        nextStatus === "critical" ||
+        nextStatus === "ongoing" ||
+        nextStatus === "moderate"
+      ) {
         await notifyPostStatusUpdated({
           post,
           newStatus: nextStatus,
@@ -1206,14 +1610,31 @@ export default function PostDetail({
                         )}
                       </View>
                     </View>
-                    <Text
-                      style={[
-                        styles.postedDate,
-                        isMobile && styles.postedDateMobile,
-                      ]}
-                    >
-                      {formatPostedDate(post.createdAt)}
-                    </Text>
+                    <View style={{ alignItems: isMobile ? "flex-start" : "flex-end", gap: 4 }}>
+                      <Text
+                        style={[
+                          styles.postedDate,
+                          isMobile && styles.postedDateMobile,
+                        ]}
+                      >
+                        {formatPostedDate(post.createdAt)}
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.contactReporterButton}
+                        onPress={() => setShowReporterModal(true)}
+                        activeOpacity={0.8}
+                        accessibilityLabel="View reporter contact details"
+                      >
+                        <Ionicons
+                          name="person-circle-outline"
+                          size={13}
+                          color="#276344"
+                        />
+                        <Text style={styles.contactReporterButtonText}>
+                          Reporter Info
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
 
                   <TouchableOpacity
@@ -1227,7 +1648,7 @@ export default function PostDetail({
                       style={styles.locationIcon}
                     />
                     <Text style={styles.locationText} numberOfLines={1}>
-                      {formatLocationWithPurok(post.locationName, post.purok)}
+                      {formatLocationWithPurok(post)}
                     </Text>
                   </TouchableOpacity>
 
@@ -1270,9 +1691,106 @@ export default function PostDetail({
                         </Text>
                       </View>
                     )}
+
+                    {Boolean(post.isDuplicate || post.isPointEligible === false) && (
+                      <View style={[styles.statusTag, styles.duplicateTag]}>
+                        <Ionicons
+                          name="copy-outline"
+                          size={10}
+                          color="#FFFFFF"
+                          style={{ marginRight: 3 }}
+                        />
+                        <Text style={styles.statusTagText}>Duplicate Report</Text>
+                      </View>
+                    )}
+
+                    {Boolean(post.linkedReportId || post.duplicateOf) && (
+                      <TouchableOpacity
+                        style={[styles.statusTag, styles.linkedTag]}
+                        activeOpacity={0.7}
+                        onPress={async () => {
+                          const targetId = post.linkedReportId || post.duplicateOf;
+                          try {
+                            const snap = await getDoc(doc(db, "posts", targetId));
+                            if (snap.exists()) {
+                              setSelectedPost({ id: snap.id, ...snap.data() });
+                            } else {
+                              Alert.alert("Notice", "The primary linked report is no longer available.");
+                            }
+                          } catch (err) {
+                            console.error("Error loading linked report:", err);
+                          }
+                        }}
+                      >
+                        <Ionicons
+                          name="link-outline"
+                          size={10}
+                          color="#FFFFFF"
+                          style={{ marginRight: 3 }}
+                        />
+                        <Text style={styles.statusTagText}>Linked Report</Text>
+                      </TouchableOpacity>
+                    )}
+
+                    {linkedPostsCount > 0 && (
+                      <View style={[styles.statusTag, styles.linkedTag]}>
+                        <Ionicons
+                          name="albums-outline"
+                          size={10}
+                          color="#FFFFFF"
+                          style={{ marginRight: 3 }}
+                        />
+                        <Text style={styles.statusTagText}>
+                          {linkedPostsCount} Linked {linkedPostsCount === 1 ? "Report" : "Reports"}
+                        </Text>
+                      </View>
+                    )}
                   </View>
                 </View>
               </View>
+
+              {/* VICINITY / DUPLICATE NOTICES */}
+              {Boolean(post.linkedReportId || post.duplicateOf) && (
+                <TouchableOpacity
+                  style={styles.linkedNoticeBox}
+                  activeOpacity={0.7}
+                  onPress={async () => {
+                    const targetId = post.linkedReportId || post.duplicateOf;
+                    try {
+                      const snap = await getDoc(doc(db, "posts", targetId));
+                      if (snap.exists()) {
+                        setSelectedPost({ id: snap.id, ...snap.data() });
+                      } else {
+                        Alert.alert("Notice", "The primary linked report is no longer available.");
+                      }
+                    } catch (err) {
+                      console.error("Error opening linked report:", err);
+                    }
+                  }}
+                >
+                  <Ionicons name="link" size={16} color="#1D4ED8" />
+                  <Text style={styles.linkedNoticeText}>
+                    Linked Vicinity Report: Tap to view the primary report for this location.
+                  </Text>
+                  <Ionicons name="chevron-forward" size={15} color="#1D4ED8" />
+                </TouchableOpacity>
+              )}
+
+              {Boolean(post.isDuplicate || post.isPointEligible === false) && (
+                <View
+                  style={[
+                    styles.duplicateNoticeBox,
+                    Boolean(post.linkedReportId || post.duplicateOf) && {
+                      marginTop: 0,
+                    },
+                  ]}
+                >
+                  <Ionicons name="copy-outline" size={16} color="#DC2626" />
+                  <Text style={styles.duplicateNoticeText}>
+                    Duplicate Report: Marked as a duplicate report in the same vicinity (0 EcoPoints awarded).
+                  </Text>
+                </View>
+              )}
 
               {/* DESCRIPTION */}
               {Boolean(post.caption) && (
@@ -1324,6 +1842,104 @@ export default function PostDetail({
         {/* RIGHT - COMMENTS + LOCATION */}
         <View style={[styles.right, isCompactLayout && styles.rightCompact]}>
           {!isCompactLayout && commentsSection}
+
+          {/* ACTIVE VOLUNTEER CLEANUP CARD */}
+          {Boolean(existingVolunteerActivity) && (
+            <View style={styles.volunteerActivityCard}>
+              <TouchableOpacity
+                onPress={openVolunteerActivity}
+                activeOpacity={0.8}
+                style={styles.volunteerActivityCardMain}
+              >
+                <View style={styles.volunteerCardHeader}>
+                  <View style={styles.volunteerBadgeRow}>
+                    <View
+                      style={[
+                        styles.volunteerStatusDot,
+                        existingVolunteerActivity.status === "ongoing"
+                          ? styles.volunteerStatusDotOngoing
+                          : existingVolunteerActivity.status === "cancelled"
+                            ? styles.volunteerStatusDotCancelled
+                            : styles.volunteerStatusDotOpen,
+                      ]}
+                    />
+                    <Text style={styles.volunteerStatusText}>
+                      {existingVolunteerActivity.status === "ongoing"
+                        ? "Operation On-Going"
+                        : existingVolunteerActivity.status === "cancelled"
+                          ? "Drive Cancelled"
+                          : "Volunteer Drive Active"}
+                    </Text>
+                  </View>
+                  <View style={styles.volunteerMemberPill}>
+                    <Ionicons name="people" size={13} color="#276344" />
+                    <Text style={styles.volunteerMemberPillText}>
+                      {(existingVolunteerActivity.volunteers || []).length} /{" "}
+                      {existingVolunteerActivity.maxVolunteers || 0}
+                    </Text>
+                  </View>
+                </View>
+
+                <Text style={styles.volunteerActivityTitle} numberOfLines={1}>
+                  {existingVolunteerActivity.title || "Community Clean-up Drive"}
+                </Text>
+
+                <View style={styles.volunteerCardFooter}>
+                  <Text style={styles.volunteerManageHint}>
+                    Tap to manage volunteers & attendance
+                  </Text>
+                  <Ionicons name="chevron-forward" size={16} color="#276344" />
+                </View>
+              </TouchableOpacity>
+
+              {effectiveCurrentTab === "ongoing" && (
+                <View style={{ borderTopWidth: 1, borderTopColor: "#A7F3D0" }}>
+                  <TouchableOpacity
+                    style={styles.rescheduleCleanupActionRow}
+                    onPress={() => {
+                      const d = existingVolunteerActivity?.meetingDate;
+                      setRescheduleDate(
+                        d
+                          ? typeof d?.toDate === "function"
+                            ? d.toDate().toISOString().split("T")[0]
+                            : String(d)
+                          : "",
+                      );
+                      setRescheduleTime(
+                        existingVolunteerActivity?.meetingTime || "",
+                      );
+                      setShowRescheduleModal(true);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons
+                      name="calendar-outline"
+                      size={14}
+                      color="#276344"
+                    />
+                    <Text style={styles.rescheduleCleanupActionText}>
+                      Reschedule Cleanup Drive
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.cancelCleanupActionRow}
+                    onPress={() => setShowCancelCleanupModal(true)}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons
+                      name="close-circle-outline"
+                      size={14}
+                      color="#DC2626"
+                    />
+                    <Text style={styles.cancelCleanupActionText}>
+                      Cancel / Revert Cleanup Operation
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          )}
+
 
           {!isCleaned && (
             <TouchableOpacity
@@ -1552,23 +2168,29 @@ export default function PostDetail({
             onPress={(event) => event.stopPropagation?.()}
           >
             <Text style={styles.modalTitle}>Comment Options</Text>
+            {selectedCommentForMenu?.userId === auth.currentUser?.uid && (
+              <TouchableOpacity
+                style={styles.commentOptionButton}
+                onPress={() => {
+                  const selectedComment = selectedCommentForMenu;
+                  setSelectedCommentForMenu(null);
+                  setEditingComment(selectedComment);
+                  setEditCommentText(selectedComment?.comment || "");
+                }}
+              >
+                <Ionicons name="pencil-outline" size={18} color="#397A51" />
+                <Text style={styles.commentOptionText}>Edit Comment</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={styles.commentOptionButton}
               onPress={() => {
-                const selectedComment = selectedCommentForMenu;
+                const comment = selectedCommentForMenu;
                 setSelectedCommentForMenu(null);
-                setEditingComment(selectedComment);
-                setEditCommentText(selectedComment?.comment || "");
-              }}
-            >
-              <Ionicons name="pencil-outline" size={18} color="#397A51" />
-              <Text style={styles.commentOptionText}>Edit Comment</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.commentOptionButton}
-              onPress={() => {
-                setCommentToDelete(selectedCommentForMenu);
-                setSelectedCommentForMenu(null);
+                setCommentToDelete(comment);
+                setSelectedCommentReason("");
+                setCustomCommentReason("");
+                setShowCommentReasonModal(true);
               }}
             >
               <Ionicons name="trash-outline" size={18} color="#B42318" />
@@ -1642,14 +2264,84 @@ export default function PostDetail({
         </KeyboardAvoidingView>
       </Modal>
 
-      <Modal
-        visible={Boolean(commentToDelete)}
-        transparent
-        animationType="fade"
-        onRequestClose={() => {
-          if (!deletingComment) setCommentToDelete(null);
-        }}
-      >
+      {/* Delete Comment — Select Reason Modal */}
+      <Modal visible={showCommentReasonModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modal}>
+            <Text style={styles.modalEyebrow}>LGU ADMIN</Text>
+            <Text style={styles.modalTitle}>Delete comment</Text>
+            <Text style={styles.modalSubtitle}>
+              Choose a reason so the resident understands why this comment was
+              removed.
+            </Text>
+
+            {commentDeleteReasons.map((reason) => (
+              <TouchableOpacity
+                key={reason}
+                style={styles.reasonButton}
+                onPress={() => chooseCommentReason(reason)}
+              >
+                <Text style={styles.reasonButtonText}>{reason}</Text>
+                <Ionicons name="chevron-forward" size={18} color="#94A3B8" />
+              </TouchableOpacity>
+            ))}
+
+            <TouchableOpacity
+              style={styles.modalCancelButton}
+              onPress={() => {
+                setShowCommentReasonModal(false);
+                setCommentToDelete(null);
+              }}
+            >
+              <Text style={styles.modalCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Delete Comment — Custom Reason Modal */}
+      <Modal visible={showCommentOtherModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modal}>
+            <View style={styles.modalHeader}>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowCommentOtherModal(false);
+                  setShowCommentReasonModal(true);
+                }}
+              >
+                <Image
+                  source={require("../../../../assets/images/backG.png")}
+                  style={styles.modalBackIcon}
+                />
+              </TouchableOpacity>
+
+              <View>
+                <Text style={styles.modalEyebrow}>DELETE COMMENT</Text>
+                <Text style={styles.modalTitle}>Other reason</Text>
+              </View>
+            </View>
+
+            <TextInput
+              placeholder="Write reason for comment removal..."
+              multiline
+              value={customCommentReason}
+              onChangeText={setCustomCommentReason}
+              style={styles.reasonInput}
+            />
+
+            <TouchableOpacity
+              style={styles.confirmButton}
+              onPress={continueCustomCommentReason}
+            >
+              <Text style={styles.confirmButtonText}>Continue</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Delete Comment — Confirm Modal */}
+      <Modal visible={showCommentConfirmModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modal}>
             <View style={styles.deleteIconCircle}>
@@ -1657,28 +2349,43 @@ export default function PostDetail({
             </View>
             <Text style={styles.modalTitle}>Delete this comment?</Text>
             <Text style={styles.modalSubtitle}>
-              This action cannot be undone.
+              This action cannot be undone. The resident will be notified with
+              the reason: &quot;{selectedCommentReason}&quot;.
             </Text>
+
             <View style={styles.modalActions}>
               <TouchableOpacity
                 style={styles.cancelButton}
                 disabled={deletingComment}
-                onPress={() => setCommentToDelete(null)}
+                onPress={() => {
+                  setShowCommentConfirmModal(false);
+                  setCommentToDelete(null);
+                }}
               >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
+                <Text style={styles.cancelButtonText}>Keep comment</Text>
               </TouchableOpacity>
+
               <TouchableOpacity
+                disabled={deletingComment}
                 style={[
                   styles.confirmButton,
                   deletingComment && styles.disabledButton,
                 ]}
-                disabled={deletingComment}
                 onPress={handleDeleteComment}
               >
                 {deletingComment ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                    <Text style={styles.confirmButtonText}>Deleting...</Text>
+                  </View>
                 ) : (
-                  <Text style={styles.confirmButtonText}>Delete</Text>
+                  <Text style={styles.confirmButtonText}>Yes, Delete</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -1693,83 +2400,325 @@ export default function PostDetail({
         onRequestClose={() => setShowCleanupModal(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modal}>
-            <View style={styles.modalHeader}>
-              <View>
+          <View
+            style={[
+              styles.modal,
+              styles.cleanupModal,
+              isTablet && styles.cleanupModalTablet,
+              isDesktop && styles.cleanupModalDesktop,
+            ]}
+          >
+            <View style={styles.cleanupModalHeader}>
+              <View style={{ flex: 1, paddingRight: 12 }}>
                 <Text style={styles.modalEyebrow}>CLEANUP RESULT</Text>
-                <Text style={styles.modalTitle}>Before and After images</Text>
+                <Text
+                  style={[
+                    styles.modalTitle,
+                    !isMobile && styles.modalTitleLarge,
+                  ]}
+                >
+                  Before and After images
+                </Text>
               </View>
               <TouchableOpacity
                 onPress={() => setShowCleanupModal(false)}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                style={styles.cleanupModalCloseButton}
               >
-                <Ionicons name="close" size={24} color="#555" />
+                <Ionicons name="close" size={22} color="#64748B" />
               </TouchableOpacity>
             </View>
-            <Text style={styles.modalSubtitle}>
+
+            <Text
+              style={[
+                styles.modalSubtitle,
+                !isMobile && styles.modalSubtitleLarge,
+              ]}
+            >
               The report photo is used as Before. Add an optional After image
               before marking the report as clean.
             </Text>
-            <View style={styles.cleanupPreviewRow}>
+
+            <View
+              style={[
+                styles.cleanupPreviewRow,
+                !isMobile &&
+                  (isDesktop
+                    ? styles.cleanupPreviewRowDesktop
+                    : styles.cleanupPreviewRowTablet),
+              ]}
+            >
+              {/* BEFORE COLUMN */}
               <View style={styles.cleanupPreviewColumn}>
-                <Text style={styles.cleanupPreviewLabel}>Before</Text>
-                <Image
-                  source={{ uri: post.imageUrl }}
-                  style={styles.cleanupPreviewImage}
-                  resizeMode="cover"
-                />
-              </View>
-              <View style={styles.cleanupPreviewColumn}>
-                <Text style={styles.cleanupPreviewLabel}>After</Text>
-                {cleanupImageUrl ? (
+                <View style={styles.cleanupCardHeader}>
+                  <View style={styles.cleanupBadgeBefore}>
+                    <Text style={styles.cleanupBadgeTextBefore}>BEFORE</Text>
+                  </View>
+                  <Text style={styles.cleanupSublabel}>Report photo</Text>
+                </View>
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  onPress={() => setFullImageUrl(post.imageUrl)}
+                  style={[
+                    styles.cleanupImageWrapper,
+                    !isMobile &&
+                      (isDesktop
+                        ? styles.cleanupImageWrapperDesktop
+                        : styles.cleanupImageWrapperTablet),
+                  ]}
+                >
                   <Image
-                    source={{ uri: cleanupImageUrl }}
+                    source={{ uri: post.imageUrl }}
                     style={styles.cleanupPreviewImage}
                     resizeMode="cover"
                   />
+                  <View style={styles.cleanupZoomOverlay}>
+                    <Ionicons name="expand-outline" size={13} color="#FFFFFF" />
+                    <Text style={styles.cleanupZoomText}>View</Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
+
+              {/* AFTER COLUMN */}
+              <View style={styles.cleanupPreviewColumn}>
+                <View style={styles.cleanupCardHeader}>
+                  <View
+                    style={[
+                      styles.cleanupBadgeAfter,
+                      cleanupImageUrl && styles.cleanupBadgeAfterActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.cleanupBadgeTextAfter,
+                        cleanupImageUrl && styles.cleanupBadgeTextAfterActive,
+                      ]}
+                    >
+                      AFTER
+                    </Text>
+                  </View>
+                  <Text style={styles.cleanupSublabel}>
+                    {cleanupImageUrl ? "Cleaned photo" : "Optional"}
+                  </Text>
+                </View>
+                {cleanupImageUrl ? (
+                  <TouchableOpacity
+                    activeOpacity={0.9}
+                    onPress={() => setFullImageUrl(cleanupImageUrl)}
+                    style={[
+                      styles.cleanupImageWrapper,
+                      !isMobile &&
+                        (isDesktop
+                          ? styles.cleanupImageWrapperDesktop
+                          : styles.cleanupImageWrapperTablet),
+                    ]}
+                  >
+                    <Image
+                      source={{ uri: cleanupImageUrl }}
+                      style={styles.cleanupPreviewImage}
+                      resizeMode="cover"
+                    />
+                    <View style={styles.cleanupZoomOverlay}>
+                      <Ionicons
+                        name="expand-outline"
+                        size={13}
+                        color="#FFFFFF"
+                      />
+                      <Text style={styles.cleanupZoomText}>View</Text>
+                    </View>
+                  </TouchableOpacity>
                 ) : (
                   <TouchableOpacity
-                    style={styles.cleanupImagePlaceholder}
+                    style={[
+                      styles.cleanupImagePlaceholder,
+                      !isMobile &&
+                        (isDesktop
+                          ? styles.cleanupImagePlaceholderDesktop
+                          : styles.cleanupImagePlaceholderTablet),
+                    ]}
                     onPress={uploadCleanupImage}
                     disabled={uploadingCleanupImage}
+                    activeOpacity={0.8}
                   >
                     {uploadingCleanupImage ? (
-                      <ActivityIndicator color="#397A51" />
-                    ) : (
-                      <>
-                        <Ionicons
-                          name="cloud-upload-outline"
-                          size={24}
+                      <View style={styles.cleanupLoadingContainer}>
+                        <ActivityIndicator
+                          size={isMobile ? "small" : "large"}
                           color="#397A51"
                         />
                         <Text style={styles.cleanupPlaceholderText}>
+                          Uploading...
+                        </Text>
+                      </View>
+                    ) : (
+                      <View style={styles.cleanupPlaceholderContent}>
+                        <View
+                          style={[
+                            styles.cleanupUploadIconCircle,
+                            !isMobile && styles.cleanupUploadIconCircleLarge,
+                          ]}
+                        >
+                          <Ionicons
+                            name="cloud-upload-outline"
+                            size={isMobile ? 24 : 32}
+                            color="#397A51"
+                          />
+                        </View>
+                        <Text
+                          style={[
+                            styles.cleanupPlaceholderText,
+                            !isMobile && styles.cleanupPlaceholderTextLarge,
+                          ]}
+                        >
                           Add image
                         </Text>
-                      </>
+                        {!isMobile && (
+                          <Text style={styles.cleanupPlaceholderHint}>
+                            Tap to upload cleaned area photo
+                          </Text>
+                        )}
+                      </View>
                     )}
                   </TouchableOpacity>
                 )}
               </View>
             </View>
+
             {Boolean(cleanupImageUrl) && (
-              <TouchableOpacity
-                style={styles.replaceCleanupButton}
-                onPress={uploadCleanupImage}
-                disabled={uploadingCleanupImage}
-              >
-                <Text style={styles.replaceCleanupText}>
-                  {uploadingCleanupImage
-                    ? "Uploading..."
-                    : "Replace After image"}
-                </Text>
-              </TouchableOpacity>
+              <View style={styles.cleanupActionsRow}>
+                <TouchableOpacity
+                  style={styles.replaceCleanupButton}
+                  onPress={uploadCleanupImage}
+                  disabled={uploadingCleanupImage}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons
+                    name="camera-reverse-outline"
+                    size={16}
+                    color="#397A51"
+                  />
+                  <Text style={styles.replaceCleanupText}>
+                    {uploadingCleanupImage
+                      ? "Uploading..."
+                      : "Replace After image"}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.removeCleanupButton}
+                  onPress={() => setCleanupImageUrl(null)}
+                  disabled={uploadingCleanupImage}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="trash-outline" size={16} color="#DC2626" />
+                  <Text style={styles.removeCleanupText}>Remove</Text>
+                </TouchableOpacity>
+              </View>
             )}
-            <TouchableOpacity
-              style={styles.modalCancelButton}
-              onPress={() => setShowCleanupModal(false)}
+
+            <View style={styles.cleanupFooterRow}>
+              <TouchableOpacity
+                style={styles.cleanupDoneButton}
+                onPress={() => setShowCleanupModal(false)}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.cleanupDoneButtonText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* CANCEL / REVERT CLEANUP OPERATION MODAL */}
+      <Modal
+        visible={showCancelCleanupModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!cancellingCleanup) setShowCancelCleanupModal(false);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modal}>
+            <View
+              style={[
+                styles.deleteIconCircle,
+                { alignSelf: "center", marginBottom: 12 },
+              ]}
             >
-              <Text style={styles.modalCancelText}>Done</Text>
-            </TouchableOpacity>
+              <Ionicons name="alert-circle-outline" size={26} color="#B42318" />
+            </View>
+            <Text
+              style={[
+                styles.modalTitle,
+                { textAlign: "center", marginBottom: 6 },
+              ]}
+            >
+              Cancel or Revert Cleanup?
+            </Text>
+            <Text
+              style={[
+                styles.modalSubtitle,
+                { textAlign: "center", marginBottom: 16 },
+              ]}
+            >
+              You can revert the report back to Moderate (re-opening registration) or cancel the cleanup drive permanently.
+            </Text>
+            <TextInput
+              style={styles.editCommentInput}
+              placeholder="Reason for cancellation (e.g., Hazardous weather, Postponed)..."
+              placeholderTextColor="#8FA396"
+              value={cancelCleanupReason}
+              onChangeText={setCancelCleanupReason}
+              multiline
+              numberOfLines={3}
+            />
+            <View style={{ gap: 8 }}>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                <TouchableOpacity
+                  style={[styles.cancelButton, { flex: 1 }]}
+                  onPress={() => setShowCancelCleanupModal(false)}
+                  disabled={cancellingCleanup}
+                >
+                  <Text style={styles.cancelButtonText}>Keep Running</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.cancelButton,
+                    {
+                      flex: 1,
+                      backgroundColor: "#E8F5EC",
+                      borderColor: "#A7F3D0",
+                      borderWidth: 1,
+                    },
+                    cancellingCleanup && styles.disabledButton,
+                  ]}
+                  onPress={handleRevertCleanupToModerate}
+                  disabled={cancellingCleanup}
+                >
+                  <Text style={[styles.cancelButtonText, { color: "#276344" }]}>
+                    Revert to Open
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              <TouchableOpacity
+                style={[
+                  styles.confirmButton,
+                  { backgroundColor: "#B42318", minHeight: 44 },
+                  cancellingCleanup && styles.disabledButton,
+                ]}
+                onPress={handleCancelCleanupPermanently}
+                disabled={cancellingCleanup}
+              >
+                {cancellingCleanup ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.confirmButtonText}>
+                    Cancel Drive Permanently
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -1872,11 +2821,203 @@ export default function PostDetail({
         </View>
       </Modal>
 
+      {/* RESCHEDULE CLEANUP MODAL */}
+      <Modal
+        visible={showRescheduleModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!reschedulingCleanup) setShowRescheduleModal(false);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modal}>
+            <View
+              style={[
+                styles.deleteIconCircle,
+                { alignSelf: "center", marginBottom: 12, backgroundColor: "#EAF4ED" },
+              ]}
+            >
+              <Ionicons name="calendar-outline" size={26} color="#276344" />
+            </View>
+            <Text
+              style={[
+                styles.modalTitle,
+                { textAlign: "center", marginBottom: 6 },
+              ]}
+            >
+              Reschedule Cleanup Drive
+            </Text>
+            <Text
+              style={[
+                styles.modalSubtitle,
+                { textAlign: "center", marginBottom: 16 },
+              ]}
+            >
+              Update the date and time. Enrolled volunteers will automatically receive an update notification.
+            </Text>
+
+            <Text style={styles.rescheduleInputLabel}>Meeting Date</Text>
+            <TextInput
+              style={styles.rescheduleInput}
+              placeholder="e.g. 2026-10-25"
+              placeholderTextColor="#8FA396"
+              value={rescheduleDate}
+              onChangeText={setRescheduleDate}
+            />
+
+            <Text style={styles.rescheduleInputLabel}>Meeting Time</Text>
+            <TextInput
+              style={styles.rescheduleInput}
+              placeholder="e.g. 07:00 AM - 10:00 AM"
+              placeholderTextColor="#8FA396"
+              value={rescheduleTime}
+              onChangeText={setRescheduleTime}
+            />
+
+            <Text style={styles.rescheduleInputLabel}>Reason / Advisory for Volunteers</Text>
+            <TextInput
+              style={[styles.rescheduleInput, { height: 65, textAlignVertical: "top" }]}
+              placeholder="e.g. Rescheduled due to inclement weather advisory..."
+              placeholderTextColor="#8FA396"
+              value={rescheduleReason}
+              onChangeText={setRescheduleReason}
+              multiline
+            />
+
+            <View style={[styles.modalActions, { marginTop: 14 }]}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => setShowRescheduleModal(false)}
+                disabled={reschedulingCleanup}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.confirmButton,
+                  { minHeight: 44 },
+                  reschedulingCleanup && styles.disabledButton,
+                ]}
+                onPress={handleRescheduleCleanup}
+                disabled={reschedulingCleanup}
+              >
+                {reschedulingCleanup ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.confirmButtonText}>
+                    Confirm & Notify
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* REPORTER CONTACT DETAILS MODAL */}
+      <Modal
+        visible={showReporterModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowReporterModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modal}>
+            <View style={styles.modalHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.modalEyebrow}>REPORTER DETAILS</Text>
+                <Text style={styles.modalTitle}>Contact Reporter</Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowReporterModal(false)}>
+                <Ionicons name="close" size={24} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.reporterInfoCard}>
+              <Text style={styles.reporterInfoLabel}>Full Name</Text>
+              <Text style={styles.reporterInfoValue}>
+                {[residentProfile?.firstName ?? post.firstName, residentProfile?.lastName ?? post.lastName]
+                  .filter(Boolean)
+                  .join(" ") || "Resident"}
+              </Text>
+            </View>
+
+            <View style={styles.reporterInfoCard}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                <Text style={styles.reporterInfoLabel}>Email Address</Text>
+                {Boolean(residentProfile?.email) && (
+                  <TouchableOpacity onPress={handleCopyReporterEmail}>
+                    <Text style={styles.reporterCopyLink}>Copy</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              <Text style={styles.reporterInfoValue}>
+                {residentProfile?.email || "No email on file"}
+              </Text>
+            </View>
+
+            <View style={styles.reporterInfoCard}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                <Text style={styles.reporterInfoLabel}>Phone Number</Text>
+                {Boolean(reporterPhone) && (
+                  <TouchableOpacity onPress={handleCopyReporterPhone}>
+                    <Text style={styles.reporterCopyLink}>Copy</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              <Text style={styles.reporterInfoValue} selectable>
+                {reporterPhone || "No phone number on file"}
+              </Text>
+            </View>
+
+            <View style={styles.reporterInfoCard}>
+              <Text style={styles.reporterInfoLabel}>Community Reputation</Text>
+              <Text style={styles.reporterInfoValue}>
+                {residentPoints} EcoPoints · {residentBadges.length} Badges
+              </Text>
+            </View>
+
+            <View style={{ gap: 8, marginTop: 14 }}>
+              {Boolean(post.userId) && (
+                <TouchableOpacity
+                  style={[styles.confirmButton, { minHeight: 44 }]}
+                  onPress={() => {
+                    setShowReporterModal(false);
+                    router.push({
+                      pathname: "/admin/assessments/post_view/UserPostDetail",
+                      params: { userId: post.userId },
+                    });
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.confirmButtonText}>View Resident Profile</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setShowReporterModal(false)}
+              >
+                <Text style={styles.modalCancelText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* POST LOCATION MINI MAP MODAL */}
       <PostLocationModal
+        key={
+          locationModalVisible
+            ? `post-detail-loc-${post?.id}-open`
+            : "post-detail-loc-closed"
+        }
         post={post}
+        initialLocation={post?.locationName}
+        initialCoords={post?.coordinates}
         visible={locationModalVisible}
         onClose={() => setLocationModalVisible(false)}
+        onSelectLocation={handleSaveLocation}
       />
     </View>
   );
@@ -2377,6 +3518,56 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "800",
   },
+  duplicateTag: {
+    backgroundColor: "#DC2626",
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  linkedTag: {
+    backgroundColor: "#2563EB",
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  linkedNoticeBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    marginTop: 12,
+    marginBottom: 10,
+    gap: 8,
+  },
+  linkedNoticeText: {
+    flex: 1,
+    fontSize: 12,
+    color: "#1E40AF",
+    fontWeight: "600",
+    lineHeight: 16,
+  },
+  duplicateNoticeBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    marginTop: 12,
+    marginBottom: 10,
+    gap: 8,
+  },
+  duplicateNoticeText: {
+    flex: 1,
+    fontSize: 12,
+    color: "#B91C1C",
+    fontWeight: "600",
+    lineHeight: 16,
+  },
   description: {
     lineHeight: 19,
   },
@@ -2689,51 +3880,247 @@ const styles = StyleSheet.create({
     fontSize: 11,
     marginTop: 3,
   },
+  cleanupModal: {
+    width: "100%",
+    maxWidth: 440,
+  },
+  cleanupModalTablet: {
+    maxWidth: 680,
+    padding: 28,
+    borderRadius: 20,
+  },
+  cleanupModalDesktop: {
+    maxWidth: 820,
+    padding: 32,
+    borderRadius: 22,
+  },
+  cleanupModalHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  cleanupModalCloseButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#F1F5F9",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalTitleLarge: {
+    fontSize: 24,
+    marginBottom: 4,
+  },
+  modalSubtitleLarge: {
+    fontSize: 14,
+    lineHeight: 21,
+    marginBottom: 18,
+  },
   cleanupPreviewRow: {
     flexDirection: "row",
     gap: 10,
+    marginBottom: 10,
+  },
+  cleanupPreviewRowTablet: {
+    gap: 18,
+    marginBottom: 16,
+  },
+  cleanupPreviewRowDesktop: {
+    gap: 22,
+    marginBottom: 18,
   },
   cleanupPreviewColumn: {
     flex: 1,
     minWidth: 0,
   },
-  cleanupPreviewLabel: {
-    color: "#68746C",
+  cleanupCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 6,
+  },
+  cleanupBadgeBefore: {
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 5,
+    backgroundColor: "#EEF2F6",
+  },
+  cleanupBadgeTextBefore: {
     fontSize: 10,
     fontWeight: "800",
-    marginBottom: 4,
+    color: "#475569",
+    letterSpacing: 0.5,
+  },
+  cleanupBadgeAfter: {
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 5,
+    backgroundColor: "#F1F5F9",
+  },
+  cleanupBadgeTextAfter: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#64748B",
+    letterSpacing: 0.5,
+  },
+  cleanupBadgeAfterActive: {
+    backgroundColor: "#DCFCE7",
+  },
+  cleanupBadgeTextAfterActive: {
+    color: "#166534",
+  },
+  cleanupSublabel: {
+    fontSize: 11,
+    color: "#94A3B8",
+    fontWeight: "600",
+  },
+  cleanupImageWrapper: {
+    position: "relative",
+    width: "100%",
+    aspectRatio: 4 / 3,
+    borderRadius: 10,
+    overflow: "hidden",
+    backgroundColor: "#EEF4F0",
+  },
+  cleanupImageWrapperTablet: {
+    borderRadius: 14,
+  },
+  cleanupImageWrapperDesktop: {
+    borderRadius: 16,
   },
   cleanupPreviewImage: {
     width: "100%",
-    aspectRatio: 4 / 3,
-    borderRadius: 8,
-    backgroundColor: "#EEF4F0",
+    height: "100%",
+  },
+  cleanupZoomOverlay: {
+    position: "absolute",
+    bottom: 8,
+    right: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: "rgba(15, 23, 42, 0.65)",
+  },
+  cleanupZoomText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "700",
   },
   cleanupImagePlaceholder: {
     width: "100%",
     aspectRatio: 4 / 3,
     alignItems: "center",
     justifyContent: "center",
-    gap: 5,
-    borderRadius: 8,
-    borderWidth: 1,
+    borderRadius: 10,
+    borderWidth: 1.5,
     borderStyle: "dashed",
     borderColor: "#9BC5A7",
     backgroundColor: "#F4FAF6",
   },
+  cleanupImagePlaceholderTablet: {
+    borderRadius: 14,
+  },
+  cleanupImagePlaceholderDesktop: {
+    borderRadius: 16,
+  },
+  cleanupPlaceholderContent: {
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+  },
+  cleanupUploadIconCircle: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: "#E8F5EC",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 2,
+  },
+  cleanupUploadIconCircleLarge: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    marginBottom: 4,
+  },
   cleanupPlaceholderText: {
     color: "#397A51",
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: "700",
   },
+  cleanupPlaceholderTextLarge: {
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  cleanupPlaceholderHint: {
+    fontSize: 11,
+    color: "#68746C",
+    textAlign: "center",
+    marginTop: 2,
+  },
+  cleanupLoadingContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  cleanupActionsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 10,
+    marginBottom: 4,
+    gap: 10,
+  },
   replaceCleanupButton: {
-    alignSelf: "flex-start",
-    marginTop: 9,
-    paddingVertical: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: "#E8F5EC",
   },
   replaceCleanupText: {
     color: "#397A51",
     fontSize: 12,
+    fontWeight: "800",
+  },
+  removeCleanupButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: "#FEE2E2",
+  },
+  removeCleanupText: {
+    color: "#DC2626",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  cleanupFooterRow: {
+    marginTop: 16,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: "#F1F5F9",
+  },
+  cleanupDoneButton: {
+    backgroundColor: "#397A51",
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    width: "100%",
+  },
+  cleanupDoneButtonText: {
+    color: "#FFFFFF",
+    fontSize: 14,
     fontWeight: "800",
   },
   cleanAssessment: {
@@ -2768,5 +4155,172 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
     marginTop: 6,
+  },
+  volunteerActivityCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+    marginBottom: 12,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  volunteerActivityCardMain: {
+    padding: 14,
+  },
+  volunteerCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  volunteerBadgeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  volunteerStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#10B981",
+  },
+  volunteerStatusDotOngoing: {
+    backgroundColor: "#D97706",
+  },
+  volunteerStatusDotCancelled: {
+    backgroundColor: "#DC2626",
+  },
+  volunteerStatusDotOpen: {
+    backgroundColor: "#10B981",
+  },
+  volunteerStatusText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#276344",
+  },
+  volunteerMemberPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    backgroundColor: "#E8F5EC",
+  },
+  volunteerMemberPillText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#276344",
+  },
+  volunteerActivityTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#1E293B",
+    marginBottom: 6,
+  },
+  volunteerCardFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 4,
+  },
+  volunteerManageHint: {
+    fontSize: 11,
+    color: "#64748B",
+    fontWeight: "600",
+  },
+  cancelCleanupActionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    paddingVertical: 9,
+    backgroundColor: "#FEF2F2",
+    borderTopWidth: 1,
+    borderTopColor: "#FECACA",
+  },
+  cancelCleanupActionText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#DC2626",
+  },
+  rescheduleCleanupActionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    paddingVertical: 9,
+    backgroundColor: "#F0FDF4",
+    borderBottomWidth: 1,
+    borderBottomColor: "#DCFCE7",
+  },
+  rescheduleCleanupActionText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#276344",
+  },
+  contactReporterButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#EAF4ED",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+    marginTop: 2,
+  },
+  contactReporterButtonText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#276344",
+  },
+  rescheduleInputLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#334155",
+    marginBottom: 4,
+    marginTop: 6,
+  },
+  rescheduleInput: {
+    backgroundColor: "#F8FAF9",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 13,
+    color: "#1E293B",
+    marginBottom: 6,
+  },
+  reporterInfoCard: {
+    backgroundColor: "#F8FAF9",
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  reporterInfoLabel: {
+    fontSize: 11,
+    color: "#64748B",
+    fontWeight: "600",
+    marginBottom: 2,
+  },
+  reporterInfoValue: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#1E293B",
+  },
+  reporterCopyLink: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#276344",
   },
 });

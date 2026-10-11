@@ -11,6 +11,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Image,
   Modal,
   ScrollView,
@@ -23,9 +24,16 @@ import {
 } from "react-native";
 
 import PostLocationModal from "../../../../components/PostLocationModal";
+import { formatLocationWithPurok } from "../../../../constants/locationFormat";
 import { auth, db } from "../../../../firebaseConfig";
 import { hideBadWords } from "../../../../utils/hideBadWords";
-import { notifyPostStatusUpdated } from "../../../../utils/notificationHelpers";
+import {
+  notifyPostStatusUpdated,
+  notifyUserEcoPointsAwarded,
+  notifyVolunteersOnActivityCancelled,
+  notifyVolunteersOnActivityRevertedToOpen,
+  notifyVolunteersOnActivityStarted,
+} from "../../../../utils/notificationHelpers";
 
 const getMemberId = (member) =>
   typeof member === "string"
@@ -71,7 +79,11 @@ export default function VolunteerPostDetail({
   const [loadError, setLoadError] = useState("");
   const [showMembers, setShowMembers] = useState(false);
   const [showLocationModal, setShowLocationModal] = useState(false);
-  const [selectedMember, setSelectedMember] = useState(null);
+  const [actionMember, setActionMember] = useState(null);
+  const [showRevertModal, setShowRevertModal] = useState(false);
+  const [revertTargetMember, setRevertTargetMember] = useState(null);
+  const [revertReason, setRevertReason] = useState("");
+  const [revertingAttendance, setRevertingAttendance] = useState(false);
   const [removingMemberId, setRemovingMemberId] = useState("");
   const [kickReason, setKickReason] = useState("");
   const [updatingAttendanceId, setUpdatingAttendanceId] = useState("");
@@ -84,6 +96,11 @@ export default function VolunteerPostDetail({
   const [startingCleanup, setStartingCleanup] = useState(false);
   const [deletingActivity, setDeletingActivity] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [showCancelProgressModal, setShowCancelProgressModal] = useState(false);
+  const [cancelProgressReason, setCancelProgressReason] = useState("");
+  const [cancellingProgress, setCancellingProgress] = useState(false);
+  const [wasteSacks, setWasteSacks] = useState("");
+  const [wasteWeightKg, setWasteWeightKg] = useState("");
 
   useEffect(() => {
     if (suppliedPost || !volunteerId) return;
@@ -114,26 +131,29 @@ export default function VolunteerPostDetail({
 
   const members = useMemo(
     () => (Array.isArray(post?.volunteers) ? post.volunteers : []),
-    [post?.volunteers],
+    [post],
   );
   const joinedCount = Number.isFinite(Number(post?.joinedCount))
     ? Number(post.joinedCount)
     : members.length;
   const maxVolunteers = post?.maxVolunteers ?? post?.maxParticipants ?? 0;
   const isStandaloneEvent = !post?.postId;
+  const isOperationActive = post?.status === "ongoing";
   const standaloneOperationStarted =
     isStandaloneEvent && post?.status === "ongoing";
   const standaloneOperationCompleted =
     isStandaloneEvent && ["completed", "cleaned"].includes(post?.status);
   const eventAttendanceAvailable =
-    standaloneOperationStarted || standaloneOperationCompleted;
+    isOperationActive ||
+    standaloneOperationStarted ||
+    standaloneOperationCompleted ||
+    ["completed", "cleaned"].includes(post?.status);
   const attendedVolunteerIds = Array.isArray(post?.attendedVolunteerIds)
     ? post.attendedVolunteerIds
     : [];
   useEffect(() => {
     const memberIds = members.map(getMemberId).filter(Boolean);
     if (!memberIds.length) {
-      setMemberProfiles({});
       return undefined;
     }
 
@@ -276,9 +296,19 @@ export default function VolunteerPostDetail({
     try {
       if (post.postId) {
         await updateDoc(doc(db, "posts", post.postId), { status: "ongoing" });
+        await updateDoc(doc(db, "volunteer_posts", post.id), {
+          status: "ongoing",
+        });
         await notifyPostStatusUpdated({
           postId: post.postId,
           newStatus: "ongoing",
+        });
+        await notifyVolunteersOnActivityStarted({
+          activityId: post.id,
+          title: post.title,
+          volunteers: post.volunteers,
+          ownerId: post.userId || post.ownerId,
+          imageUrl: post.imageUrl,
         });
         router.replace({
           pathname: "/admin/assessments/post_view/PostDetail",
@@ -290,10 +320,17 @@ export default function VolunteerPostDetail({
       await updateDoc(doc(db, "volunteer_posts", post.id), {
         status: "ongoing",
       });
+      await notifyVolunteersOnActivityStarted({
+        activityId: post.id,
+        title: post.title,
+        volunteers: post.volunteers,
+        ownerId: post.userId || post.ownerId,
+        imageUrl: post.imageUrl,
+      });
       setPost((currentPost) => ({ ...currentPost, status: "ongoing" }));
       setKickDialog({
         title: "Event started",
-        message: "This event is now marked as ongoing.",
+        message: "This event is now marked as ongoing and volunteers have been notified.",
       });
     } catch (error) {
       console.error("Unable to start cleanup operation:", error);
@@ -303,6 +340,112 @@ export default function VolunteerPostDetail({
       });
     } finally {
       setStartingCleanup(false);
+    }
+  };
+
+  const cancelInProgressEvent = async () => {
+    if (!post?.id || !isOperationActive || cancellingProgress) return;
+
+    setCancellingProgress(true);
+    try {
+      const reason = hideBadWords(cancelProgressReason.trim());
+
+      await updateDoc(doc(db, "volunteer_posts", post.id), {
+        status: "cancelled",
+        cancellationReason: reason || "Cancelled by LGU administrator",
+        cancelledAt: serverTimestamp(),
+      });
+
+      if (post.postId) {
+        await updateDoc(doc(db, "posts", post.postId), {
+          status: "moderate",
+        });
+        await notifyPostStatusUpdated({
+          postId: post.postId,
+          newStatus: "moderate",
+        });
+      }
+
+      await notifyVolunteersOnActivityCancelled({
+        activityId: post.id,
+        title: post.title,
+        reason: reason || "Event was cancelled by LGU administrator.",
+        volunteers: post.volunteers,
+        ownerId: post.userId || post.ownerId,
+        imageUrl: post.imageUrl,
+      });
+
+      setPost((currentPost) => ({
+        ...currentPost,
+        status: "cancelled",
+        cancellationReason: reason || "Cancelled by LGU administrator",
+      }));
+      setShowCancelProgressModal(false);
+      setCancelProgressReason("");
+      setKickDialog({
+        title: "Event cancelled",
+        message: "The in-progress event was cancelled and registered volunteers have been notified.",
+      });
+    } catch (error) {
+      console.error("Unable to cancel event in progress:", error);
+      setKickDialog({
+        title: "Unable to cancel event",
+        message: error.message || "Please try again.",
+      });
+    } finally {
+      setCancellingProgress(false);
+    }
+  };
+
+  const revertInProgressEventToOpen = async () => {
+    if (!post?.id || !isOperationActive || cancellingProgress) return;
+
+    setCancellingProgress(true);
+    try {
+      await updateDoc(doc(db, "volunteer_posts", post.id), {
+        status: "open",
+        cancellationReason: null,
+      });
+
+      if (post.postId) {
+        await updateDoc(doc(db, "posts", post.postId), {
+          status: "moderate",
+        });
+        await notifyPostStatusUpdated({
+          postId: post.postId,
+          newStatus: "moderate",
+        });
+      }
+
+      await notifyVolunteersOnActivityRevertedToOpen({
+        activityId: post.id,
+        title: post.title,
+        reason: cancelProgressReason?.trim() || "",
+        volunteers: post.volunteers,
+        ownerId: post.userId || post.ownerId,
+        imageUrl: post.imageUrl,
+      });
+
+      setPost((currentPost) => ({
+        ...currentPost,
+        status: "open",
+        cancellationReason: null,
+      }));
+      setShowCancelProgressModal(false);
+      setCancelProgressReason("");
+      setKickDialog({
+        title: "Reverted to Open Registration",
+        message:
+          "The activity status has been reset to Open. Volunteers can continue joining.",
+      });
+    } catch (error) {
+      console.error("Unable to revert event to open:", error);
+      setKickDialog({
+        title: "Unable to revert event",
+        message: error.message || "Please try again.",
+      });
+    } finally {
+      setCancellingProgress(false);
     }
   };
 
@@ -367,15 +510,29 @@ export default function VolunteerPostDetail({
           }),
         );
 
+        const attendedIds =
+          Array.isArray(activity.attendedVolunteerIds) &&
+          activity.attendedVolunteerIds.length > 0
+            ? activity.attendedVolunteerIds
+            : volunteerIds;
+
         transaction.update(activityRef, {
           status: "completed",
           completionSummary: summary,
+          wasteCollected: {
+            sacks: Number(wasteSacks) || 0,
+            weightKg: Number(wasteWeightKg) || 0,
+          },
           completedAt: serverTimestamp(),
           eventRewardPoints: reward,
-          rewardedVolunteerIds: volunteerIds,
+          rewardedVolunteerIds: attendedIds,
         });
 
-        userDocuments.forEach(({ userId, userRef, userSnapshot }) => {
+        const rewardedUserDocs = userDocuments.filter((u) =>
+          attendedIds.includes(u.userId),
+        );
+
+        rewardedUserDocs.forEach(({ userId, userRef, userSnapshot }) => {
           transaction.update(userRef, {
             points: (Number(userSnapshot.data().points) || 0) + reward,
           });
@@ -398,7 +555,8 @@ export default function VolunteerPostDetail({
         return {
           alreadyCompleted: false,
           reward,
-          volunteerCount: userDocuments.length,
+          volunteerCount: rewardedUserDocs.length,
+          rewardedIds: attendedIds,
         };
       });
 
@@ -412,6 +570,21 @@ export default function VolunteerPostDetail({
       }));
       setShowCompletionModal(false);
       setCompletionSummary("");
+
+      if (!result.alreadyCompleted && result.reward) {
+        const volunteerIds = Array.isArray(post.volunteers)
+          ? post.volunteers.map(getMemberId).filter(Boolean)
+          : [];
+        volunteerIds.forEach((vId) => {
+          notifyUserEcoPointsAwarded({
+            userId: vId,
+            amount: result.reward,
+            source: "volunteer_event_reward",
+            title: post.title,
+            volunteerPostId: post.id,
+          });
+        });
+      }
       setKickDialog(
         result.alreadyCompleted
           ? {
@@ -438,13 +611,14 @@ export default function VolunteerPostDetail({
     }
   };
 
-  const toggleVolunteerAttendance = async (memberId) => {
-    if (!post?.id || !isStandaloneEvent || !memberId || updatingAttendanceId)
-      return;
+  const markVolunteerPresent = async (memberId) => {
+    if (!post?.id || !memberId || updatingAttendanceId) return;
 
     setUpdatingAttendanceId(memberId);
     try {
       let updatedAttendeeIds = [];
+      const notificationRef = doc(collection(db, "notifications"));
+
       await runTransaction(db, async (transaction) => {
         const activityRef = doc(db, "volunteer_posts", post.id);
         const activitySnapshot = await transaction.get(activityRef);
@@ -457,30 +631,98 @@ export default function VolunteerPostDetail({
         )
           ? activitySnapshot.data().attendedVolunteerIds
           : [];
-        const nextAttendees = currentAttendees.includes(memberId)
-          ? currentAttendees.filter((id) => id !== memberId)
-          : [...currentAttendees, memberId];
-        updatedAttendeeIds = nextAttendees;
+
+        if (currentAttendees.includes(memberId)) {
+          updatedAttendeeIds = currentAttendees;
+          return;
+        }
+
+        updatedAttendeeIds = [...currentAttendees, memberId];
 
         transaction.update(activityRef, {
-          attendedVolunteerIds: nextAttendees,
+          attendedVolunteerIds: updatedAttendeeIds,
+        });
+
+        transaction.set(notificationRef, {
+          userId: memberId,
+          ...(auth.currentUser?.uid ? { actorId: auth.currentUser.uid } : {}),
+          actorNames: ["GreenTrace Admin"],
+          type: "attendance_marked",
+          title: "Attendance Confirmed",
+          message: `You were marked Present for "${post.title || "volunteer activity"}".`,
+          volunteerPostId: post.id,
+          read: false,
+          createdAt: serverTimestamp(),
         });
       });
 
-      setPost((currentPost) => {
-        return {
-          ...currentPost,
-          attendedVolunteerIds: updatedAttendeeIds,
-        };
-      });
+      setPost((currentPost) => ({
+        ...currentPost,
+        attendedVolunteerIds: updatedAttendeeIds,
+      }));
     } catch (error) {
-      console.error("Unable to update event attendance:", error);
-      setKickDialog({
-        title: "Unable to update attendance",
-        message: "Please try again.",
-      });
+      console.error("Unable to mark volunteer present:", error);
+      Alert.alert("Error", "Could not mark volunteer as present.");
     } finally {
       setUpdatingAttendanceId("");
+    }
+  };
+
+  const confirmRevertAttendance = async () => {
+    const memberId = getMemberId(revertTargetMember);
+    const reason = revertReason.trim();
+    if (!post?.id || !memberId || !reason || revertingAttendance) return;
+
+    setRevertingAttendance(true);
+    try {
+      let updatedAttendeeIds = [];
+      const notificationRef = doc(collection(db, "notifications"));
+
+      await runTransaction(db, async (transaction) => {
+        const activityRef = doc(db, "volunteer_posts", post.id);
+        const activitySnapshot = await transaction.get(activityRef);
+        if (!activitySnapshot.exists()) {
+          throw new Error("This event no longer exists.");
+        }
+
+        const currentAttendees = Array.isArray(
+          activitySnapshot.data().attendedVolunteerIds,
+        )
+          ? activitySnapshot.data().attendedVolunteerIds
+          : [];
+
+        updatedAttendeeIds = currentAttendees.filter((id) => id !== memberId);
+
+        transaction.update(activityRef, {
+          attendedVolunteerIds: updatedAttendeeIds,
+        });
+
+        transaction.set(notificationRef, {
+          userId: memberId,
+          ...(auth.currentUser?.uid ? { actorId: auth.currentUser.uid } : {}),
+          actorNames: ["GreenTrace Admin"],
+          type: "attendance_reverted",
+          title: "Attendance Reverted",
+          message: `Your attendance status for "${post.title || "volunteer activity"}" was reverted. Reason: ${reason}`,
+          volunteerPostId: post.id,
+          read: false,
+          createdAt: serverTimestamp(),
+        });
+      });
+
+      setPost((currentPost) => ({
+        ...currentPost,
+        attendedVolunteerIds: updatedAttendeeIds,
+      }));
+
+      setShowRevertModal(false);
+      setRevertReason("");
+      setRevertTargetMember(null);
+    } catch (error) {
+      console.error("Unable to revert volunteer attendance:", error);
+      Alert.alert("Error", "Could not revert attendance.");
+    } finally {
+      setRevertingAttendance(false);
     }
   };
 
@@ -496,6 +738,7 @@ export default function VolunteerPostDetail({
     }
 
     setShowMembers(false);
+    setActionMember(null);
     router.push({
       pathname: "/admin/assessments/post_view/UserPostDetail",
       params: { userId: memberId },
@@ -514,6 +757,7 @@ export default function VolunteerPostDetail({
       return;
     }
 
+    setActionMember(null);
     setKickDialog({
       title: "Kick volunteer?",
       message: `Remove ${memberName} from this activity? Please provide a reason. They will be notified.`,
@@ -602,7 +846,7 @@ export default function VolunteerPostDetail({
             : [],
         };
       });
-      setSelectedMember(null);
+      setActionMember(null);
     } catch (error) {
       console.error("Unable to kick volunteer:", error);
       setKickDialog({
@@ -958,8 +1202,7 @@ export default function VolunteerPostDetail({
             >
               <Ionicons name="location" size={20} color="#276344" />
               <Text style={styles.locationText}>
-                {post.meetingLocation ||
-                  post.locationName ||
+                {formatLocationWithPurok(post.meetingLocation || post) ||
                   "Location not specified"}
               </Text>
               <Ionicons name="navigate-outline" size={18} color="#276344" />
@@ -970,14 +1213,14 @@ export default function VolunteerPostDetail({
               style={[
                 styles.startCleanupButton,
                 (startingCleanup ||
-                  standaloneOperationStarted ||
+                  isOperationActive ||
                   standaloneOperationCompleted) &&
                   styles.disabledAction,
               ]}
               onPress={startCleanupOperation}
               disabled={
                 startingCleanup ||
-                standaloneOperationStarted ||
+                isOperationActive ||
                 standaloneOperationCompleted
               }
               accessibilityRole="button"
@@ -994,8 +1237,7 @@ export default function VolunteerPostDetail({
                 <>
                   <Ionicons
                     name={
-                      standaloneOperationStarted ||
-                      standaloneOperationCompleted
+                      isOperationActive || standaloneOperationCompleted
                         ? "checkmark-circle-outline"
                         : "play-circle-outline"
                     }
@@ -1005,7 +1247,7 @@ export default function VolunteerPostDetail({
                   <Text style={styles.startCleanupText}>
                     {standaloneOperationCompleted
                       ? "Event completed"
-                      : standaloneOperationStarted
+                      : isOperationActive
                         ? isStandaloneEvent
                           ? "Event in progress"
                           : "Operation in progress"
@@ -1016,24 +1258,70 @@ export default function VolunteerPostDetail({
                 </>
               )}
             </TouchableOpacity>
-            {standaloneOperationStarted && (
-              <TouchableOpacity
-                style={[
-                  styles.completeEventButton,
-                  completingActivity && styles.disabledAction,
-                ]}
-                onPress={() => setShowCompletionModal(true)}
-                disabled={completingActivity}
-                accessibilityRole="button"
-                activeOpacity={0.85}
-              >
-                <Ionicons
-                  name="checkmark-done-outline"
-                  size={20}
-                  color="#276344"
-                />
-                <Text style={styles.completeEventText}>Mark event completed</Text>
-              </TouchableOpacity>
+            {isOperationActive && (
+              <>
+                {isStandaloneEvent ? (
+                  <TouchableOpacity
+                    style={[
+                      styles.completeEventButton,
+                      completingActivity && styles.disabledAction,
+                    ]}
+                    onPress={() => setShowCompletionModal(true)}
+                    disabled={completingActivity || cancellingProgress}
+                    accessibilityRole="button"
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons
+                      name="checkmark-done-outline"
+                      size={20}
+                      color="#276344"
+                    />
+                    <Text style={styles.completeEventText}>Mark event completed</Text>
+                  </TouchableOpacity>
+                ) : post?.postId ? (
+                  <TouchableOpacity
+                    style={styles.completeEventButton}
+                    onPress={() =>
+                      router.replace({
+                        pathname: "/admin/assessments/post_view/PostDetail",
+                        params: { postId: post.postId },
+                      })
+                    }
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons
+                      name="document-text-outline"
+                      size={20}
+                      color="#276344"
+                    />
+                    <Text style={styles.completeEventText}>
+                      Go to Report to Mark as Clean
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+
+                <TouchableOpacity
+                  style={[
+                    styles.cancelProgressButton,
+                    cancellingProgress && styles.disabledAction,
+                  ]}
+                  onPress={() => setShowCancelProgressModal(true)}
+                  disabled={completingActivity || cancellingProgress}
+                  accessibilityRole="button"
+                  activeOpacity={0.85}
+                >
+                  <Ionicons
+                    name="close-circle-outline"
+                    size={20}
+                    color="#B42318"
+                  />
+                  <Text style={styles.cancelProgressText}>
+                    {isStandaloneEvent
+                      ? "Cancel event in progress"
+                      : "Cancel / Revert cleanup operation"}
+                  </Text>
+                </TouchableOpacity>
+              </>
             )}
           </View>
         </View>
@@ -1062,7 +1350,7 @@ export default function VolunteerPostDetail({
               <View>
                 <Text style={styles.modalTitle}>Joined volunteers</Text>
                 <Text style={styles.modalSubtitle}>
-                  {joinedCount} of {maxVolunteers} participants
+                  {joinedCount} of {maxVolunteers} participants · {attendedVolunteerIds.length} present
                 </Text>
               </View>
               <TouchableOpacity
@@ -1091,23 +1379,21 @@ export default function VolunteerPostDetail({
                       : { userId: member }),
                   };
                   const name = getMemberName(displayMember);
-                  const isSelected = selectedMember === memberId;
                   const avatarUrl =
                     displayMember.imageUrl ||
                     displayMember.photoURL ||
                     displayMember.profileImage;
 
                   return (
-                    <View key={memberId} style={styles.memberCard}>
-                      <TouchableOpacity
-                        style={styles.memberRow}
-                        onPress={() =>
-                          setSelectedMember(isSelected ? null : memberId)
-                        }
-                        accessibilityRole="button"
-                        accessibilityLabel={`Show actions for ${name}`}
-                        activeOpacity={0.7}
-                      >
+                    <TouchableOpacity
+                      key={memberId}
+                      style={styles.memberCard}
+                      onPress={() => setActionMember(displayMember)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Manage ${name}`}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.memberRow}>
                         {avatarUrl ? (
                           <Image
                             source={{ uri: avatarUrl }}
@@ -1120,96 +1406,50 @@ export default function VolunteerPostDetail({
                             </Text>
                           </View>
                         )}
-                        <Text style={styles.memberName}>{name}</Text>
-                        <Ionicons
-                          name={isSelected ? "chevron-up" : "chevron-down"}
-                          size={20}
-                          color="#5f6f65"
-                        />
-                      </TouchableOpacity>
-
-                      {isSelected && (
-                        <View style={styles.memberActions}>
-                          <TouchableOpacity
-                            style={styles.viewProfileButton}
-                            onPress={() => viewMemberProfile(displayMember)}
-                            activeOpacity={0.7}
-                          >
-                            <Ionicons
-                              name="person-outline"
-                              size={18}
-                              color="#276344"
-                            />
-                            <Text style={styles.viewProfileText}>
-                              View profile
-                            </Text>
-                          </TouchableOpacity>
-                          {eventAttendanceAvailable && (
-                            <TouchableOpacity
-                              style={[
-                                styles.attendanceButton,
-                                isAttended && styles.attendedButton,
-                                updatingAttendanceId === attendanceMemberId &&
-                                  styles.disabledAction,
-                              ]}
-                              onPress={() =>
-                                toggleVolunteerAttendance(attendanceMemberId)
-                              }
-                              disabled={
-                                !attendanceMemberId ||
-                                Boolean(updatingAttendanceId)
-                              }
-                              accessibilityRole="button"
-                              accessibilityLabel={
-                                isAttended
-                                  ? `Mark ${name} as not attended`
-                                  : `Mark ${name} as attended`
-                              }
-                              activeOpacity={0.7}
-                            >
-                              <Ionicons
-                                name={
-                                  isAttended
-                                    ? "checkmark-circle"
-                                    : "checkmark-circle-outline"
-                                }
-                                size={18}
-                                color={isAttended ? "#FFFFFF" : "#276344"}
-                              />
-                              <Text
-                                style={[
-                                  styles.attendanceText,
-                                  isAttended && styles.attendedText,
-                                ]}
-                              >
-                                {updatingAttendanceId === attendanceMemberId
-                                  ? "Saving..."
-                                  : isAttended
-                                    ? "Attended"
-                                    : "Mark attended"}
-                              </Text>
-                            </TouchableOpacity>
-                          )}
-                          <TouchableOpacity
-                            style={styles.kickButton}
-                            disabled={removingMemberId === getMemberId(member)}
-                            onPress={() => confirmKick(displayMember)}
-                            activeOpacity={0.7}
-                          >
-                            <Ionicons
-                              name="person-remove-outline"
-                              size={18}
-                              color="#bf3030"
-                            />
-                            <Text style={styles.kickText}>
-                              {removingMemberId === getMemberId(member)
-                                ? "Removing..."
-                                : "Kick"}
-                            </Text>
-                          </TouchableOpacity>
+                        <View style={{ flex: 1, paddingRight: 8 }}>
+                          <Text style={styles.memberName} numberOfLines={1}>
+                            {name}
+                          </Text>
+                          <Text style={styles.memberEmail} numberOfLines={1}>
+                            {displayMember.email || "Volunteer"}
+                          </Text>
                         </View>
-                      )}
-                    </View>
+
+                        <View
+                          style={[
+                            styles.attendanceStatusBadge,
+                            isAttended
+                              ? styles.attendanceStatusBadgePresent
+                              : styles.attendanceStatusBadgeRegistered,
+                          ]}
+                        >
+                          <Ionicons
+                            name={
+                              isAttended
+                                ? "checkmark-circle"
+                                : "time-outline"
+                            }
+                            size={13}
+                            color={isAttended ? "#15803D" : "#64748B"}
+                          />
+                          <Text
+                            style={[
+                              styles.attendanceStatusBadgeText,
+                              isAttended
+                                ? styles.attendanceStatusBadgeTextPresent
+                                : styles.attendanceStatusBadgeTextRegistered,
+                            ]}
+                          >
+                            {isAttended ? "Present" : "Registered"}
+                          </Text>
+                        </View>
+                        <Ionicons
+                          name="chevron-forward"
+                          size={18}
+                          color="#94A3B8"
+                        />
+                      </View>
+                    </TouchableOpacity>
                   );
                 })
               ) : (
@@ -1218,6 +1458,257 @@ export default function VolunteerPostDetail({
                 </Text>
               )}
             </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* MEMBER ACTION MODAL */}
+      <Modal
+        visible={Boolean(actionMember)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setActionMember(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.memberActionModalCard}>
+            {/* Header with avatar, name & close */}
+            <View style={styles.memberActionHeader}>
+              <View style={styles.memberActionUserInfo}>
+                {actionMember?.imageUrl ||
+                actionMember?.photoURL ||
+                actionMember?.profileImage ? (
+                  <Image
+                    source={{
+                      uri:
+                        actionMember.imageUrl ||
+                        actionMember.photoURL ||
+                        actionMember.profileImage,
+                    }}
+                    style={styles.actionAvatar}
+                  />
+                ) : (
+                  <View style={styles.actionAvatarFallback}>
+                    <Text style={styles.actionAvatarInitials}>
+                      {initialsFor(getMemberName(actionMember))}
+                    </Text>
+                  </View>
+                )}
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.actionMemberName} numberOfLines={1}>
+                    {getMemberName(actionMember)}
+                  </Text>
+                  <Text style={styles.actionMemberSubtitle} numberOfLines={1}>
+                    {actionMember?.email || "GreenTrace Volunteer"}
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                onPress={() => setActionMember(null)}
+                style={styles.actionCloseBtn}
+                accessibilityLabel="Close"
+              >
+                <Ionicons name="close" size={22} color="#475569" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Attendance state banner in the card */}
+            <View
+              style={[
+                styles.attendanceStateBanner,
+                attendedVolunteerIds.includes(getMemberId(actionMember))
+                  ? styles.attendanceStateBannerPresent
+                  : styles.attendanceStateBannerRegistered,
+              ]}
+            >
+              <Ionicons
+                name={
+                  attendedVolunteerIds.includes(getMemberId(actionMember))
+                    ? "checkmark-circle"
+                    : "information-circle-outline"
+                }
+                size={18}
+                color={
+                  attendedVolunteerIds.includes(getMemberId(actionMember))
+                    ? "#15803D"
+                    : "#64748B"
+                }
+              />
+              <Text
+                style={[
+                  styles.attendanceStateBannerText,
+                  attendedVolunteerIds.includes(getMemberId(actionMember))
+                    ? styles.attendanceStateBannerTextPresent
+                    : styles.attendanceStateBannerTextRegistered,
+                ]}
+              >
+                {attendedVolunteerIds.includes(getMemberId(actionMember))
+                  ? "Status: Present"
+                  : "Status: Not Marked (Registered)"}
+              </Text>
+            </View>
+
+            {/* User action options: View Profile & Kick */}
+            <View style={styles.memberTopActionsRow}>
+              <TouchableOpacity
+                style={styles.actionProfileBtn}
+                onPress={() => viewMemberProfile(actionMember)}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="person-outline" size={17} color="#276344" />
+                <Text style={styles.actionProfileBtnText}>View Profile</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.actionKickBtn}
+                onPress={() => confirmKick(actionMember)}
+                activeOpacity={0.8}
+              >
+                <Ionicons
+                  name="person-remove-outline"
+                  size={17}
+                  color="#DC2626"
+                />
+                <Text style={styles.actionKickBtnText}>Kick</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Attendance Action: Below to that put an attendance button */}
+            <View style={styles.attendanceActionSection}>
+              <Text style={styles.attendanceSectionLabel}>
+                Attendance
+              </Text>
+
+              {attendedVolunteerIds.includes(getMemberId(actionMember)) ? (
+                <TouchableOpacity
+                  style={[
+                    styles.presentAttendanceBtn,
+                    updatingAttendanceId === getMemberId(actionMember) &&
+                      styles.disabledAction,
+                  ]}
+                  onPress={() => {
+                    setRevertTargetMember(actionMember);
+                    setRevertReason("");
+                    setShowRevertModal(true);
+                  }}
+                  disabled={updatingAttendanceId === getMemberId(actionMember)}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="checkmark-circle" size={20} color="#FFFFFF" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.presentAttendanceBtnText}>Present</Text>
+                    <Text style={styles.presentAttendanceBtnSubtext}>
+                      Tap to revert attendance with a reason
+                    </Text>
+                  </View>
+                  <Ionicons
+                    name="arrow-undo-outline"
+                    size={18}
+                    color="#D1FAE5"
+                  />
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={[
+                    styles.markPresentBtn,
+                    updatingAttendanceId === getMemberId(actionMember) &&
+                      styles.disabledAction,
+                  ]}
+                  onPress={() =>
+                    markVolunteerPresent(getMemberId(actionMember))
+                  }
+                  disabled={updatingAttendanceId === getMemberId(actionMember)}
+                  activeOpacity={0.85}
+                >
+                  {updatingAttendanceId === getMemberId(actionMember) ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Ionicons
+                        name="checkmark-circle-outline"
+                        size={20}
+                        color="#FFFFFF"
+                      />
+                      <Text style={styles.markPresentBtnText}>
+                        Mark as Present
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* REVERT ATTENDANCE REASON MODAL */}
+      <Modal
+        visible={showRevertModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!revertingAttendance) setShowRevertModal(false);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.confirmModal} accessibilityRole="alert">
+            <View style={[styles.confirmIcon, { backgroundColor: "#FEF3C7" }]}>
+              <Ionicons name="arrow-undo-outline" size={26} color="#D97706" />
+            </View>
+            <Text style={styles.confirmTitle}>Revert Attendance?</Text>
+            <Text style={styles.confirmMessage}>
+              Revert present status for{" "}
+              {getMemberName(revertTargetMember) || "this volunteer"}? Please
+              state the reason. They will be notified.
+            </Text>
+            <TextInput
+              value={revertReason}
+              onChangeText={setRevertReason}
+              placeholder="Reason for reverting (e.g. Left early, Marked by mistake)..."
+              placeholderTextColor="#8C9E93"
+              multiline
+              maxLength={500}
+              editable={!revertingAttendance}
+              style={styles.kickReasonInput}
+              textAlignVertical="top"
+            />
+            <View style={styles.confirmActions}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                disabled={revertingAttendance}
+                onPress={() => {
+                  setShowRevertModal(false);
+                  setRevertReason("");
+                  setRevertTargetMember(null);
+                }}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.confirmKickButton,
+                  { backgroundColor: "#D97706" },
+                  (!revertReason.trim() || revertingAttendance) &&
+                    styles.disabledAction,
+                ]}
+                disabled={!revertReason.trim() || revertingAttendance}
+                onPress={confirmRevertAttendance}
+              >
+                {revertingAttendance ? (
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                    <Text style={styles.confirmKickText}>Reverting...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.confirmKickText}>Confirm Revert</Text>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -1255,6 +1746,32 @@ export default function VolunteerPostDetail({
               style={styles.completionSummaryInput}
               textAlignVertical="top"
             />
+            <View style={styles.wasteMetricsInputsRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.wasteMetricsInputLabel}>Sacks Collected</Text>
+                <TextInput
+                  value={wasteSacks}
+                  onChangeText={setWasteSacks}
+                  placeholder="e.g. 10"
+                  placeholderTextColor="#8C9E93"
+                  keyboardType="numeric"
+                  editable={!completingActivity}
+                  style={styles.wasteMetricInput}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.wasteMetricsInputLabel}>Est. Weight (kg)</Text>
+                <TextInput
+                  value={wasteWeightKg}
+                  onChangeText={setWasteWeightKg}
+                  placeholder="e.g. 50"
+                  placeholderTextColor="#8C9E93"
+                  keyboardType="numeric"
+                  editable={!completingActivity}
+                  style={styles.wasteMetricInput}
+                />
+              </View>
+            </View>
             <View style={styles.confirmActions}>
               <TouchableOpacity
                 style={styles.cancelButton}
@@ -1335,6 +1852,95 @@ export default function VolunteerPostDetail({
                   </View>
                 ) : (
                   <Text style={styles.confirmKickText}>Delete</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* CANCEL IN-PROGRESS EVENT MODAL */}
+      <Modal
+        visible={showCancelProgressModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!cancellingProgress) setShowCancelProgressModal(false);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.confirmModal} accessibilityRole="alert">
+            <View style={[styles.confirmIcon, { backgroundColor: "#FDE8E8" }]}>
+              <Ionicons name="close-circle-outline" size={28} color="#B42318" />
+            </View>
+            <Text style={styles.confirmTitle}>
+              {isStandaloneEvent
+                ? "Cancel or Revert Event?"
+                : "Cancel or Revert Cleanup Drive?"}
+            </Text>
+            <Text style={styles.confirmMessage}>
+              You can revert the activity back to Open Registration (so volunteers can still join) or cancel it permanently.
+            </Text>
+            <TextInput
+              style={styles.completionSummaryInput}
+              placeholder="Reason for cancellation or update (e.g. Hazardous weather, Rescheduled)..."
+              placeholderTextColor="#8FA396"
+              value={cancelProgressReason}
+              onChangeText={setCancelProgressReason}
+              multiline
+              numberOfLines={3}
+            />
+            <View style={[styles.confirmActions, { flexDirection: "column", gap: 8 }]}>
+              <View style={{ flexDirection: "row", gap: 8, width: "100%" }}>
+                <TouchableOpacity
+                  style={[styles.cancelButton, { flex: 1 }]}
+                  onPress={() => setShowCancelProgressModal(false)}
+                  disabled={cancellingProgress}
+                >
+                  <Text style={styles.cancelButtonText}>Keep Running</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.cancelButton,
+                    {
+                      flex: 1,
+                      backgroundColor: "#E8F5EC",
+                      borderColor: "#A7F3D0",
+                      borderWidth: 1,
+                    },
+                    cancellingProgress && styles.disabledButton,
+                  ]}
+                  onPress={revertInProgressEventToOpen}
+                  disabled={cancellingProgress}
+                >
+                  <Text style={[styles.cancelButtonText, { color: "#276344" }]}>
+                    Revert to Open
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              <TouchableOpacity
+                style={[
+                  styles.confirmKickButton,
+                  { backgroundColor: "#B42318", width: "100%" },
+                  cancellingProgress && styles.disabledButton,
+                ]}
+                onPress={cancelInProgressEvent}
+                disabled={cancellingProgress}
+              >
+                {cancellingProgress ? (
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <ActivityIndicator size="small" color="#fff" />
+                    <Text style={styles.confirmKickText}>Updating...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.confirmKickText}>Cancel Permanently</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -1645,6 +2251,18 @@ const styles = StyleSheet.create({
     backgroundColor: "#F1F7F3",
   },
   completeEventText: { color: "#276344", fontWeight: "700", fontSize: 14 },
+  cancelProgressButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    padding: 13,
+    borderWidth: 1,
+    borderColor: "#F2B8B5",
+    borderRadius: 8,
+    backgroundColor: "#FDECEC",
+  },
+  cancelProgressText: { color: "#B42318", fontWeight: "700", fontSize: 14 },
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.45)",
@@ -1691,54 +2309,32 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   avatarInitials: { color: "#fff", fontWeight: "700" },
-  memberName: { flex: 1, fontWeight: "600", color: "#1d2b21" },
-  memberActions: {
+  memberName: { fontWeight: "700", color: "#1d2b21", fontSize: 14 },
+  memberEmail: { color: "#64748B", fontSize: 12, marginTop: 2 },
+  attendanceStatusBadge: {
     flexDirection: "row",
-    gap: 10,
-    borderTopWidth: 1,
-    borderTopColor: "#e2e8e3",
-    padding: 10,
-    backgroundColor: "#f8faf8",
-  },
-  viewProfileButton: {
-    flex: 1,
-    flexDirection: "row",
-    justifyContent: "center",
     alignItems: "center",
-    gap: 5,
-    padding: 10,
-    borderRadius: 7,
-    backgroundColor: "#e6f0e9",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
   },
-  viewProfileText: { color: "#276344", fontWeight: "600" },
-  kickButton: {
-    flex: 1,
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    gap: 5,
-    padding: 10,
-    borderRadius: 7,
-    backgroundColor: "#fff0f0",
+  attendanceStatusBadgePresent: {
+    backgroundColor: "#DCFCE7",
   },
-  kickText: { color: "#bf3030", fontWeight: "600" },
-  attendanceButton: {
-    flex: 1,
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    gap: 5,
-    padding: 10,
-    borderRadius: 7,
-    backgroundColor: "#e6f0e9",
+  attendanceStatusBadgeRegistered: {
+    backgroundColor: "#F1F5F9",
   },
-  attendedButton: { backgroundColor: "#5F9C76" },
-  attendanceText: {
-    color: "#276344",
-    fontWeight: "600",
-    textAlign: "center",
+  attendanceStatusBadgeText: {
+    fontSize: 11,
+    fontWeight: "700",
   },
-  attendedText: { color: "#FFFFFF" },
+  attendanceStatusBadgeTextPresent: {
+    color: "#15803D",
+  },
+  attendanceStatusBadgeTextRegistered: {
+    color: "#64748B",
+  },
   emptyText: { color: "#728078", textAlign: "center", paddingVertical: 24 },
   confirmModal: {
     width: "100%",
@@ -1840,4 +2436,200 @@ const styles = StyleSheet.create({
     backgroundColor: "#5F9C76",
   },
   okButtonText: { color: "#fff", fontWeight: "700" },
+
+  /* MEMBER ACTION & ATTENDANCE MODAL STYLES */
+  memberActionModalCard: {
+    width: "100%",
+    maxWidth: 420,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 20,
+    gap: 14,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 5,
+  },
+  memberActionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  memberActionUserInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    flex: 1,
+    paddingRight: 8,
+  },
+  actionAvatar: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+  },
+  actionAvatarFallback: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: "#276344",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  actionAvatarInitials: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 16,
+  },
+  actionMemberName: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#1E293B",
+  },
+  actionMemberSubtitle: {
+    fontSize: 12,
+    color: "#64748B",
+    marginTop: 2,
+  },
+  actionCloseBtn: {
+    padding: 6,
+    borderRadius: 8,
+    backgroundColor: "#F1F5F9",
+  },
+  attendanceStateBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    padding: 10,
+    borderRadius: 10,
+  },
+  attendanceStateBannerPresent: {
+    backgroundColor: "#DCFCE7",
+  },
+  attendanceStateBannerRegistered: {
+    backgroundColor: "#F1F5F9",
+  },
+  attendanceStateBannerText: {
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  attendanceStateBannerTextPresent: {
+    color: "#15803D",
+  },
+  attendanceStateBannerTextRegistered: {
+    color: "#475569",
+  },
+  memberTopActionsRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  actionProfileBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: "#E8F5EC",
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+  },
+  actionProfileBtnText: {
+    color: "#276344",
+    fontWeight: "700",
+    fontSize: 13,
+  },
+  actionKickBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+  },
+  actionKickBtnText: {
+    color: "#DC2626",
+    fontWeight: "700",
+    fontSize: 13,
+  },
+  attendanceActionSection: {
+    marginTop: 4,
+    gap: 8,
+  },
+  attendanceSectionLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#475569",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  markPresentBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#276344",
+    paddingVertical: 13,
+    borderRadius: 10,
+    shadowColor: "#276344",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  markPresentBtnText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 14,
+  },
+  presentAttendanceBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "#15803D",
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#166534",
+  },
+  presentAttendanceBtnText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 14,
+  },
+  presentAttendanceBtnSubtext: {
+    color: "#DCFCE7",
+    fontSize: 11,
+    marginTop: 1,
+  },
+
+  /* WASTE METRICS INPUTS IN COMPLETE MODAL */
+  wasteMetricsInputsRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 10,
+    width: "100%",
+  },
+  wasteMetricsInputLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#374151",
+    marginBottom: 4,
+  },
+  wasteMetricInput: {
+    borderWidth: 1,
+    borderColor: "#D8E3DC",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    backgroundColor: "#FAFCFB",
+    fontSize: 13,
+    color: "#1F2937",
+  },
 });

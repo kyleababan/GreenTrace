@@ -7,14 +7,13 @@ import {
     getDoc,
     getDocs,
     increment,
-    orderBy,
     query,
     serverTimestamp,
     updateDoc,
     where,
     writeBatch,
 } from "firebase/firestore";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -29,6 +28,7 @@ import {
     useWindowDimensions,
 } from "react-native";
 
+import { formatLocationWithPurok } from "../../../../constants/locationFormat";
 import { db } from "../../../../firebaseConfig";
 import { deleteUserRelatedDocuments } from "../../../../utils/deletePostHelper";
 import { hideBadWords } from "../../../../utils/hideBadWords";
@@ -45,6 +45,40 @@ const getInitials = (name) =>
     .join("")
     .toUpperCase() || "U";
 
+const getMemberId = (member) =>
+  typeof member === "string"
+    ? member
+    : member?.userId || member?.uid || member?.id || "";
+
+const formatPointSource = (entry) => {
+  if (entry.title) return entry.title;
+  switch (entry.source) {
+    case "admin_award":
+      return "Awarded by Administrator";
+    case "volunteer_event_reward":
+      return "Volunteer Event Reward";
+    case "linked_cleanup_reward":
+      return "Linked Report Cleaned EcoPoints";
+    case "cleanup_reward":
+    case "post_cleaned":
+      return "Report Cleaned EcoPoints";
+    default:
+      return "EcoPoints Transaction";
+  }
+};
+
+const getLogTimestamp = (entry) => {
+  const ts = entry.changedAt || entry.createdAt;
+  if (!ts) return 0;
+  if (ts.toMillis) return ts.toMillis();
+  if (ts.seconds) return ts.seconds * 1000;
+  if (typeof ts === "string" || typeof ts === "number") {
+    const d = new Date(ts);
+    return isNaN(d.getTime()) ? 0 : d.getTime();
+  }
+  return 0;
+};
+
 const getChangeLabel = (field) =>
   ({
     firstName: "First name",
@@ -54,14 +88,76 @@ const getChangeLabel = (field) =>
 
 const formatChangeTime = (timestamp) => {
   if (!timestamp) return "Time unavailable";
-  if (timestamp.toDate) return timestamp.toDate().toLocaleString();
-  if (timestamp.seconds)
-    return new Date(timestamp.seconds * 1000).toLocaleString();
-  if (typeof timestamp === "string" || typeof timestamp === "number") {
-    const d = new Date(timestamp);
-    if (!isNaN(d.getTime())) return d.toLocaleString();
+  let date;
+  if (typeof timestamp.toDate === "function") {
+    date = timestamp.toDate();
+  } else if (timestamp.seconds) {
+    date = new Date(timestamp.seconds * 1000);
+  } else {
+    date = new Date(timestamp);
   }
-  return "Time unavailable";
+  if (Number.isNaN(date.getTime())) return "Time unavailable";
+
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+};
+
+const getLogIcon = (entry) => {
+  if (entry.type === "points") return "gift-outline";
+  if (entry.subType === "attendance_marked")
+    return "checkmark-done-circle-outline";
+  if (entry.subType === "attendance_reverted")
+    return "alert-circle-outline";
+  if (entry.subType === "activity_rescheduled") return "time-outline";
+  if (entry.subType === "activity_cancelled") return "close-circle-outline";
+  if (
+    entry.type === "volunteering_kicked" ||
+    entry.subType === "volunteer_kicked"
+  )
+    return "person-remove-outline";
+  if (entry.type === "volunteering")
+    return entry.isAttended ? "checkmark-circle-outline" : "people-outline";
+  if (entry.subType === "deleted_post" || entry.field === "report_moderated")
+    return "trash-outline";
+  if (entry.subType === "account_warning") return "warning-outline";
+  if (entry.field === "account_unban" || entry.violationType === "admin_unban")
+    return "shield-checkmark-outline";
+  if (entry.field === "account_ban" || entry.violationType === "admin_ban")
+    return "ban-outline";
+  if (entry.type === "violation") return "alert-circle-outline";
+  if (entry.type === "comment") return "chatbubble-ellipses-outline";
+  if (entry.subType === "status_update") return "alert-circle-outline";
+  return "document-text-outline";
+};
+
+const getLogIconBg = (entry) => {
+  if (entry.type === "points") return "#E68A00";
+  if (entry.subType === "attendance_marked") return "#2E7D32";
+  if (entry.subType === "attendance_reverted") return "#D97706";
+  if (entry.subType === "activity_rescheduled") return "#2563EB";
+  if (entry.subType === "activity_cancelled") return "#D92D20";
+  if (
+    entry.type === "volunteering_kicked" ||
+    entry.subType === "volunteer_kicked"
+  )
+    return "#B42318";
+  if (entry.type === "volunteering")
+    return entry.isAttended ? "#2E7D32" : "#2563EB";
+  if (entry.subType === "deleted_post" || entry.subType === "account_warning")
+    return "#B42318";
+  if (entry.field === "account_unban" || entry.violationType === "admin_unban")
+    return "#2E7D32";
+  if (entry.field === "account_ban" || entry.violationType === "admin_ban")
+    return "#B42318";
+  if (entry.type === "violation") return "#B42318";
+  if (entry.type === "comment") return "#5F9C76";
+  if (entry.subType === "status_update") return "#F59E0B";
+  return "#64748B";
 };
 
 export default function UserPostDetail() {
@@ -82,6 +178,8 @@ export default function UserPostDetail() {
   const [visibleReportCount, setVisibleReportCount] = useState(6);
   const [changeLogs, setChangeLogs] = useState([]);
   const [visibleLogCount, setVisibleLogCount] = useState(6);
+  const [activeLogSubTab, setActiveLogSubTab] = useState("all");
+  const [logSearch, setLogSearch] = useState("");
   const [logsLoading, setLogsLoading] = useState(true);
   const [logsError, setLogsError] = useState("");
   const [logsRefreshKey, setLogsRefreshKey] = useState(0);
@@ -99,7 +197,123 @@ export default function UserPostDetail() {
   const [banningUser, setBanningUser] = useState(false);
   const [unbanningUser, setUnbanningUser] = useState(false);
   const visiblePosts = posts.slice(0, visibleReportCount);
-  const visibleChangeLogs = changeLogs.slice(0, visibleLogCount);
+
+  const filteredChangeLogs = useMemo(() => {
+    let result = changeLogs;
+
+    // Filter by subtab category
+    if (activeLogSubTab === "points") {
+      result = result.filter((log) => log.type === "points");
+    } else if (activeLogSubTab === "violations") {
+      result = result.filter(
+        (log) =>
+          log.type === "violation" ||
+          log.type === "moderation" ||
+          log.subType === "deleted_post" ||
+          log.subType === "account_warning" ||
+          log.type === "volunteering_kicked" ||
+          log.subType === "volunteer_kicked",
+      );
+    } else if (activeLogSubTab === "volunteering") {
+      result = result.filter(
+        (log) =>
+          log.type === "volunteering" ||
+          log.type === "volunteering_kicked" ||
+          log.subType === "volunteer_kicked" ||
+          log.subType === "attendance_marked" ||
+          log.subType === "attendance_reverted" ||
+          log.subType === "activity_rescheduled" ||
+          log.subType === "activity_cancelled",
+      );
+    } else if (activeLogSubTab === "comments") {
+      result = result.filter(
+        (log) =>
+          log.type === "comment" ||
+          log.type === "profile" ||
+          log.subType === "status_update",
+      );
+    }
+
+    // Filter by keyword search
+    const queryTerm = logSearch.trim().toLowerCase();
+    if (queryTerm) {
+      result = result.filter((log) => {
+        const text = [
+          log.title,
+          log.message,
+          log.reason,
+          log.actionTaken,
+          log.postCaption,
+          log.comment,
+          log.locationName,
+          log.field,
+          log.oldValue,
+          log.newValue,
+          log.source,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return text.includes(queryTerm);
+      });
+    }
+
+    return result;
+  }, [changeLogs, activeLogSubTab, logSearch]);
+
+  const logCounts = useMemo(() => {
+    let points = 0;
+    let violations = 0;
+    let volunteering = 0;
+    let comments = 0;
+
+    for (const log of changeLogs) {
+      if (log.type === "points") points++;
+      if (
+        log.type === "violation" ||
+        log.type === "moderation" ||
+        log.subType === "deleted_post" ||
+        log.subType === "account_warning" ||
+        log.type === "volunteering_kicked" ||
+        log.subType === "volunteer_kicked"
+      ) {
+        violations++;
+      }
+      if (
+        log.type === "volunteering" ||
+        log.type === "volunteering_kicked" ||
+        log.subType === "volunteer_kicked" ||
+        log.subType === "attendance_marked" ||
+        log.subType === "attendance_reverted" ||
+        log.subType === "activity_rescheduled" ||
+        log.subType === "activity_cancelled"
+      ) {
+        volunteering++;
+      }
+      if (
+        log.type === "comment" ||
+        log.type === "profile" ||
+        log.subType === "status_update"
+      ) {
+        comments++;
+      }
+    }
+
+    return {
+      all: changeLogs.length,
+      points,
+      violations,
+      volunteering,
+      comments,
+    };
+  }, [changeLogs]);
+
+  const visibleChangeLogs = filteredChangeLogs.slice(0, visibleLogCount);
+
+  const handleSubTabChange = (subTab) => {
+    setActiveLogSubTab(subTab);
+    setVisibleLogCount(6);
+  };
 
   const openCommentLog = (entry) => {
     router.push({
@@ -114,6 +328,23 @@ export default function UserPostDetail() {
         commentId: entry.id,
         from: "user_logs",
       },
+    });
+  };
+
+  const openVolunteerLog = (entry) => {
+    const volId = entry.volunteerPostId || entry.id;
+    if (!volId) return;
+    router.push({
+      pathname: "/admin/assessments/post_view/VolunteerPostDetail",
+      params: { volunteerId: volId },
+    });
+  };
+
+  const openPostLog = (postId) => {
+    if (!postId) return;
+    router.push({
+      pathname: "/admin/assessments/post_view/PostDetail",
+      params: { postId },
     });
   };
 
@@ -165,14 +396,34 @@ export default function UserPostDetail() {
       setLogsLoading(true);
       setLogsError("");
       try {
-        const [subcollectionLogsSnapshot, commentsSnapshot, userDocSnapshot] =
-          await Promise.all([
-            getDocs(collection(db, "users", userId, "changeLogs")),
-            getDocs(
-              query(collection(db, "comments"), where("userId", "==", userId)),
+        const [
+          subcollectionLogsSnapshot,
+          commentsSnapshot,
+          userDocSnapshot,
+          pointTransactionsSnapshot,
+          notificationsSnapshot,
+          volunteerPostsSnapshot,
+        ] = await Promise.all([
+          getDocs(collection(db, "users", userId, "changeLogs")),
+          getDocs(
+            query(collection(db, "comments"), where("userId", "==", userId)),
+          ),
+          getDoc(doc(db, "users", userId)),
+          getDocs(
+            query(
+              collection(db, "point_transactions"),
+              where("userId", "==", userId),
             ),
-            getDoc(doc(db, "users", userId)),
-          ]);
+          ),
+          getDocs(
+            query(
+              collection(db, "notifications"),
+              where("userId", "==", userId),
+            ),
+          ),
+          getDocs(collection(db, "volunteer_posts")),
+        ]);
+
         const comments = commentsSnapshot.docs.map((comment) => ({
           id: comment.id,
           ...comment.data(),
@@ -218,6 +469,190 @@ export default function UserPostDetail() {
             type: logType,
           };
         });
+
+        // 1. EcoPoints transaction logs
+        const pointLogs = pointTransactionsSnapshot.docs.map((docSnap) => {
+          const data = docSnap.data();
+          return {
+            id: docSnap.id,
+            type: "points",
+            amount: Number(data.amount) || 0,
+            source: data.source || "admin_award",
+            title: data.title || "",
+            reason: data.reason || "",
+            volunteerPostId: data.volunteerPostId || "",
+            postId: data.postId || "",
+            createdAt: data.createdAt || null,
+            changedAt: data.createdAt || null,
+          };
+        });
+
+        // 2. Volunteering history & attendance logs
+        const volunteeringLogs = volunteerPostsSnapshot.docs
+          .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+          .filter((vPost) => {
+            const members = Array.isArray(vPost.volunteers)
+              ? vPost.volunteers
+              : [];
+            return members.some((m) => getMemberId(m) === userId);
+          })
+          .map((vPost) => {
+            const isAttended =
+              Array.isArray(vPost.attendedVolunteerIds) &&
+              vPost.attendedVolunteerIds.includes(userId);
+            return {
+              id: vPost.id,
+              type: "volunteering",
+              title: vPost.title || "Volunteer Activity",
+              locationName: vPost.locationName || vPost.address || "",
+              status: vPost.status || "open",
+              meetingDate: vPost.meetingDate || "",
+              rewardPoints: Number(vPost.eventRewardPoints) || 0,
+              isAttended,
+              isStandalone: !vPost.postId,
+              createdAt: vPost.createdAt || vPost.updatedAt || null,
+              changedAt: vPost.createdAt || vPost.updatedAt || null,
+            };
+          });
+
+        // 3. Official notification timeline events (moderated reports, kicks, attendance, updates)
+        const notificationEvents = notificationsSnapshot.docs
+          .map((docSnap) => {
+            const data = docSnap.data();
+            const nType = data.type;
+            const rawMsg = data.message || "";
+            const extractedReason = data.reason
+              ? data.reason
+              : rawMsg.includes("Reason: ")
+              ? rawMsg.split("Reason: ")[1]
+              : "";
+
+            if (nType === "deleted_post") {
+              return {
+                id: docSnap.id,
+                type: "violation",
+                subType: "deleted_post",
+                field: "report_moderated",
+                title: data.title || "Waste Report Removed",
+                message: rawMsg || "Report removed by LGU moderation.",
+                reason: extractedReason || "Guideline violation",
+                actionTaken: "Report Deleted by LGU Administrator",
+                source: "content_moderation",
+                postId: data.postId || "",
+                changedAt: data.createdAt || null,
+                createdAt: data.createdAt || null,
+              };
+            }
+
+            if (nType === "volunteer_kicked") {
+              return {
+                id: docSnap.id,
+                type: "volunteering_kicked",
+                subType: "volunteer_kicked",
+                field: "volunteer_kicked",
+                title: data.title || "Removed from Volunteer Activity",
+                message: rawMsg,
+                reason: extractedReason || "Removed by administrator",
+                actionTaken: "Removed from Volunteer Activity",
+                source: "admin_action",
+                volunteerPostId: data.volunteerPostId || "",
+                changedAt: data.createdAt || null,
+                createdAt: data.createdAt || null,
+              };
+            }
+
+            if (nType === "attendance_marked") {
+              return {
+                id: docSnap.id,
+                type: "volunteering",
+                subType: "attendance_marked",
+                title: data.title || "Attendance Confirmed",
+                message: rawMsg || "Marked Present for volunteer activity.",
+                actionTaken: "Marked Present",
+                source: "lgu_attendance",
+                volunteerPostId: data.volunteerPostId || "",
+                changedAt: data.createdAt || null,
+                createdAt: data.createdAt || null,
+              };
+            }
+
+            if (nType === "attendance_reverted") {
+              return {
+                id: docSnap.id,
+                type: "volunteering",
+                subType: "attendance_reverted",
+                title: data.title || "Attendance Reverted",
+                message: rawMsg,
+                reason: extractedReason || "Attendance status reverted",
+                actionTaken: "Attendance Reverted",
+                source: "lgu_attendance",
+                volunteerPostId: data.volunteerPostId || "",
+                changedAt: data.createdAt || null,
+                createdAt: data.createdAt || null,
+              };
+            }
+
+            if (nType === "activity_rescheduled") {
+              return {
+                id: docSnap.id,
+                type: "volunteering",
+                subType: "activity_rescheduled",
+                title: data.title || "Activity Rescheduled",
+                message: rawMsg,
+                source: "activity_update",
+                volunteerPostId: data.volunteerPostId || "",
+                changedAt: data.createdAt || null,
+                createdAt: data.createdAt || null,
+              };
+            }
+
+            if (nType === "activity_cancelled") {
+              return {
+                id: docSnap.id,
+                type: "volunteering",
+                subType: "activity_cancelled",
+                title: data.title || "Activity Cancelled",
+                message: rawMsg,
+                reason: extractedReason,
+                source: "activity_update",
+                volunteerPostId: data.volunteerPostId || "",
+                changedAt: data.createdAt || null,
+                createdAt: data.createdAt || null,
+              };
+            }
+
+            if (nType === "account_warning") {
+              return {
+                id: docSnap.id,
+                type: "violation",
+                subType: "account_warning",
+                title: data.title || "Official Account Warning",
+                message: rawMsg || "Warning issued by LGU.",
+                reason: extractedReason || rawMsg,
+                actionTaken: "Official Warning Issued",
+                source: "admin_action",
+                changedAt: data.createdAt || null,
+                createdAt: data.createdAt || null,
+              };
+            }
+
+            if (nType === "status_update") {
+              return {
+                id: docSnap.id,
+                type: "comment",
+                subType: "status_update",
+                title: data.title || "Report Status Updated",
+                message: rawMsg,
+                postId: data.postId || "",
+                source: "report_update",
+                changedAt: data.createdAt || null,
+                createdAt: data.createdAt || null,
+              };
+            }
+
+            return null;
+          })
+          .filter(Boolean);
 
         // Check if there are user-level warnings/bans without changeLogs records (legacy or pre-existing)
         const targetUserData = userDocSnapshot.exists()
@@ -285,17 +720,12 @@ export default function UserPostDetail() {
           ...subcollectionLogs,
           ...fallbackLogs,
           ...commentLogs,
+          ...pointLogs,
+          ...volunteeringLogs,
+          ...notificationEvents,
         ];
         const sortedLogs = allLogs.sort(
-          (first, second) =>
-            (second.changedAt?.toMillis?.() ??
-              second.createdAt?.toMillis?.() ??
-              (second.changedAt?.seconds ? second.changedAt.seconds * 1000 : 0) ??
-              0) -
-            (first.changedAt?.toMillis?.() ??
-              first.createdAt?.toMillis?.() ??
-              (first.changedAt?.seconds ? first.changedAt.seconds * 1000 : 0) ??
-              0),
+          (first, second) => getLogTimestamp(second) - getLogTimestamp(first),
         );
         if (isActive) {
           setChangeLogs(sortedLogs);
@@ -340,6 +770,7 @@ export default function UserPostDetail() {
       }));
       setPointsToAdd("");
       setShowPointsModal(false);
+      setLogsRefreshKey((k) => k + 1);
     } catch (error) {
       console.error("Unable to add points:", error);
       Alert.alert("Unable to add points", "Please try again.");
@@ -617,6 +1048,168 @@ export default function UserPostDetail() {
               ? `${name}'s reports`
               : `${name}'s activity & violation logs`}
           </Text>
+          {activeActivityTab === "logs" && (
+            <View style={styles.logControlsWrapper}>
+              {/* Search Bar for Filtering Logs */}
+              <View style={styles.logSearchBox}>
+                <Ionicons name="search" size={15} color="#5F9C76" />
+                <TextInput
+                  placeholder="Filter logs by keyword, reason, activity..."
+                  placeholderTextColor="#8FA396"
+                  style={styles.logSearchInput}
+                  value={logSearch}
+                  onChangeText={(text) => {
+                    setLogSearch(text);
+                    setVisibleLogCount(6);
+                  }}
+                />
+                {logSearch.length > 0 && (
+                  <TouchableOpacity
+                    onPress={() => setLogSearch("")}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons name="close-circle" size={16} color="#8FA396" />
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {/* Subtabs Horizontal Chips */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.logSubTabsScroll}
+                contentContainerStyle={styles.logSubTabs}
+              >
+                <TouchableOpacity
+                  style={[
+                    styles.logSubTab,
+                    activeLogSubTab === "all" && styles.logSubTabActive,
+                  ]}
+                  onPress={() => handleSubTabChange("all")}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name="layers-outline"
+                    size={13}
+                    color={activeLogSubTab === "all" ? "#FFFFFF" : "#526E5F"}
+                  />
+                  <Text
+                    style={[
+                      styles.logSubTabText,
+                      activeLogSubTab === "all" && styles.logSubTabTextActive,
+                    ]}
+                  >
+                    All ({logCounts.all})
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.logSubTab,
+                    activeLogSubTab === "volunteering" &&
+                      styles.logSubTabActive,
+                  ]}
+                  onPress={() => handleSubTabChange("volunteering")}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name="people-outline"
+                    size={13}
+                    color={
+                      activeLogSubTab === "volunteering"
+                        ? "#FFFFFF"
+                        : "#526E5F"
+                    }
+                  />
+                  <Text
+                    style={[
+                      styles.logSubTabText,
+                      activeLogSubTab === "volunteering" &&
+                        styles.logSubTabTextActive,
+                    ]}
+                  >
+                    Volunteering ({logCounts.volunteering})
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.logSubTab,
+                    activeLogSubTab === "points" && styles.logSubTabActive,
+                  ]}
+                  onPress={() => handleSubTabChange("points")}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name="gift-outline"
+                    size={13}
+                    color={activeLogSubTab === "points" ? "#FFFFFF" : "#526E5F"}
+                  />
+                  <Text
+                    style={[
+                      styles.logSubTabText,
+                      activeLogSubTab === "points" && styles.logSubTabTextActive,
+                    ]}
+                  >
+                    EcoPoints ({logCounts.points})
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.logSubTab,
+                    activeLogSubTab === "violations" &&
+                      styles.logSubTabActive,
+                  ]}
+                  onPress={() => handleSubTabChange("violations")}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name="shield-outline"
+                    size={13}
+                    color={
+                      activeLogSubTab === "violations" ? "#FFFFFF" : "#526E5F"
+                    }
+                  />
+                  <Text
+                    style={[
+                      styles.logSubTabText,
+                      activeLogSubTab === "violations" &&
+                        styles.logSubTabTextActive,
+                    ]}
+                  >
+                    Violations ({logCounts.violations})
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.logSubTab,
+                    activeLogSubTab === "comments" && styles.logSubTabActive,
+                  ]}
+                  onPress={() => handleSubTabChange("comments")}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name="chatbubbles-outline"
+                    size={13}
+                    color={
+                      activeLogSubTab === "comments" ? "#FFFFFF" : "#526E5F"
+                    }
+                  />
+                  <Text
+                    style={[
+                      styles.logSubTabText,
+                      activeLogSubTab === "comments" &&
+                        styles.logSubTabTextActive,
+                    ]}
+                  >
+                    Comments & Updates ({logCounts.comments})
+                  </Text>
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
+          )}
           {activeActivityTab === "reports" ? (
             <ScrollView
               style={styles.reportsScroll}
@@ -642,7 +1235,7 @@ export default function UserPostDetail() {
                         {hideBadWords(post.caption) || "Waste report"}
                       </Text>
                       <Text style={styles.postLocation} numberOfLines={2}>
-                        {post.locationName || "Location not specified"}
+                        {formatLocationWithPurok(post) || "Location not specified"}
                       </Text>
                       <Text style={styles.postStatus}>
                         {post.status || "pending"}
@@ -695,237 +1288,238 @@ export default function UserPostDetail() {
                 <ActivityIndicator size="small" color="#5F9C76" />
               ) : logsError ? (
                 <Text style={styles.logError}>{logsError}</Text>
-              ) : changeLogs.length ? (
-                visibleChangeLogs.map((entry) => {
-                  const isComment = entry.type === "comment";
-                  const isViolation = entry.type === "violation";
-                  const isUnban =
-                    isViolation &&
-                    (entry.violationType === "admin_unban" ||
-                      entry.field === "account_unban");
-                  const isNsfw =
-                    isViolation &&
-                    (entry.violationType === "nsfw" ||
-                      entry.field === "nsfw_violation");
-                  const isAdminBan =
-                    isViolation &&
-                    (entry.violationType === "admin_ban" ||
-                      entry.field === "account_ban");
+              ) : filteredChangeLogs.length ? (
+                visibleChangeLogs.map((entry, index) => {
+                  const isClickable =
+                    (entry.type === "comment" && entry.postExists) ||
+                    Boolean(entry.volunteerPostId) ||
+                    (entry.type === "volunteering" && Boolean(entry.id)) ||
+                    (entry.subType === "status_update" && Boolean(entry.postId));
+
+                  const iconName = getLogIcon(entry);
+                  const iconBg = getLogIconBg(entry);
+
+                  let displayTitle = entry.title || "Activity Log";
+                  let displayMessage = entry.message || "";
+                  let badgeText = "";
+                  let badgeStyle = styles.logPillDefault;
+                  let badgeTextStyle = styles.logPillTextDefault;
+
+                  if (entry.type === "points") {
+                    displayTitle =
+                      entry.amount >= 0
+                        ? "EcoPoints Awarded"
+                        : "EcoPoints Deducted";
+                    badgeText =
+                      entry.amount >= 0
+                        ? `+${entry.amount} pts`
+                        : `${entry.amount} pts`;
+                    badgeStyle = styles.logPillPoints;
+                    badgeTextStyle = styles.logPillTextPoints;
+                    displayMessage =
+                      formatPointSource(entry) +
+                      (entry.reason ? ` · Note: ${entry.reason}` : "");
+                  } else if (entry.subType === "attendance_marked") {
+                    badgeText = "Present";
+                    badgeStyle = styles.logPillPresent;
+                    badgeTextStyle = styles.logPillTextPresent;
+                  } else if (entry.subType === "attendance_reverted") {
+                    badgeText = "Reverted";
+                    badgeStyle = styles.logPillReverted;
+                    badgeTextStyle = styles.logPillTextReverted;
+                  } else if (entry.subType === "activity_rescheduled") {
+                    badgeText = "Rescheduled";
+                    badgeStyle = styles.logPillInfo;
+                    badgeTextStyle = styles.logPillTextInfo;
+                  } else if (entry.subType === "activity_cancelled") {
+                    badgeText = "Cancelled";
+                    badgeStyle = styles.logPillDanger;
+                    badgeTextStyle = styles.logPillTextDanger;
+                  } else if (
+                    entry.type === "volunteering_kicked" ||
+                    entry.subType === "volunteer_kicked"
+                  ) {
+                    badgeText = "Removed";
+                    badgeStyle = styles.logPillDanger;
+                    badgeTextStyle = styles.logPillTextDanger;
+                  } else if (entry.type === "volunteering") {
+                    badgeText = entry.isAttended ? "Attended" : "Registered";
+                    badgeStyle = entry.isAttended
+                      ? styles.logPillPresent
+                      : styles.logPillInfo;
+                    badgeTextStyle = entry.isAttended
+                      ? styles.logPillTextPresent
+                      : styles.logPillTextInfo;
+                    displayMessage =
+                      [
+                        entry.meetingDate && `Schedule: ${entry.meetingDate}`,
+                        entry.locationName &&
+                          `Location: ${
+                            formatLocationWithPurok(entry) || entry.locationName
+                          }`,
+                        entry.rewardPoints > 0 &&
+                          `Reward: +${entry.rewardPoints} EcoPoints`,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ") ||
+                      entry.status ||
+                      "Joined volunteer activity";
+                  } else if (entry.subType === "deleted_post") {
+                    badgeText = "Moderated";
+                    badgeStyle = styles.logPillDanger;
+                    badgeTextStyle = styles.logPillTextDanger;
+                  } else if (entry.subType === "account_warning") {
+                    badgeText = "Warning";
+                    badgeStyle = styles.logPillWarning;
+                    badgeTextStyle = styles.logPillTextWarning;
+                  } else if (
+                    entry.field === "account_unban" ||
+                    entry.violationType === "admin_unban"
+                  ) {
+                    badgeText = "Restored";
+                    badgeStyle = styles.logPillPresent;
+                    badgeTextStyle = styles.logPillTextPresent;
+                  } else if (
+                    entry.field === "account_ban" ||
+                    entry.violationType === "admin_ban"
+                  ) {
+                    badgeText = "Banned";
+                    badgeStyle = styles.logPillDanger;
+                    badgeTextStyle = styles.logPillTextDanger;
+                  } else if (entry.violationType === "nsfw") {
+                    badgeText = entry.warningNumber
+                      ? `Warning ${entry.warningNumber}/3`
+                      : "Violation";
+                    badgeStyle = styles.logPillWarning;
+                    badgeTextStyle = styles.logPillTextWarning;
+                  } else if (entry.type === "comment") {
+                    displayTitle = "Comment on Report";
+                    badgeText = "Comment";
+                    badgeStyle = styles.logPillComment;
+                    badgeTextStyle = styles.logPillTextComment;
+                    displayMessage = `"${entry.comment || ""}" on "${
+                      entry.postCaption || "Waste report"
+                    }"`;
+                  } else if (entry.subType === "status_update") {
+                    badgeText = "Status";
+                    badgeStyle = styles.logPillWarning;
+                    badgeTextStyle = styles.logPillTextWarning;
+                  } else if (entry.field) {
+                    displayTitle = `${getChangeLabel(entry.field)} Updated`;
+                    badgeText = "Profile";
+                    badgeStyle = styles.logPillDefault;
+                    badgeTextStyle = styles.logPillTextDefault;
+                    displayMessage = `From: ${
+                      entry.oldValue || "Not set"
+                    } → To: ${entry.newValue || "Not set"}`;
+                  }
 
                   return (
                     <TouchableOpacity
-                      key={`${entry.type}-${entry.id}`}
+                      key={`${entry.type}-${entry.id}-${index}`}
                       style={[
-                        styles.changeLogCard,
-                        isComment && styles.commentLogCard,
-                        isViolation &&
-                          (isUnban
-                            ? styles.unbanLogCard
-                            : styles.violationLogCard),
+                        styles.logCard,
+                        isClickable && styles.logCardClickable,
                       ]}
-                      onPress={
-                        isComment && entry.postExists
-                          ? () => openCommentLog(entry)
-                          : undefined
-                      }
-                      disabled={!isComment || !entry.postExists}
+                      onPress={() => {
+                        if (
+                          entry.volunteerPostId ||
+                          (entry.type === "volunteering" && entry.id)
+                        ) {
+                          openVolunteerLog(entry);
+                        } else if (entry.type === "comment" && entry.postExists) {
+                          openCommentLog(entry);
+                        } else if (entry.postId) {
+                          openPostLog(entry.postId);
+                        }
+                      }}
+                      disabled={!isClickable}
                       activeOpacity={0.75}
-                      accessibilityRole={
-                        isComment && entry.postExists ? "button" : undefined
-                      }
-                      accessibilityLabel={
-                        isComment && entry.postExists
-                          ? `Open comment on ${entry.postCaption}`
-                          : undefined
-                      }
+                      accessibilityRole={isClickable ? "button" : undefined}
+                      accessibilityLabel={`${displayTitle}: ${displayMessage}`}
                     >
                       <View
                         style={[
-                          styles.changeLogIcon,
-                          isViolation &&
-                            (isUnban
-                              ? styles.unbanIconWrapper
-                              : isAdminBan
-                              ? styles.banIconWrapper
-                              : styles.violationIconWrapper),
+                          styles.logIconWrapper,
+                          { backgroundColor: iconBg },
                         ]}
                       >
-                        <Ionicons
-                          name={
-                            isComment
-                              ? "chatbubble-outline"
-                              : isUnban
-                              ? "shield-checkmark-outline"
-                              : isNsfw
-                              ? "alert-circle-outline"
-                              : isAdminBan
-                              ? "ban-outline"
-                              : "create-outline"
-                          }
-                          size={18}
-                          color={
-                            isComment
-                              ? "#4B7F5F"
-                              : isUnban
-                              ? "#166534"
-                              : isNsfw
-                              ? "#b42318"
-                              : isAdminBan
-                              ? "#b45309"
-                              : "#4B7F5F"
-                          }
-                        />
+                        <Ionicons name={iconName} size={19} color="#FFFFFF" />
                       </View>
-                      <View style={styles.changeLogCopy}>
-                        {isComment ? (
-                          <>
-                            <Text style={styles.changeLogTitle}>
-                              Commented on a report
-                            </Text>
-                            <Text style={styles.changeLogValues}>
-                              Report: {hideBadWords(entry.postCaption)}
-                            </Text>
-                            <Text style={styles.changeLogValues}>
-                              Comment: {hideBadWords(entry.comment || "")}
-                            </Text>
-                            {entry.postExists ? (
-                              <Text style={styles.commentLogHint}>
-                                Tap to view the highlighted comment
-                              </Text>
-                            ) : (
-                              <Text style={styles.changeLogTime}>
-                                The report is no longer available.
-                              </Text>
-                            )}
-                          </>
-                        ) : isViolation ? (
-                          <>
-                            <View style={styles.violationHeaderRow}>
+
+                      <View style={styles.logTextContainer}>
+                        <View style={styles.logTitleRow}>
+                          <Text style={styles.logItemTitle} numberOfLines={1}>
+                            {displayTitle}
+                          </Text>
+                          {Boolean(badgeText) && (
+                            <View style={[styles.logPill, badgeStyle]}>
                               <Text
-                                style={
-                                  isUnban
-                                    ? styles.unbanLogTitle
-                                    : isAdminBan
-                                    ? styles.banLogTitle
-                                    : styles.violationLogTitle
-                                }
+                                style={[styles.logPillText, badgeTextStyle]}
                               >
-                                {isUnban
-                                  ? "Account Unbanned"
-                                  : isNsfw
-                                  ? "Policy Violation: Inappropriate Content"
-                                  : "Account Suspension"}
+                                {badgeText}
                               </Text>
-                              <View style={styles.violationBadgeRow}>
-                                {isUnban && (
-                                  <View style={styles.unbanBadge}>
-                                    <Text style={styles.unbanBadgeText}>
-                                      Restored
-                                    </Text>
-                                  </View>
-                                )}
-                                {Boolean(entry.warningNumber) && (
-                                  <View
-                                    style={
-                                      entry.warningNumber >= 3
-                                        ? styles.violationBannedBadge
-                                        : styles.violationWarningBadge
-                                    }
-                                  >
-                                    <Text
-                                      style={
-                                        entry.warningNumber >= 3
-                                          ? styles.violationBannedBadgeText
-                                          : styles.violationWarningBadgeText
-                                      }
-                                    >
-                                      Warning {entry.warningNumber} /{" "}
-                                      {entry.maxWarnings || 3}
-                                    </Text>
-                                  </View>
-                                )}
-                                {(isAdminBan ||
-                                  (isNsfw && entry.warningNumber >= 3) ||
-                                  entry.actionTaken?.includes("Banned")) && (
-                                  <View style={styles.violationBannedBadge}>
-                                    <Text
-                                      style={styles.violationBannedBadgeText}
-                                    >
-                                      Banned
-                                    </Text>
-                                  </View>
-                                )}
-                              </View>
                             </View>
-                            <Text style={styles.violationReason}>
-                              <Text style={styles.violationLabel}>
-                                Reason:{" "}
-                              </Text>
-                              {hideBadWords(entry.reason || "Terms violation")}
-                            </Text>
-                            {Boolean(entry.actionTaken) && (
-                              <Text style={styles.violationAction}>
-                                <Text style={styles.violationLabel}>
-                                  Action:{" "}
-                                </Text>
-                                {entry.actionTaken}
-                              </Text>
-                            )}
-                            {Boolean(entry.source) && (
-                              <Text style={styles.violationSource}>
-                                Source:{" "}
-                                {entry.source === "create_post"
-                                  ? "Create Post Upload"
-                                  : entry.source === "edit_post"
-                                  ? "Edit Post Upload"
-                                  : entry.source === "admin_action"
-                                  ? "Admin Management"
-                                  : "Content Moderation"}
-                              </Text>
-                            )}
-                          </>
-                        ) : (
-                          <>
-                            <Text style={styles.changeLogTitle}>
-                              {getChangeLabel(entry.field)} changed
-                            </Text>
-                            <Text style={styles.changeLogValues}>
-                              From: {entry.oldValue || "Not set"}
-                            </Text>
-                            <Text style={styles.changeLogValues}>
-                              To: {entry.newValue || "Not set"}
-                            </Text>
-                          </>
-                        )}
-                        <Text style={styles.changeLogTime}>
-                          {formatChangeTime(
-                            isComment ? entry.createdAt : entry.changedAt,
                           )}
-                        </Text>
+                        </View>
+
+                        {Boolean(displayMessage) && (
+                          <Text style={styles.logItemMessage} numberOfLines={2}>
+                            {hideBadWords(displayMessage)}
+                          </Text>
+                        )}
+
+                        <View style={styles.logFooterRow}>
+                          <Text style={styles.logTimeText}>
+                            {formatChangeTime(
+                              entry.changedAt || entry.createdAt,
+                            )}
+                          </Text>
+                          {isClickable && (
+                            <View style={styles.logViewLink}>
+                              <Text style={styles.logViewLinkText}>View</Text>
+                              <Ionicons
+                                name="chevron-forward"
+                                size={12}
+                                color="#276344"
+                              />
+                            </View>
+                          )}
+                        </View>
                       </View>
-                      {isComment && entry.postExists ? (
-                        <Ionicons
-                          name="chevron-forward"
-                          size={18}
-                          color="#4B7F5F"
-                        />
-                      ) : null}
                     </TouchableOpacity>
                   );
                 })
               ) : (
-                <Text style={styles.emptyText}>
-                  No activity, violations, or profile changes have been logged yet.
-                </Text>
+                <View style={styles.emptyLogsContainer}>
+                  <Ionicons
+                    name="file-tray-outline"
+                    size={38}
+                    color="#9CA3AF"
+                  />
+                  <Text style={styles.emptyText}>
+                    {logSearch.trim()
+                      ? `No logs match "${logSearch.trim()}".`
+                      : activeLogSubTab === "points"
+                      ? "No EcoPoints transactions recorded for this user."
+                      : activeLogSubTab === "violations"
+                      ? "No violations or disciplinary actions on record."
+                      : activeLogSubTab === "volunteering"
+                      ? "No volunteering activities recorded for this user."
+                      : activeLogSubTab === "comments"
+                      ? "No comments or report updates on record."
+                      : "No activity, violations, or profile changes have been logged yet."}
+                  </Text>
+                </View>
               )}
               {!logsLoading &&
               !logsError &&
-              visibleLogCount < changeLogs.length ? (
+              visibleLogCount < filteredChangeLogs.length ? (
                 <TouchableOpacity
                   style={styles.loadMoreButton}
                   onPress={() =>
                     setVisibleLogCount((count) =>
-                      Math.min(count + 6, changeLogs.length),
+                      Math.min(count + 6, filteredChangeLogs.length),
                     )
                   }
                   accessibilityRole="button"
@@ -1365,6 +1959,71 @@ const styles = StyleSheet.create({
     color: "#1d2b21",
     marginBottom: 12,
   },
+  logControlsWrapper: {
+    marginBottom: 12,
+    gap: 10,
+  },
+  logSearchBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#f4f7f5",
+    borderWidth: 1,
+    borderColor: "#d7e0d9",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    height: 38,
+    gap: 8,
+  },
+  logSearchInput: {
+    flex: 1,
+    fontSize: 12.5,
+    color: "#1d2b21",
+    padding: 0,
+  },
+  logSubTabsWrapper: {
+    height: 34,
+    flexShrink: 0,
+    marginBottom: 4,
+  },
+  logSubTabsScroll: {
+    flexGrow: 0,
+    flexShrink: 0,
+    height: 34,
+  },
+  logSubTabs: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingLeft: 2,
+    paddingRight: 16,
+  },
+  logSubTab: {
+    height: 30,
+    alignSelf: "center",
+    paddingHorizontal: 12,
+    borderRadius: 15,
+    flexDirection: "row",
+    gap: 5,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#edf2ee",
+    borderWidth: 1,
+    borderColor: "#d7dfd9",
+  },
+  logSubTabActive: {
+    backgroundColor: "#276344",
+    borderColor: "#276344",
+  },
+  logSubTabText: {
+    fontSize: 11.5,
+    fontWeight: "600",
+    color: "#4b5d50",
+    textAlign: "center",
+  },
+  logSubTabTextActive: {
+    color: "#ffffff",
+    fontWeight: "700",
+  },
   postList: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -1375,163 +2034,148 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingBottom: 4,
   },
-  changeLogCard: {
+  logCard: {
     flexDirection: "row",
     alignItems: "flex-start",
-    gap: 10,
-    backgroundColor: "#f7f9f7",
+    backgroundColor: "#ffffff",
     borderWidth: 1,
-    borderColor: "#e2e8e3",
-    borderRadius: 10,
+    borderColor: "#e3eae5",
+    borderRadius: 12,
     padding: 12,
+    elevation: 1,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
   },
-  commentLogCard: {
-    borderColor: "#b8d2ff",
-    backgroundColor: "#f2f7ff",
+  logCardClickable: {
+    backgroundColor: "#fafcfb",
+    borderColor: "#d5e2d8",
   },
-  changeLogIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+  logIconWrapper: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#e6f0e9",
+    marginTop: 2,
   },
-  changeLogCopy: {
+  logTextContainer: {
     flex: 1,
+    marginLeft: 12,
     minWidth: 0,
   },
-  changeLogTitle: {
-    color: "#1d2b21",
-    fontSize: 14,
-    fontWeight: "700",
+  logTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 6,
     marginBottom: 4,
   },
-  changeLogValues: {
-    color: "#4d5d52",
-    fontSize: 12,
-    lineHeight: 18,
-    overflowWrap: "anywhere",
-  },
-  changeLogTime: {
-    color: "#849188",
-    fontSize: 11,
-    marginTop: 6,
-  },
-  commentLogHint: {
-    color: "#3973c6",
-    fontSize: 11,
+  logItemTitle: {
+    fontSize: 13.5,
     fontWeight: "700",
-    marginTop: 6,
+    color: "#1d2b21",
+    flexShrink: 1,
   },
-  violationLogCard: {
-    borderColor: "#fecdd3",
-    backgroundColor: "#fff5f5",
+  logItemMessage: {
+    fontSize: 12.5,
+    color: "#4d5d52",
+    lineHeight: 18,
+    marginBottom: 6,
   },
-  unbanLogCard: {
-    borderColor: "#bbf7d0",
-    backgroundColor: "#f0fdf4",
-  },
-  violationIconWrapper: {
-    backgroundColor: "#fee2e2",
-  },
-  unbanIconWrapper: {
-    backgroundColor: "#dcfce7",
-  },
-  banIconWrapper: {
-    backgroundColor: "#fef3c7",
-  },
-  violationHeaderRow: {
+  logFooterRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 8,
-    marginBottom: 4,
-    flexWrap: "wrap",
+    marginTop: 2,
   },
-  violationLogTitle: {
-    color: "#b42318",
-    fontSize: 14,
-    fontWeight: "700",
-    flexShrink: 1,
+  logTimeText: {
+    fontSize: 11,
+    color: "#849188",
   },
-  unbanLogTitle: {
-    color: "#166534",
-    fontSize: 14,
-    fontWeight: "700",
-    flexShrink: 1,
-  },
-  banLogTitle: {
-    color: "#92400e",
-    fontSize: 14,
-    fontWeight: "700",
-    flexShrink: 1,
-  },
-  violationBadgeRow: {
+  logViewLink: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 2,
   },
-  violationWarningBadge: {
+  logViewLinkText: {
+    fontSize: 11.5,
+    fontWeight: "700",
+    color: "#276344",
+  },
+  logPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  logPillText: {
+    fontSize: 10.5,
+    fontWeight: "700",
+  },
+  logPillDefault: {
+    backgroundColor: "#edf2ee",
+    borderColor: "#d7dfd9",
+  },
+  logPillTextDefault: {
+    color: "#4b5d50",
+  },
+  logPillPoints: {
     backgroundColor: "#fef3c7",
-    borderWidth: 1,
     borderColor: "#fde68a",
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 12,
   },
-  violationWarningBadgeText: {
-    color: "#92400e",
-    fontSize: 11,
-    fontWeight: "700",
+  logPillTextPoints: {
+    color: "#b45309",
   },
-  violationBannedBadge: {
-    backgroundColor: "#fee2e2",
-    borderWidth: 1,
-    borderColor: "#fca5a5",
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 12,
-  },
-  violationBannedBadgeText: {
-    color: "#991b1b",
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  unbanBadge: {
+  logPillPresent: {
     backgroundColor: "#dcfce7",
-    borderWidth: 1,
     borderColor: "#86efac",
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 12,
   },
-  unbanBadgeText: {
-    color: "#166534",
-    fontSize: 11,
-    fontWeight: "700",
+  logPillTextPresent: {
+    color: "#15803d",
   },
-  violationLabel: {
-    fontWeight: "700",
-    color: "#374151",
+  logPillReverted: {
+    backgroundColor: "#fee2e2",
+    borderColor: "#fca5a5",
   },
-  violationReason: {
-    color: "#4b5563",
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 2,
+  logPillTextReverted: {
+    color: "#b91c1c",
   },
-  violationAction: {
-    color: "#4b5563",
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 2,
+  logPillInfo: {
+    backgroundColor: "#e0f2fe",
+    borderColor: "#bae6fd",
   },
-  violationSource: {
-    color: "#6b7280",
-    fontSize: 11,
-    marginTop: 3,
-    fontStyle: "italic",
+  logPillTextInfo: {
+    color: "#0369a1",
+  },
+  logPillDanger: {
+    backgroundColor: "#fee2e2",
+    borderColor: "#fca5a5",
+  },
+  logPillTextDanger: {
+    color: "#b91c1c",
+  },
+  logPillWarning: {
+    backgroundColor: "#fffbeb",
+    borderColor: "#fef08a",
+  },
+  logPillTextWarning: {
+    color: "#b45309",
+  },
+  logPillComment: {
+    backgroundColor: "#eff6ff",
+    borderColor: "#bfdbfe",
+  },
+  logPillTextComment: {
+    color: "#1d4ed8",
+  },
+  emptyLogsContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 36,
+    gap: 8,
   },
   logError: {
     color: "#b42318",

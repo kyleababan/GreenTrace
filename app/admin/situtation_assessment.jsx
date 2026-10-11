@@ -122,7 +122,13 @@ export default function SituationAssessment() {
         <PostDetail
           post={selectedPost}
           currentTab={selectedPost.status || activeTab}
-          setSelectedPost={closeSelectedPost}
+          setSelectedPost={(nextPost) => {
+            if (!nextPost) {
+              closeSelectedPost();
+            } else {
+              setSelectedPost(nextPost);
+            }
+          }}
           setSelectedVolunteerPost={setSelectedVolunteerPost}
           highlightedCommentId={requestedCommentId}
         />
@@ -288,7 +294,7 @@ export default function SituationAssessment() {
 
               <View style={styles.filterOptions}>
                 {[
-                  { id: "purok", label: "Purok", placeholder: "Enter purok" },
+                  { id: "purok", label: "Purok / Sitio", placeholder: "Enter purok or sitio" },
                   {
                     id: "barangay",
                     label: "Barangay",

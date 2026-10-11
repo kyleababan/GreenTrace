@@ -3,6 +3,7 @@ import { useRouter } from "expo-router";
 import {
   EmailAuthProvider,
   reauthenticateWithCredential,
+  signOut,
   updatePassword,
 } from "firebase/auth";
 import {
@@ -34,6 +35,7 @@ import { auth, db } from "../../firebaseConfig";
 // ---------------------------------------------------------------------------
 const DEFAULT_ECOPOINTS = {
   reportCleaned: "5",
+  linkedReportCleaned: "5",
   volunteerCleanup: "10",
   volunteerEvent: "8",
 };
@@ -110,6 +112,9 @@ export default function AdminSettings() {
         setEcoPoints({
           reportCleaned: String(
             data.reportCleaned ?? DEFAULT_ECOPOINTS.reportCleaned,
+          ),
+          linkedReportCleaned: String(
+            data.linkedReportCleaned ?? DEFAULT_ECOPOINTS.linkedReportCleaned,
           ),
           volunteerCleanup: String(
             data.volunteerCleanup ?? DEFAULT_ECOPOINTS.volunteerCleanup,
@@ -243,6 +248,29 @@ export default function AdminSettings() {
     }
   };
 
+  const handleLogout = () => {
+    Alert.alert(
+      "Log Out",
+      "Are you sure you want to log out of the admin portal?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Log Out",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await signOut(auth);
+              router.replace("/signin");
+            } catch (error) {
+              console.error("Admin logout error:", error);
+              router.replace("/signin");
+            }
+          },
+        },
+      ],
+    );
+  };
+
   // ---------------------------------------------------------------------------
   // EcoPoints Config — Save
   // ---------------------------------------------------------------------------
@@ -253,6 +281,7 @@ export default function AdminSettings() {
     // Validate — all must be whole positive integers
     const fields = [
       { key: "reportCleaned", label: "Report Cleaned" },
+      { key: "linkedReportCleaned", label: "Linked Report Cleaned" },
       { key: "volunteerCleanup", label: "Volunteer Cleanup" },
       { key: "volunteerEvent", label: "Volunteer Event" },
     ];
@@ -275,6 +304,7 @@ export default function AdminSettings() {
         {
           reportOngoing: deleteField(),
           reportCleaned: parseInt(ecoPoints.reportCleaned, 10),
+          linkedReportCleaned: parseInt(ecoPoints.linkedReportCleaned, 10),
           volunteerCleanup: parseInt(ecoPoints.volunteerCleanup, 10),
           volunteerEvent: parseInt(ecoPoints.volunteerEvent, 10),
           updatedAt: serverTimestamp(),
@@ -379,6 +409,15 @@ export default function AdminSettings() {
             <Ionicons name="lock-closed-outline" size={16} color="#599A74" />
             <Text style={styles.outlineButtonText}>Change Password</Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.outlineButton, { borderColor: "#FCA5A5" }]}
+            onPress={handleLogout}
+          >
+            <Ionicons name="log-out-outline" size={16} color="#DC2626" />
+            <Text style={[styles.outlineButtonText, { color: "#DC2626" }]}>
+              Log Out
+            </Text>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -411,10 +450,18 @@ export default function AdminSettings() {
         {/* Fields */}
         <EcoPointsField
           label="Report set to Cleaned"
-          description="Points given to the reporter when their waste report is marked as cleaned."
+          description="Points given to the primary reporter when their waste report is marked as cleaned."
           value={ecoPoints.reportCleaned}
           onChangeText={(val) =>
             setEcoPoints((prev) => ({ ...prev, reportCleaned: val }))
+          }
+        />
+        <EcoPointsField
+          label="Linked Report set to Cleaned"
+          description="Points given to residents whose reports are linked to the same vicinity cleanup site (duplicate reports receive 0 points)."
+          value={ecoPoints.linkedReportCleaned}
+          onChangeText={(val) =>
+            setEcoPoints((prev) => ({ ...prev, linkedReportCleaned: val }))
           }
         />
         <EcoPointsField

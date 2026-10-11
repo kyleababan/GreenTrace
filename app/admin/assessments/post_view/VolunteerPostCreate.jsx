@@ -27,6 +27,7 @@ import {
 } from "react-native";
 
 import PostLocationModal from "../../../../components/PostLocationModal";
+import { formatLocationWithPurok } from "../../../../constants/locationFormat";
 import { db } from "../../../../firebaseConfig";
 import { hideBadWords } from "../../../../utils/hideBadWords";
 import {
@@ -41,6 +42,64 @@ const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => {
   const minute = index % 2 === 0 ? "00" : "30";
   return `${hour}:${minute} ${hour24 >= 12 ? "PM" : "AM"}`;
 });
+
+const ACTIVITY_PRESETS = [
+  {
+    name: "Coastal Clean-up",
+    title: "Coastal Marine Clean-up Drive",
+    desc: "Community clean-up drive targeting plastic trash, debris, and marine waste along the shoreline.",
+    capacity: "25",
+    requirements: [
+      "Heavy-duty gloves",
+      "Rubber boots",
+      "Reusable water tumbler",
+      "Sun protection / cap",
+    ],
+  },
+  {
+    name: "Purok Street Sweep",
+    title: "Purok Community Street Clean-up",
+    desc: "Neighborhood clearing and waste segregation along public roads and residential pathways.",
+    capacity: "15",
+    requirements: [
+      "Work gloves",
+      "Brooms & dustpans (optional)",
+      "Reusable water tumbler",
+    ],
+  },
+  {
+    name: "Canal & Drainage",
+    title: "Drainage Canal De-clogging Drive",
+    desc: "Clearing storm drainage channels and culverts to prevent street flooding and mosquito breeding.",
+    capacity: "12",
+    requirements: [
+      "Rubber boots",
+      "Heavy-duty gloves",
+      "Extra clothes",
+      "Reusable water tumbler",
+    ],
+  },
+  {
+    name: "Tree Planting",
+    title: "Barangay Tree Planting & Greening",
+    desc: "Planting native trees and coastal mangrove saplings to promote local biodiversity and green cover.",
+    capacity: "20",
+    requirements: [
+      "Hand shovel / trowel",
+      "Outdoor gloves",
+      "Sun protection / cap",
+      "Reusable water tumbler",
+    ],
+  },
+];
+
+const COMMON_GEAR_TAGS = [
+  "Heavy-duty gloves",
+  "Rubber boots",
+  "Reusable water tumbler",
+  "Sun protection / cap",
+  "Rain gear / poncho",
+];
 
 const formatDateKey = (date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -115,6 +174,10 @@ export default function VolunteerPostCreate({
   );
   const [meetingDate, setMeetingDate] = useState(null);
   const [meetingTime, setMeetingTime] = useState("");
+  const [meetingEndTime, setMeetingEndTime] = useState(
+    suppliedPost?.meetingEndTime || "",
+  );
+  const [selectingEndTime, setSelectingEndTime] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [showLocationChoice, setShowLocationChoice] = useState(false);
@@ -128,6 +191,27 @@ export default function VolunteerPostCreate({
   const [loading, setLoading] = useState(isEditing || isFromPostId);
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState({});
+
+  const applyPreset = (preset) => {
+    setTitle(preset.title);
+    setDesc(preset.desc);
+    setMaxVolunteers(preset.capacity);
+    setRequirements([...preset.requirements]);
+    clearError("title");
+    clearError("desc");
+    clearError("maxVolunteers");
+  };
+
+  const toggleGearTag = (gear) => {
+    setRequirements((prev) => {
+      const filtered = prev.filter(Boolean);
+      if (filtered.includes(gear)) {
+        const next = filtered.filter((g) => g !== gear);
+        return next.length ? next : [""];
+      }
+      return [...filtered, gear];
+    });
+  };
 
   useEffect(() => {
     if (requirements.length > previousRequirementsLengthRef.current) {
@@ -260,6 +344,7 @@ export default function VolunteerPostCreate({
           meetingCoordinates: meetingCoordinates || null,
           meetingDate: formatDateKey(meetingDate),
           meetingTime: meetingTime.trim(),
+          meetingEndTime: meetingEndTime ? meetingEndTime.trim() : null,
           maxVolunteers: Number(maxVolunteers),
         });
 
@@ -307,10 +392,14 @@ export default function VolunteerPostCreate({
                 longitude: Number(targetPost.longitude),
               }
             : null),
+        street: targetPost.street || "",
         purok: targetPost.purok || "",
+        barangay: targetPost.barangay || "",
+        municipality: targetPost.municipality || "Pinamungajan",
         wasteClassification: targetPost.wasteClassification || null,
         meetingDate: formatDateKey(meetingDate),
         meetingTime: meetingTime.trim(),
+        meetingEndTime: meetingEndTime ? meetingEndTime.trim() : null,
         maxVolunteers: Number(maxVolunteers),
         joinedCount: 0,
         volunteers: [],
@@ -478,6 +567,7 @@ export default function VolunteerPostCreate({
                   ]}
                   onPress={() => {
                     clearError("meetingTime");
+                    setSelectingEndTime(false);
                     setShowTimePicker(true);
                   }}
                   activeOpacity={0.8}
@@ -490,7 +580,9 @@ export default function VolunteerPostCreate({
                     ]}
                     numberOfLines={1}
                   >
-                    {meetingTime || "Meeting time"}
+                    {meetingTime
+                      ? `${meetingTime}${meetingEndTime ? ` - ${meetingEndTime}` : ""}`
+                      : "Meeting time"}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -521,7 +613,7 @@ export default function VolunteerPostCreate({
               >
                 <Ionicons name="location-outline" size={20} color="#FFFFFF" />
                 <Text style={styles.meetupLocationText} numberOfLines={1}>
-                  {meetingLocation || "Add meetup area"}
+                  {formatLocationWithPurok(meetingLocation) || "Add meetup area"}
                 </Text>
               </TouchableOpacity>
               {meetingCoordinates?.latitude != null &&
@@ -544,6 +636,29 @@ export default function VolunteerPostCreate({
                 ? "Edit volunteer activity"
                 : "Create volunteer activity"}
             </Text>
+
+            {!isEditing && (
+              <View style={styles.presetsWrap}>
+                <Text style={styles.presetsLabel}>Templates:</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.presetsScroll}
+                >
+                  {ACTIVITY_PRESETS.map((preset) => (
+                    <TouchableOpacity
+                      key={preset.name}
+                      style={styles.presetChip}
+                      onPress={() => applyPreset(preset)}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="sparkles" size={11} color="#166534" />
+                      <Text style={styles.presetChipText}>{preset.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
 
             <View style={styles.inputBox}>
               <TextInput
@@ -586,6 +701,44 @@ export default function VolunteerPostCreate({
             {/* REQUIREMENTS */}
             <View style={styles.requirementBox}>
               <Text style={styles.fieldLabel}>Requirements</Text>
+
+              <View style={styles.gearTagsWrap}>
+                <Text style={styles.gearTagsHint}>Quick gear presets:</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.gearTagsScroll}
+                >
+                  {COMMON_GEAR_TAGS.map((gear) => {
+                    const isAdded = requirements.includes(gear);
+                    return (
+                      <TouchableOpacity
+                        key={gear}
+                        style={[
+                          styles.gearTagChip,
+                          isAdded && styles.gearTagChipActive,
+                        ]}
+                        onPress={() => toggleGearTag(gear)}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons
+                          name={isAdded ? "checkmark-circle" : "add-circle-outline"}
+                          size={11}
+                          color={isAdded ? "#FFFFFF" : "#276344"}
+                        />
+                        <Text
+                          style={[
+                            styles.gearTagText,
+                            isAdded && styles.gearTagTextActive,
+                          ]}
+                        >
+                          {gear}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
               <ScrollView
                 ref={requirementsScrollRef}
                 style={styles.requirementsList}
@@ -795,28 +948,92 @@ export default function VolunteerPostCreate({
         <View style={styles.modalOverlay}>
           <View style={styles.timeModal}>
             <View style={styles.calendarHeader}>
-              <Text style={styles.calendarTitle}>Select meeting time</Text>
+              <Text style={styles.calendarTitle}>
+                {selectingEndTime ? "Select End Time" : "Select Start Time"}
+              </Text>
               <TouchableOpacity onPress={() => setShowTimePicker(false)}>
                 <Ionicons name="close" size={25} color="#526158" />
               </TouchableOpacity>
             </View>
+
+            <View style={styles.timeModeTabs}>
+              <TouchableOpacity
+                style={[
+                  styles.timeModeTab,
+                  !selectingEndTime && styles.timeModeTabActive,
+                ]}
+                onPress={() => setSelectingEndTime(false)}
+              >
+                <Text
+                  style={[
+                    styles.timeModeTabText,
+                    !selectingEndTime && styles.timeModeTabTextActive,
+                  ]}
+                >
+                  Start: {meetingTime || "Not set"}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.timeModeTab,
+                  selectingEndTime && styles.timeModeTabActive,
+                ]}
+                onPress={() => setSelectingEndTime(true)}
+              >
+                <Text
+                  style={[
+                    styles.timeModeTabText,
+                    selectingEndTime && styles.timeModeTabTextActive,
+                  ]}
+                >
+                  End: {meetingEndTime || "None (optional)"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
             <ScrollView style={styles.timeList}>
-              {TIME_OPTIONS.map((timeOption) => (
+              {selectingEndTime && (
                 <TouchableOpacity
-                  key={timeOption}
                   style={[
                     styles.timeOption,
-                    meetingTime === timeOption && styles.selectedTime,
+                    !meetingEndTime && styles.selectedTime,
                   ]}
                   onPress={() => {
-                    setMeetingTime(timeOption);
+                    setMeetingEndTime("");
                     setShowTimePicker(false);
                   }}
                 >
-                  <Ionicons name="time-outline" size={18} color="#276344" />
-                  <Text style={styles.timeOptionText}>{timeOption}</Text>
+                  <Ionicons name="close-circle-outline" size={18} color="#64748B" />
+                  <Text style={[styles.timeOptionText, { color: "#64748B" }]}>
+                    No End Time (TBD)
+                  </Text>
                 </TouchableOpacity>
-              ))}
+              )}
+              {TIME_OPTIONS.map((timeOption) => {
+                const isSelected = selectingEndTime
+                  ? meetingEndTime === timeOption
+                  : meetingTime === timeOption;
+                return (
+                  <TouchableOpacity
+                    key={timeOption}
+                    style={[
+                      styles.timeOption,
+                      isSelected && styles.selectedTime,
+                    ]}
+                    onPress={() => {
+                      if (selectingEndTime) {
+                        setMeetingEndTime(timeOption);
+                      } else {
+                        setMeetingTime(timeOption);
+                      }
+                      setShowTimePicker(false);
+                    }}
+                  >
+                    <Ionicons name="time-outline" size={18} color="#276344" />
+                    <Text style={styles.timeOptionText}>{timeOption}</Text>
+                  </TouchableOpacity>
+                );
+              })}
             </ScrollView>
           </View>
         </View>
@@ -901,6 +1118,10 @@ export default function VolunteerPostCreate({
         onClose={() => setShowGpsModal(false)}
         initialLocation={meetingLocation}
         initialCoords={meetingCoordinates}
+        post={{
+          locationName: meetingLocation,
+          coordinates: meetingCoordinates,
+        }}
         onSelectLocation={({ locationName, coordinates }) => {
           setMeetingLocation(locationName);
           setMeetingCoordinates(coordinates);
@@ -1183,4 +1404,105 @@ const styles = StyleSheet.create({
   outsideDayText: { color: "#ABB5AF" },
   pastDayText: { color: "#D2D8D4" },
   selectedDayText: { color: "#FFFFFF", fontWeight: "800" },
+
+  /* PRESETS STYLES */
+  presetsWrap: {
+    gap: 6,
+    marginBottom: 6,
+  },
+  presetsLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#4A6153",
+  },
+  presetsScroll: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  presetChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "#F0FDF4",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#DCFCE7",
+  },
+  presetChipText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#166534",
+  },
+
+  /* GEAR TAGS STYLES */
+  gearTagsWrap: {
+    gap: 6,
+    marginBottom: 4,
+  },
+  gearTagsHint: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#64748B",
+  },
+  gearTagsScroll: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  gearTagChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#F8FAFC",
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  gearTagChipActive: {
+    backgroundColor: "#276344",
+    borderColor: "#276344",
+  },
+  gearTagText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#334155",
+  },
+  gearTagTextActive: {
+    color: "#FFFFFF",
+  },
+
+  /* TIME MODE TABS */
+  timeModeTabs: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  timeModeTab: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+    borderRadius: 8,
+    backgroundColor: "#F1F5F9",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  timeModeTabActive: {
+    backgroundColor: "#276344",
+    borderColor: "#276344",
+  },
+  timeModeTabText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#475569",
+  },
+  timeModeTabTextActive: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+  },
 });

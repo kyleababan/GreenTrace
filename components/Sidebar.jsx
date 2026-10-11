@@ -2,6 +2,7 @@
 
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { signOut } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
@@ -187,9 +188,15 @@ export default function Sidebar({ onClose, isDrawer = false }) {
 
         <TouchableOpacity
           style={styles.logoutContainer}
-          onPress={() => {
-            if (onClose) onClose();
-            router.replace("/signin");
+          onPress={async () => {
+            try {
+              if (onClose) onClose();
+              await signOut(auth);
+              router.replace("/signin");
+            } catch (error) {
+              console.error("Unable to sign out admin:", error);
+              router.replace("/signin");
+            }
           }}
         >
           <Text style={styles.logout}>Logout</Text>

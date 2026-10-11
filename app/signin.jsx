@@ -6,7 +6,7 @@ import {
     signOut,
 } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
     Image,
     KeyboardAvoidingView,
@@ -27,6 +27,7 @@ import { getAuthErrorMessage } from "../utils/authErrors";
 
 export default function Login() {
   const router = useRouter();
+  const passwordInputRef = useRef(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showResetModal, setShowResetModal] = useState(false);
@@ -175,7 +176,7 @@ export default function Login() {
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
         style={styles.keyboardAvoidingView}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <ScrollView
           contentContainerStyle={styles.scrollContent}
@@ -225,6 +226,9 @@ export default function Login() {
               }}
               keyboardType="email-address"
               autoCapitalize="none"
+              returnKeyType="next"
+              blurOnSubmit={false}
+              onSubmitEditing={() => passwordInputRef.current?.focus()}
               accessibilityState={{ invalid: Boolean(fieldErrors.email) }}
             />
             {Boolean(fieldErrors.email) && (
@@ -232,6 +236,7 @@ export default function Login() {
             )}
 
             <TextInput
+              ref={passwordInputRef}
               placeholder="Password"
               placeholderTextColor={fieldErrors.password ? "#D66A6A" : "#888"}
               secureTextEntry
@@ -240,6 +245,8 @@ export default function Login() {
                 updateField("password", value, setPassword);
               }}
               style={[styles.input, fieldErrors.password && styles.inputError]}
+              returnKeyType="go"
+              onSubmitEditing={loginUser}
               accessibilityState={{ invalid: Boolean(fieldErrors.password) }}
             />
             {Boolean(fieldErrors.password) && (
@@ -311,6 +318,8 @@ export default function Login() {
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
+              returnKeyType="go"
+              onSubmitEditing={sendResetEmail}
             />
 
             <TouchableOpacity

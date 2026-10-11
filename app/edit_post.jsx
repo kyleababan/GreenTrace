@@ -1,4 +1,3 @@
-import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { signOut } from "firebase/auth";
@@ -12,57 +11,33 @@ import {
 } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Image,
-    Modal,
-    Platform,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Image,
+  Modal,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { deleteFromCloudinary, uploadToCloudinary } from "../cloudinary";
 import Navbar from "../components/navbar";
 import NsfwWarningModal from "../components/nsfw-warning-modal";
-import { normalizePurok } from "../constants/locationFormat";
+import PostLocationModal from "../components/PostLocationModal";
+import {
+  formatLocationWithPurok,
+  normalizePurok,
+  splitLocationDetails,
+} from "../constants/locationFormat";
 import {
     formatWasteLabel,
     getWasteCategoryColor,
 } from "../constants/wasteCategories";
 import { auth, db } from "../firebaseConfig";
-import { getCurrentCoordinates } from "../utils/getCurrentCoordinates";
 import { hideBadWords } from "../utils/hideBadWords";
 
-const BARANGAYS = [
-  "Anislag",
-  "Anopog",
-  "Binabag",
-  "Buhingtubig",
-  "Busay",
-  "Butong",
-  "Cabiangon",
-  "Camugao",
-  "Duangan",
-  "Guimbawian",
-  "Lamac",
-  "Lut-od",
-  "Mangoto",
-  "Opao",
-  "Poblacion",
-  "Punod",
-  "Rizal",
-  "Sacsac",
-  "Sambagon",
-  "Sibago",
-  "Tajao",
-  "Tangub",
-  "Tanibag",
-  "Tupas",
-  "Tutay",
-].sort((a, b) => a.localeCompare(b));
 
 const formatPostedAt = (timestamp) => {
   if (!timestamp) return "Posted just now";
@@ -102,20 +77,11 @@ export default function EditPost() {
 
   const [manualBarangay, setManualBarangay] = useState("");
   const [manualPurok, setManualPurok] = useState("");
+  const [manualStreet, setManualStreet] = useState("");
+  const [manualMunicipality, setManualMunicipality] = useState("Pinamungajan");
   const [locationName, setLocationName] = useState("");
   const [gpsModalVisible, setGpsModalVisible] = useState(false);
-  const [coords, setCoords] = useState({
-    latitude: 10.2705,
-    longitude: 123.5855,
-  });
-  const [hasGpsCoordinates, setHasGpsCoordinates] = useState(false);
   const [postCoordinates, setPostCoordinates] = useState(null);
-  const [gpsBarangay, setGpsBarangay] = useState("");
-  const [gpsStreet, setGpsStreet] = useState("");
-  const [gpsReverseLoading, setGpsReverseLoading] = useState(false);
-  const [gpsLoading, setGpsLoading] = useState(false);
-  const [gpsErrors, setGpsErrors] = useState({});
-  const [mapSessionId, setMapSessionId] = useState(0);
   const [imageSourceModalVisible, setImageSourceModalVisible] = useState(false);
   const [errors, setErrors] = useState({});
   const [wasteClassification, setWasteClassification] = useState(null);
@@ -156,213 +122,82 @@ export default function EditPost() {
     loadUser();
   }, []);
 
-  // -------------------------------------------------------------------------
-  // Load the post being edited
-  // -------------------------------------------------------------------------
   useEffect(() => {
-    loadPost();
-  }, []);
+    let isMounted = true;
+    const fetchPost = async () => {
+      try {
+        const snapshot = await getDoc(doc(db, "posts", id));
 
-  const loadPost = async () => {
-    try {
-      const snapshot = await getDoc(doc(db, "posts", id));
-
-      if (!snapshot.exists()) {
-        setErrors({ form: "Post not found." });
-        router.back();
-        return;
-      }
-
-      const data = snapshot.data();
-      if (isPostEditLocked(data.status)) {
-        setPostLocked(true);
-        return;
-      }
-
-      setTitle(data.title || "");
-      setCaption(data.caption || "");
-      setCreatedAt(data.createdAt || null);
-      setLocationName(data.locationName || "");
-      setStatus((data.status || "moderate").toLowerCase());
-      setWasteClassification(data.wasteClassification || null);
-
-      if (data.barangay) {
-        setManualBarangay(data.barangay);
-        setGpsBarangay(data.barangay);
-      } else if (data.locationName) {
-        const parts = data.locationName
-          .split(",")
-          .map((p) => p.trim())
-          .filter(Boolean);
-        if (parts[0]) {
-          setManualBarangay(parts[0]);
-          setGpsBarangay(parts[0]);
+        if (!isMounted) return;
+        if (!snapshot.exists()) {
+          setErrors({ form: "Post not found." });
+          router.back();
+          return;
         }
-      }
 
-      if (data.purok) {
-        setManualPurok(data.purok);
-        setGpsStreet(data.purok);
-      } else if (data.locationName) {
-        const parts = data.locationName
-          .split(",")
-          .map((p) => p.trim())
-          .filter(Boolean);
-        if (parts.length > 1) {
-          setManualPurok(parts.slice(1).join(", "));
-          setGpsStreet(parts.slice(1).join(", "));
+        const data = snapshot.data();
+        if (isPostEditLocked(data.status)) {
+          setPostLocked(true);
+          return;
         }
-      }
 
-      if (
-        Number.isFinite(Number(data.coordinates?.latitude)) &&
-        Number.isFinite(Number(data.coordinates?.longitude)) &&
-        data.coordinates?.latitude != null &&
-        data.coordinates?.longitude != null
-      ) {
-        const lat = parseFloat(Number(data.coordinates.latitude).toFixed(6));
-        const lng = parseFloat(Number(data.coordinates.longitude).toFixed(6));
-        setCoords({ latitude: lat, longitude: lng });
-        setHasGpsCoordinates(true);
-        setPostCoordinates({ latitude: lat, longitude: lng });
-      }
+        setTitle(data.title || "");
+        setCaption(data.caption || "");
+        setCreatedAt(data.createdAt || null);
+        setLocationName(data.locationName || "");
+        setStatus((data.status || "moderate").toLowerCase());
+        setWasteClassification(data.wasteClassification || null);
 
-      setOriginalImageUrl(data.imageUrl || null);
-      setImage({ uri: data.imageUrl, isNew: false });
-    } catch (error) {
-      console.log(error);
-      setErrors({ form: "Unable to load the post." });
-    } finally {
-      setLoadingPost(false);
-    }
-  };
-
-  useEffect(() => {
-    if (Platform.OS === "web" && typeof window !== "undefined") {
-      const handleWindowMessage = (event) => {
-        try {
-          const data =
-            typeof event.data === "string"
-              ? JSON.parse(event.data)
-              : event.data;
-          if (data && data.type === "GPS_PIN_MOVED") {
-            const nextLat = Number(data.lat);
-            const nextLng = Number(data.lng);
-            if (
-              !Number.isFinite(nextLat) ||
-              !Number.isFinite(nextLng) ||
-              nextLat < -90 ||
-              nextLat > 90 ||
-              nextLng < -180 ||
-              nextLng > 180
-            ) {
-              return;
-            }
-            const latitude = Number(nextLat.toFixed(6));
-            const longitude = Number(nextLng.toFixed(6));
-            setCoords({ latitude, longitude });
-            setHasGpsCoordinates(true);
-            setGpsErrors((previous) => {
-              const next = { ...previous };
-              delete next.location;
-              return next;
-            });
-            reverseGeocodeCoordinates(latitude, longitude);
-          }
-        } catch {
-          // Ignore non-JSON postMessages
-        }
-      };
-
-      window.addEventListener("message", handleWindowMessage);
-      return () => {
-        window.removeEventListener("message", handleWindowMessage);
-      };
-    }
-  }, []);
-
-  const reverseGeocodeCoordinates = async (lat, lng) => {
-    setGpsReverseLoading(true);
-    try {
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&addressdetails=1`,
-        {
-          headers: {
-            Accept: "application/json",
-            "User-Agent": "GreenTraceApp/1.0",
-          },
-        },
-      );
-      if (!response.ok) return;
-      const data = await response.json();
-      if (data && data.address) {
-        const addr = data.address;
-        const candidateBarangay =
-          addr.suburb ||
-          addr.village ||
-          addr.quarter ||
-          addr.neighbourhood ||
-          addr.hamlet ||
-          "";
-
-        const matched = BARANGAYS.find(
-          (b) => b.toLowerCase() === candidateBarangay.toLowerCase().trim(),
+        const parsedLoc = splitLocationDetails(
+          data.locationName,
+          data.purok,
+          data.barangay,
+          data.municipality || "Pinamungajan",
+        );
+        setManualBarangay(parsedLoc.barangay);
+        setManualPurok(parsedLoc.purokOrSitio);
+        setManualStreet(parsedLoc.street || data.street || "");
+        setManualMunicipality(
+          parsedLoc.municipality || data.municipality || "Pinamungajan",
+        );
+        setLocationName(
+          formatLocationWithPurok(
+            parsedLoc.street || data.street,
+            parsedLoc.purokOrSitio,
+            parsedLoc.barangay,
+            parsedLoc.municipality || data.municipality || "Pinamungajan",
+          ) || data.locationName || "",
         );
 
-        const barangayVal =
-          matched || candidateBarangay || manualBarangay || "Poblacion";
-        const roadVal =
-          addr.road || addr.pedestrian || addr.street || addr.residential || "";
+        if (
+          Number.isFinite(Number(data.coordinates?.latitude)) &&
+          Number.isFinite(Number(data.coordinates?.longitude)) &&
+          data.coordinates?.latitude != null &&
+          data.coordinates?.longitude != null
+        ) {
+          const lat = parseFloat(Number(data.coordinates.latitude).toFixed(6));
+          const lng = parseFloat(Number(data.coordinates.longitude).toFixed(6));
+          setPostCoordinates({ latitude: lat, longitude: lng });
+        }
 
-        setGpsBarangay(barangayVal);
-        setGpsStreet(
-          roadVal ||
-            (addr.town || addr.city ? `${addr.town || addr.city}` : ""),
-        );
+        setOriginalImageUrl(data.imageUrl || null);
+        setImage({ uri: data.imageUrl, isNew: false });
+      } catch (error) {
+        console.log(error);
+        if (isMounted) setErrors({ form: "Unable to load the post." });
+      } finally {
+        if (isMounted) setLoadingPost(false);
       }
-    } catch (err) {
-      console.warn("Reverse geocode error:", err);
-    } finally {
-      setGpsReverseLoading(false);
-    }
-  };
+    };
 
-  const detectGpsLocation = async (refresh = false) => {
+    fetchPost();
+    return () => {
+      isMounted = false;
+    };
+  }, [id, router]);
+
+  const detectGpsLocation = () => {
     setGpsModalVisible(true);
-    setGpsErrors((previous) => {
-      const next = { ...previous };
-      delete next.location;
-      return next;
-    });
-    if (hasGpsCoordinates && !refresh) {
-      setMapSessionId((previous) => previous + 1);
-      if (!gpsBarangay && !gpsStreet) {
-        await reverseGeocodeCoordinates(coords.latitude, coords.longitude);
-      }
-      return;
-    }
-
-    setGpsLoading(true);
-    try {
-      const currentCoordinates = await getCurrentCoordinates();
-      setCoords(currentCoordinates);
-      setHasGpsCoordinates(true);
-      setMapSessionId((previous) => previous + 1);
-      await reverseGeocodeCoordinates(
-        currentCoordinates.latitude,
-        currentCoordinates.longitude,
-      );
-    } catch (locErr) {
-      console.warn("Could not get current GPS location:", locErr);
-      setGpsErrors((previous) => ({
-        ...previous,
-        location:
-          locErr.message ||
-          "Could not retrieve GPS location. Check your device settings and try again.",
-      }));
-    } finally {
-      setGpsLoading(false);
-    }
   };
 
   const handleUseCamera = async () => {
@@ -431,109 +266,11 @@ export default function EditPost() {
     });
   };
 
-  const handleConfirmGpsLocation = () => {
-    const barangay = gpsBarangay.trim();
-    const street = gpsStreet.trim();
-
-    const newGpsErrors = {};
-    if (!barangay) {
-      newGpsErrors.barangay = "Barangay is required.";
-    }
-    if (!street) {
-      newGpsErrors.street = "Street / Purok is required.";
-    }
-    if (!hasGpsCoordinates) {
-      newGpsErrors.location =
-        Platform.OS === "web"
-          ? "Get your GPS location or move the map pin first."
-          : "Get your GPS location before confirming.";
-    }
-
-    if (Object.keys(newGpsErrors).length > 0) {
-      setGpsErrors(newGpsErrors);
-      return;
-    }
-
-    setGpsErrors({});
-
-    let purokVal = street;
-    const purokMatch = street.match(/(?:pk\.?|purok)\s*(\d+|[a-zA-Z0-9]+)/i);
-    if (purokMatch) {
-      purokVal = purokMatch[1];
-    }
-
-    setManualBarangay(barangay);
-    setManualPurok(purokVal);
-    setLocationName(`${barangay}, ${street}`);
-    setPostCoordinates({
-      latitude: coords.latitude,
-      longitude: coords.longitude,
-    });
-
-    setErrors((prev) => {
-      const next = { ...prev };
-      delete next.location;
-      delete next.barangay;
-      delete next.purok;
-      return next;
-    });
-
-    setGpsModalVisible(false);
-  };
-
-  const leafletHtml = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <style>
-    html, body, #map { height: 100%; margin: 0; padding: 0; }
-  </style>
-</head>
-<body>
-  <div id="map"></div>
-  <script>
-    var lat = ${coords.latitude ?? 10.2705};
-    var lng = ${coords.longitude ?? 123.5855};
-    var map = L.map('map', {
-      center: [lat, lng],
-      zoom: 16,
-      zoomControl: true
-    });
-
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap',
-      maxZoom: 19,
-    }).addTo(map);
-
-    var marker = L.marker([lat, lng], { draggable: true }).addTo(map);
-
-    function notify(pos) {
-      window.parent.postMessage(JSON.stringify({ type: 'GPS_PIN_MOVED', lat: pos.lat, lng: pos.lng }), '*');
-    }
-
-    marker.on('dragend', function() {
-      notify(marker.getLatLng());
-    });
-
-    map.on('click', function(e) {
-      marker.setLatLng(e.latlng);
-      notify(e.latlng);
-    });
-  </script>
-</body>
-</html>
-`;
-
   // -------------------------------------------------------------------------
-  // Location validation (barangay + purok required)
+  // Location validation (barangay is required; street, purok are optional)
   // -------------------------------------------------------------------------
   const validateLocation = () => ({
     ...(!manualBarangay ? { barangay: "Barangay is required." } : {}),
-    ...(!manualPurok ? { purok: "Street / Purok is required." } : {}),
   });
 
   // -------------------------------------------------------------------------
@@ -590,8 +327,10 @@ export default function EditPost() {
         title: hideBadWords(title.trim()),
         caption: hideBadWords(caption.trim()),
         locationName,
+        street: manualStreet || null,
         barangay: manualBarangay || null,
         purok: normalizePurok(manualPurok) || null,
+        municipality: manualMunicipality || "Pinamungajan",
         imageUrl,
       };
 
@@ -692,7 +431,7 @@ export default function EditPost() {
     try {
       await signOut(auth);
       router.replace("/signin");
-    } catch (e) {
+    } catch (_e) {
       router.replace("/signin");
     }
   };
@@ -806,7 +545,7 @@ export default function EditPost() {
                 style={styles.locationIcon}
               />
               <Text style={styles.locationText}>
-                {locationName || "Set Location..."}
+                {formatLocationWithPurok(locationName) || locationName || "Set Location..."}
               </Text>
             </TouchableOpacity>
             <Text style={styles.postedAt}>{formatPostedAt(createdAt)}</Text>
@@ -925,166 +664,45 @@ export default function EditPost() {
           </ScrollView>
         </View>
 
-        {/* GPS TRACKING MODAL */}
-        <Modal
+        {/* POST LOCATION MODAL */}
+        <PostLocationModal
+          key={gpsModalVisible ? "edit-gps-open" : "edit-gps-closed"}
           visible={gpsModalVisible}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setGpsModalVisible(false)}
-        >
-          <View style={styles.modalBackground}>
-            <View style={[styles.modalBox, styles.gpsModalBox]}>
-              <Text style={styles.modalTitle}>GPS Tracking</Text>
-              <TouchableOpacity
-                style={styles.gpsCurrentLocationBtn}
-                onPress={() => detectGpsLocation(true)}
-                disabled={gpsLoading}
-              >
-                {gpsLoading ? (
-                  <ActivityIndicator size="small" color="#276344" />
-                ) : (
-                  <Ionicons name="locate" size={16} color="#276344" />
-                )}
-                <Text style={styles.gpsCurrentLocationText}>
-                  {gpsLoading ? "Getting current location..." : "Use current GPS"}
-                </Text>
-              </TouchableOpacity>
-
-              {/* INTERACTIVE LEAFLET / OPENSTREETMAP */}
-              <View style={styles.gpsPlaceholder}>
-                {gpsLoading ? (
-                  <View style={styles.gpsLoadingCenter}>
-                    <ActivityIndicator size="large" color="#5F9C76" />
-                    <Text style={styles.gpsLoadingText}>
-                      Acquiring GPS location...
-                    </Text>
-                  </View>
-                ) : Platform.OS === "web" ? (
-                  <iframe
-                    key={`gps-map-${mapSessionId}`}
-                    srcDoc={leafletHtml}
-                    style={{
-                      width: "100%",
-                      height: "100%",
-                      border: "none",
-                      borderRadius: 8,
-                    }}
-                    title="GPS Location Map"
-                  />
-                ) : (
-                  <View style={styles.gpsLoadingCenter}>
-                    <Text style={{ color: "#24352A", fontWeight: "600" }}>
-                      📍 Pin: {coords.latitude}, {coords.longitude}
-                    </Text>
-                  </View>
-                )}
-              </View>
-              <Text style={styles.gpsInstruction}>
-                📍 Drag the pin or tap on the map to adjust location if
-                inaccurate.
-              </Text>
-              {!!gpsErrors.location && (
-                <Text style={styles.gpsLocationError}>
-                  {gpsErrors.location}
-                </Text>
-              )}
-
-              <View style={styles.gpsDetails}>
-                <View style={styles.gpsCoordinateRow}>
-                  <View style={styles.gpsDetailItem}>
-                    <Text style={styles.gpsDetailLabel}>Latitude</Text>
-                    <Text style={styles.gpsDetailValue}>
-                      {hasGpsCoordinates ? coords.latitude.toFixed(6) : "--"}
-                    </Text>
-                  </View>
-                  <View style={styles.gpsDetailItem}>
-                    <Text style={styles.gpsDetailLabel}>Longitude</Text>
-                    <Text style={styles.gpsDetailValue}>
-                      {hasGpsCoordinates ? coords.longitude.toFixed(6) : "--"}
-                    </Text>
-                  </View>
-                </View>
-
-                {/* Barangay */}
-                <View style={styles.gpsAddressRow}>
-                  <View style={styles.gpsLabelRow}>
-                    <Text style={styles.gpsDetailLabel}>
-                      Barangay <Text style={{ color: "#D93025" }}>*</Text>
-                    </Text>
-                    {gpsReverseLoading && (
-                      <ActivityIndicator size="small" color="#5F9C76" />
-                    )}
-                  </View>
-                  <TextInput
-                    style={[
-                      styles.gpsInput,
-                      gpsErrors.barangay && styles.inputError,
-                    ]}
-                    value={gpsBarangay}
-                    onChangeText={(text) => {
-                      setGpsBarangay(text);
-                      if (gpsErrors.barangay) {
-                        setGpsErrors((prev) => {
-                          const next = { ...prev };
-                          delete next.barangay;
-                          return next;
-                        });
-                      }
-                    }}
-                    placeholder="Barangay"
-                    placeholderTextColor="#999"
-                  />
-                  {!!gpsErrors.barangay && (
-                    <Text style={styles.fieldError}>{gpsErrors.barangay}</Text>
-                  )}
-                </View>
-
-                {/* Street / Purok */}
-                <View style={styles.gpsAddressRow}>
-                  <Text style={styles.gpsDetailLabel}>
-                    Street / Purok <Text style={{ color: "#D93025" }}>*</Text>
-                  </Text>
-                  <TextInput
-                    style={[
-                      styles.gpsInput,
-                      gpsErrors.street && styles.inputError,
-                    ]}
-                    value={gpsStreet}
-                    onChangeText={(text) => {
-                      setGpsStreet(text);
-                      if (gpsErrors.street) {
-                        setGpsErrors((prev) => {
-                          const next = { ...prev };
-                          delete next.street;
-                          return next;
-                        });
-                      }
-                    }}
-                    placeholder="e.g. Pinya / Pk. 2"
-                    placeholderTextColor="#999"
-                  />
-                  {!!gpsErrors.street && (
-                    <Text style={styles.fieldError}>{gpsErrors.street}</Text>
-                  )}
-                </View>
-              </View>
-
-              <TouchableOpacity
-                style={styles.confirmLocationBtn}
-                onPress={handleConfirmGpsLocation}
-              >
-                <Text style={styles.confirmLocationText}>Confirm Location</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.modalCancel}
-                onPress={() => setGpsModalVisible(false)}
-              >
-                <Text style={styles.modalCancelText}>Close</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
+          onClose={() => setGpsModalVisible(false)}
+          initialLocation={locationName}
+          initialCoords={postCoordinates}
+          post={{
+            locationName,
+            street: manualStreet,
+            purok: manualPurok,
+            barangay: manualBarangay,
+            municipality: manualMunicipality,
+            coordinates: postCoordinates,
+          }}
+          onSelectLocation={({
+            locationName: finalLocation,
+            street,
+            purok,
+            barangay,
+            municipality,
+            coordinates,
+          }) => {
+            setLocationName(finalLocation);
+            setManualStreet(street);
+            setManualPurok(purok);
+            setManualBarangay(barangay);
+            setManualMunicipality(municipality || "Pinamungajan");
+            setPostCoordinates(coordinates);
+            setErrors((prev) => {
+              const next = { ...prev };
+              delete next.location;
+              delete next.barangay;
+              delete next.purok;
+              return next;
+            });
+            setGpsModalVisible(false);
+          }}
+        />
 
         {/* IMAGE SOURCE MODAL: Use Camera or Upload */}
         <Modal

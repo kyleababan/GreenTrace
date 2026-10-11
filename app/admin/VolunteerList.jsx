@@ -59,6 +59,7 @@ export default function VolunteerList({ setActivePage }) {
   const [posts, setPosts] = useState([]);
   const [search, setSearch] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
+  const [activeFilter, setActiveFilter] = useState("all");
 
   // Activity creation options modal state
   const [choiceModalVisible, setChoiceModalVisible] = useState(false);
@@ -99,20 +100,8 @@ export default function VolunteerList({ setActivePage }) {
       });
       setVolunteerPostMap(vMap);
 
-      const activePosts = await Promise.all(
+      const allPosts = await Promise.all(
         data.map(async (volunteerPost) => {
-          const isStandaloneEvent =
-            !volunteerPost.postId && Boolean(volunteerPost.eventType);
-          const volunteerPostStatus = String(
-            volunteerPost.status || "",
-          ).toLowerCase();
-          if (
-            volunteerPostStatus === "cleaned" ||
-            (isStandaloneEvent && volunteerPostStatus === "completed")
-          ) {
-            return null;
-          }
-
           if (!volunteerPost.postId) {
             return volunteerPost;
           }
@@ -125,9 +114,10 @@ export default function VolunteerList({ setActivePage }) {
             if (!sourcePost.exists()) return volunteerPost;
 
             const sourceData = sourcePost.data();
-            if (sourceData.status === "cleaned") return null;
-
-            return volunteerPost;
+            return {
+              ...volunteerPost,
+              sourcePostStatus: sourceData.status,
+            };
           } catch (error) {
             console.error("Unable to check volunteer post status:", error);
             return volunteerPost;
@@ -135,7 +125,7 @@ export default function VolunteerList({ setActivePage }) {
         }),
       );
 
-      setPosts(activePosts.filter(Boolean));
+      setPosts(allPosts);
     } catch (error) {
       console.log(error);
     }
@@ -175,15 +165,82 @@ export default function VolunteerList({ setActivePage }) {
     }, [loadVolunteerPosts]),
   );
 
+  const postCounts = useMemo(() => {
+    let events = 0;
+    let cleanups = 0;
+    let ongoing = 0;
+    let completed = 0;
+    let cancelled = 0;
+
+    for (const post of posts) {
+      const postStatus = String(post.status || "").toLowerCase();
+      const isCompleted =
+        ["completed", "cleaned"].includes(postStatus) ||
+        post.sourcePostStatus === "cleaned";
+      const isCancelled = postStatus === "cancelled";
+
+      if (isCompleted) {
+        completed++;
+        continue;
+      }
+      if (isCancelled) {
+        cancelled++;
+        continue;
+      }
+
+      const isEvent = Boolean(post.eventType) || !post.postId;
+      if (isEvent) {
+        events++;
+      } else {
+        cleanups++;
+      }
+
+      if (postStatus === "ongoing") {
+        ongoing++;
+      }
+    }
+
+    const totalActive = events + cleanups;
+
+    return {
+      all: totalActive,
+      events,
+      cleanups,
+      ongoing,
+      completed,
+      cancelled,
+    };
+  }, [posts]);
+
   const filteredPosts = useMemo(() => {
     const keyword = search.trim().toLowerCase();
 
     return posts.filter((post) => {
       const postStatus = String(post.status || "").toLowerCase();
-      const isCompletedEvent =
-        Boolean(post.eventType) &&
-        ["completed", "cleaned"].includes(postStatus);
-      if (postStatus === "cleaned" || isCompletedEvent) return false;
+      const isCompleted =
+        ["completed", "cleaned"].includes(postStatus) ||
+        post.sourcePostStatus === "cleaned";
+      const isCancelled = postStatus === "cancelled";
+
+      if (activeFilter === "completed") {
+        if (!isCompleted) return false;
+      } else if (activeFilter === "cancelled") {
+        if (!isCancelled) return false;
+      } else {
+        // In active tabs, exclude completed and cancelled activities
+        if (isCompleted || isCancelled) return false;
+
+        const isEvent = Boolean(post.eventType) || !post.postId;
+        if (activeFilter === "events" && !isEvent) {
+          return false;
+        }
+        if (activeFilter === "cleanups" && isEvent) {
+          return false;
+        }
+        if (activeFilter === "ongoing" && postStatus !== "ongoing") {
+          return false;
+        }
+      }
 
       return (
         !keyword ||
@@ -192,7 +249,7 @@ export default function VolunteerList({ setActivePage }) {
         post.locationName?.toLowerCase().includes(keyword)
       );
     });
-  }, [posts, search]);
+  }, [posts, search, activeFilter]);
 
   const filteredAssessments = useMemo(() => {
     const q = assessmentSearch.trim().toLowerCase();
@@ -233,7 +290,7 @@ export default function VolunteerList({ setActivePage }) {
               style={styles.searchIcon}
             />
             <TextInput
-              placeholder="Search"
+              placeholder="Search activities..."
               style={styles.searchInput}
               placeholderTextColor="#888"
               value={search}
@@ -253,6 +310,149 @@ export default function VolunteerList({ setActivePage }) {
           </TouchableOpacity>
         </View>
 
+        {/* KPI SUMMARY CARDS */}
+        <View style={styles.kpiContainer}>
+          <View style={styles.kpiCard}>
+            <View style={[styles.kpiIconBox, { backgroundColor: "#EAF4ED" }]}>
+              <Ionicons name="leaf-outline" size={18} color="#276344" />
+            </View>
+            <View style={styles.kpiInfo}>
+              <Text style={styles.kpiVal}>{postCounts.all}</Text>
+              <Text style={styles.kpiLbl}>Active Drives</Text>
+            </View>
+          </View>
+          <View style={styles.kpiCard}>
+            <View style={[styles.kpiIconBox, { backgroundColor: "#FEF3C7" }]}>
+              <Ionicons name="time-outline" size={18} color="#B45309" />
+            </View>
+            <View style={styles.kpiInfo}>
+              <Text style={styles.kpiVal}>{postCounts.ongoing}</Text>
+              <Text style={styles.kpiLbl}>In Progress</Text>
+            </View>
+          </View>
+          <View style={styles.kpiCard}>
+            <View style={[styles.kpiIconBox, { backgroundColor: "#DCFCE7" }]}>
+              <Ionicons name="checkmark-circle-outline" size={18} color="#15803D" />
+            </View>
+            <View style={styles.kpiInfo}>
+              <Text style={styles.kpiVal}>{postCounts.completed}</Text>
+              <Text style={styles.kpiLbl}>Completed</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* FILTER PILLS */}
+        <View style={styles.filterPillsWrapper}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.filterPillsScroll}
+            contentContainerStyle={styles.filterPillsContainer}
+          >
+            <TouchableOpacity
+              style={[
+                styles.filterPill,
+                activeFilter === "all" && styles.filterPillActive,
+              ]}
+              onPress={() => setActiveFilter("all")}
+            >
+              <Text
+                style={[
+                  styles.filterPillText,
+                  activeFilter === "all" && styles.filterPillTextActive,
+                ]}
+              >
+                All ({postCounts.all})
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.filterPill,
+                activeFilter === "events" && styles.filterPillActive,
+              ]}
+              onPress={() => setActiveFilter("events")}
+            >
+              <Text
+                style={[
+                  styles.filterPillText,
+                  activeFilter === "events" && styles.filterPillTextActive,
+                ]}
+              >
+                Events ({postCounts.events})
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.filterPill,
+                activeFilter === "cleanups" && styles.filterPillActive,
+              ]}
+              onPress={() => setActiveFilter("cleanups")}
+            >
+              <Text
+                style={[
+                  styles.filterPillText,
+                  activeFilter === "cleanups" && styles.filterPillTextActive,
+                ]}
+              >
+                Cleanups ({postCounts.cleanups})
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.filterPill,
+                activeFilter === "ongoing" && styles.filterPillActive,
+              ]}
+              onPress={() => setActiveFilter("ongoing")}
+            >
+              <Text
+                style={[
+                  styles.filterPillText,
+                  activeFilter === "ongoing" && styles.filterPillTextActive,
+                ]}
+              >
+                On-going ({postCounts.ongoing})
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.filterPill,
+                activeFilter === "completed" && styles.filterPillActive,
+              ]}
+              onPress={() => setActiveFilter("completed")}
+            >
+              <Text
+                style={[
+                  styles.filterPillText,
+                  activeFilter === "completed" && styles.filterPillTextActive,
+                ]}
+              >
+                Completed ({postCounts.completed})
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.filterPill,
+                activeFilter === "cancelled" && styles.filterPillActive,
+              ]}
+              onPress={() => setActiveFilter("cancelled")}
+            >
+              <Text
+                style={[
+                  styles.filterPillText,
+                  activeFilter === "cancelled" && styles.filterPillTextActive,
+                ]}
+              >
+                Cancelled ({postCounts.cancelled})
+              </Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+
         {/* GRID OF VOLUNTEER POSTS */}
         <ScrollView
           style={styles.scroll}
@@ -263,20 +463,32 @@ export default function VolunteerList({ setActivePage }) {
             <View key={post.id} style={[styles.card, { width: cardWidth }]}>
               {/* LEFT */}
               <View style={styles.cardLeft}>
-                {post.eventType ? (
-                  <View style={styles.badgesRow}>
+                <View style={styles.badgesRow}>
+                  {post.eventType ? (
                     <View style={styles.eventBadge}>
                       <Text style={styles.eventBadgeText}>Event</Text>
                     </View>
-                    {["completed", "cleaned"].includes(
+                  ) : (
+                    <View style={styles.cleanupBadge}>
+                      <Text style={styles.cleanupBadgeText}>Cleanup</Text>
+                    </View>
+                  )}
+                  {String(post.status || "").toLowerCase() === "cancelled" ? (
+                    <View style={styles.cancelledBadge}>
+                      <Text style={styles.cancelledBadgeText}>Cancelled</Text>
+                    </View>
+                  ) : ["completed", "cleaned"].includes(
                       String(post.status || "").toLowerCase(),
-                    ) ? (
-                      <View style={styles.completedBadge}>
-                        <Text style={styles.completedBadgeText}>Completed</Text>
-                      </View>
-                    ) : null}
-                  </View>
-                ) : null}
+                    ) || post.sourcePostStatus === "cleaned" ? (
+                    <View style={styles.completedBadge}>
+                      <Text style={styles.completedBadgeText}>Completed</Text>
+                    </View>
+                  ) : String(post.status || "").toLowerCase() === "ongoing" ? (
+                    <View style={styles.ongoingBadge}>
+                      <Text style={styles.ongoingBadgeText}>On-going</Text>
+                    </View>
+                  ) : null}
+                </View>
                 <Text style={styles.title}>{hideBadWords(post.title)}</Text>
 
                 <Text style={styles.desc}>
@@ -288,7 +500,7 @@ export default function VolunteerList({ setActivePage }) {
                     source={require("../../assets/images/location.png")}
                     style={styles.locationIcon}
                   />
-                  <Text style={styles.location}>{post.locationName}</Text>
+                  <Text style={styles.location}>{formatLocationWithPurok(post)}</Text>
                 </View>
 
                 <TouchableOpacity
@@ -312,6 +524,32 @@ export default function VolunteerList({ setActivePage }) {
               </View>
             </View>
           ))}
+
+          {filteredPosts.length === 0 && (
+            <View style={styles.emptyStateContainer}>
+              <Ionicons name="calendar-outline" size={44} color="#8DA396" />
+              <Text style={styles.emptyStateTitle}>
+                {search
+                  ? "No activities match your search"
+                  : activeFilter === "events"
+                  ? "No community events available"
+                  : activeFilter === "cleanups"
+                  ? "No cleanup drives available"
+                  : activeFilter === "ongoing"
+                  ? "No activities currently on-going"
+                  : "No volunteer activities yet"}
+              </Text>
+              <Text style={styles.emptyStateSubtitle}>
+                {search
+                  ? "Try checking your spelling or search terms."
+                  : activeFilter === "events"
+                  ? "Create a standalone community event from scratch."
+                  : activeFilter === "cleanups"
+                  ? "Create a cleanup drive from situation assessment."
+                  : "Tap '+ Create Activity' above to get started."}
+              </Text>
+            </View>
+          )}
         </ScrollView>
       </View>
 
@@ -631,10 +869,7 @@ export default function VolunteerList({ setActivePage }) {
                               style={styles.locationIcon}
                             />
                             <Text style={styles.locationText} numberOfLines={1}>
-                              {formatLocationWithPurok(
-                                item.locationName,
-                                item.purok,
-                              )}
+                              {formatLocationWithPurok(item)}
                             </Text>
                           </View>
 
@@ -803,6 +1038,95 @@ const styles = StyleSheet.create({
   },
   addEventText: { color: "#FFFFFF", fontSize: 13, fontWeight: "700" },
 
+  kpiContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    marginBottom: 16,
+  },
+  kpiCard: {
+    flex: 1,
+    minWidth: 130,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderWidth: 1,
+    borderColor: "#E3ECE6",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  kpiIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  kpiInfo: {
+    flex: 1,
+    justifyContent: "center",
+  },
+  kpiVal: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#1E382B",
+  },
+  kpiLbl: {
+    fontSize: 11,
+    color: "#6B7D72",
+    fontWeight: "600",
+  },
+
+  filterPillsWrapper: {
+    height: 38,
+    flexShrink: 0,
+    marginBottom: 16,
+  },
+  filterPillsScroll: {
+    flexGrow: 0,
+    flexShrink: 0,
+    height: 38,
+  },
+  filterPillsContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingLeft: 2,
+    paddingRight: 16,
+  },
+  filterPill: {
+    height: 32,
+    alignSelf: "center",
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#D7DFD9",
+  },
+  filterPillActive: {
+    backgroundColor: "#276344",
+    borderColor: "#276344",
+  },
+  filterPillText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#4B5D50",
+    textAlign: "center",
+  },
+  filterPillTextActive: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+  },
+
   scroll: {
     flex: 1,
   },
@@ -812,6 +1136,28 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     alignItems: "flex-start",
     gap: 18,
+  },
+
+  emptyStateContainer: {
+    width: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 45,
+    paddingHorizontal: 20,
+  },
+  emptyStateTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#1E382B",
+    marginTop: 12,
+    textAlign: "center",
+  },
+  emptyStateSubtitle: {
+    fontSize: 13,
+    color: "#687B70",
+    marginTop: 4,
+    textAlign: "center",
+    maxWidth: 320,
   },
 
   card: {
@@ -845,6 +1191,30 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "700",
   },
+  cleanupBadge: {
+    alignSelf: "flex-start",
+    backgroundColor: "#E0F2FE",
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  cleanupBadgeText: {
+    color: "#0369A1",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  ongoingBadge: {
+    alignSelf: "flex-start",
+    backgroundColor: "#FEF3C7",
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  ongoingBadgeText: {
+    color: "#B45309",
+    fontSize: 10,
+    fontWeight: "700",
+  },
   completedBadge: {
     alignSelf: "flex-start",
     backgroundColor: "#34C759",
@@ -854,6 +1224,18 @@ const styles = StyleSheet.create({
   },
   completedBadgeText: {
     color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  cancelledBadge: {
+    alignSelf: "flex-start",
+    backgroundColor: "#FEE2E2",
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  cancelledBadgeText: {
+    color: "#B42318",
     fontSize: 10,
     fontWeight: "700",
   },

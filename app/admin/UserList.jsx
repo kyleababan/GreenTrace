@@ -36,6 +36,7 @@ export default function UserList() {
   const [users, setUsers] = useState([]);
   const [searchFocused, setSearchFocused] = useState(false);
   const [search, setSearch] = useState("");
+  const [activeFilter, setActiveFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [visibleCount, setVisibleCount] = useState(USERS_PER_PAGE);
   const [loadError, setLoadError] = useState("");
@@ -79,13 +80,58 @@ export default function UserList() {
 
   useEffect(() => {
     setVisibleCount(USERS_PER_PAGE);
-  }, [search]);
+  }, [search, activeFilter]);
+
+  const userCounts = useMemo(() => {
+    let active = 0;
+    let warned = 0;
+    let banned = 0;
+    let topPoints = 0;
+
+    for (const u of users) {
+      if (u.isBanned) {
+        banned++;
+      } else if (u.nsfwWarnings && u.nsfwWarnings > 0) {
+        warned++;
+      } else {
+        active++;
+      }
+
+      if (Number(u.points) > 0) {
+        topPoints++;
+      }
+    }
+
+    return {
+      all: users.length,
+      active,
+      warned,
+      banned,
+      topPoints,
+    };
+  }, [users]);
 
   const filteredUsers = useMemo(() => {
     const keyword = search.trim().toLowerCase();
-    if (!keyword) return users;
 
-    return users.filter((user) => {
+    let list = users.filter((user) => {
+      // 1. Status Filter
+      if (activeFilter === "active") {
+        if (user.isBanned || (user.nsfwWarnings && user.nsfwWarnings > 0)) {
+          return false;
+        }
+      } else if (activeFilter === "warned") {
+        if (user.isBanned || !user.nsfwWarnings || user.nsfwWarnings <= 0) {
+          return false;
+        }
+      } else if (activeFilter === "banned") {
+        if (!user.isBanned) return false;
+      } else if (activeFilter === "top_points") {
+        if (!user.points || Number(user.points) <= 0) return false;
+      }
+
+      // 2. Search Keyword
+      if (!keyword) return true;
       const fullName = getFullName(user).toLowerCase();
       return (
         fullName.includes(keyword) ||
@@ -100,7 +146,16 @@ export default function UserList() {
           .some((value) => String(value).toLowerCase().includes(keyword))
       );
     });
-  }, [search, users]);
+
+    if (activeFilter === "top_points") {
+      list = [...list].sort(
+        (firstUser, secondUser) =>
+          (Number(secondUser.points) || 0) - (Number(firstUser.points) || 0),
+      );
+    }
+
+    return list;
+  }, [search, users, activeFilter]);
 
   const displayedUsers = useMemo(() => {
     return filteredUsers.slice(0, visibleCount);
@@ -137,6 +192,96 @@ export default function UserList() {
           onFocus={() => setSearchFocused(true)}
           onBlur={() => setSearchFocused(false)}
         />
+      </View>
+
+      <View style={styles.filterPillsWrapper}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.filterPillsScroll}
+          contentContainerStyle={styles.filterPillsContainer}
+        >
+          <TouchableOpacity
+            style={[
+              styles.filterPill,
+              activeFilter === "all" && styles.filterPillActive,
+            ]}
+            onPress={() => setActiveFilter("all")}
+          >
+            <Text
+              style={[
+                styles.filterPillText,
+                activeFilter === "all" && styles.filterPillTextActive,
+              ]}
+            >
+              All ({userCounts.all})
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.filterPill,
+              activeFilter === "active" && styles.filterPillActive,
+            ]}
+            onPress={() => setActiveFilter("active")}
+          >
+            <Text
+              style={[
+                styles.filterPillText,
+                activeFilter === "active" && styles.filterPillTextActive,
+              ]}
+            >
+              Active ({userCounts.active})
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.filterPill,
+              activeFilter === "warned" && styles.filterPillActive,
+            ]}
+            onPress={() => setActiveFilter("warned")}
+          >
+            <Text
+              style={[
+                styles.filterPillText,
+                activeFilter === "warned" && styles.filterPillTextActive,
+              ]}
+            >
+              Warned ({userCounts.warned})
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.filterPill,
+              activeFilter === "banned" && styles.filterPillActive,
+            ]}
+            onPress={() => setActiveFilter("banned")}
+          >
+            <Text
+              style={[
+                styles.filterPillText,
+                activeFilter === "banned" && styles.filterPillTextActive,
+              ]}
+            >
+              Banned ({userCounts.banned})
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.filterPill,
+              activeFilter === "top_points" && styles.filterPillActive,
+            ]}
+            onPress={() => setActiveFilter("top_points")}
+          >
+            <Text
+              style={[
+                styles.filterPillText,
+                activeFilter === "top_points" && styles.filterPillTextActive,
+              ]}
+            >
+              Top Points ({userCounts.topPoints})
+            </Text>
+          </TouchableOpacity>
+        </ScrollView>
       </View>
 
       {loading ? (
@@ -206,7 +351,19 @@ export default function UserList() {
           })}
 
           {!filteredUsers.length && (
-            <Text style={styles.emptyText}>No users match your search.</Text>
+            <Text style={styles.emptyText}>
+              {search
+                ? "No users match your search."
+                : activeFilter === "warned"
+                ? "No users currently have policy warnings."
+                : activeFilter === "banned"
+                ? "No banned users on record."
+                : activeFilter === "top_points"
+                ? "No users have accumulated EcoPoints yet."
+                : activeFilter === "active"
+                ? "No active users found."
+                : "No users registered yet."}
+            </Text>
           )}
           {hasMore && (
             <TouchableOpacity
@@ -227,13 +384,55 @@ const styles = StyleSheet.create({
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 15,
+    marginBottom: 12,
     minHeight: 44,
     backgroundColor: "#fff",
     borderRadius: 10,
     paddingHorizontal: 12,
     borderWidth: 1,
     borderColor: "transparent",
+  },
+  filterPillsWrapper: {
+    height: 38,
+    flexShrink: 0,
+    marginBottom: 14,
+  },
+  filterPillsScroll: {
+    flexGrow: 0,
+    flexShrink: 0,
+    height: 38,
+  },
+  filterPillsContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingLeft: 2,
+    paddingRight: 16,
+  },
+  filterPill: {
+    height: 32,
+    alignSelf: "center",
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#d7dfd9",
+  },
+  filterPillActive: {
+    backgroundColor: "#276344",
+    borderColor: "#276344",
+  },
+  filterPillText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#4b5d50",
+    textAlign: "center",
+  },
+  filterPillTextActive: {
+    color: "#ffffff",
+    fontWeight: "700",
   },
   searchContainerFocused: {
     borderColor: "#5F9C76",

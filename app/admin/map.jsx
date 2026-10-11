@@ -1,26 +1,40 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  onSnapshot,
+  orderBy,
+  query,
+  updateDoc,
+} from "firebase/firestore";
 import { useEffect, useMemo, useState } from "react";
 import {
-    ActivityIndicator,
-    Image,
-    Modal,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
-    useWindowDimensions,
+  ActivityIndicator,
+  Alert,
+  Image,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+  useWindowDimensions,
 } from "react-native";
-import { formatLocationWithPurok } from "../../constants/locationFormat";
+import PostLocationModal from "../../components/PostLocationModal";
 import {
-    formatWasteLabel,
-    getWasteCategoryColor,
+  formatLocationWithPurok,
+  normalizePurok,
+} from "../../constants/locationFormat";
+import {
+  formatWasteLabel,
+  getWasteCategoryColor,
 } from "../../constants/wasteCategories";
 import { db } from "../../firebaseConfig";
+import { deleteRelatedDocuments } from "../../utils/deletePostHelper";
+import { notifyPostModerated } from "../../utils/notificationHelpers";
 import { useAdminSidebar } from "./_layout";
 
 // Coordinates for Pinamungajan barangays (fallback if post has no GPS coordinates saved)
@@ -104,7 +118,57 @@ export default function AdminMap() {
   const [activeFilter, setActiveFilter] = useState("all");
   const [selectedPost, setSelectedPost] = useState(null);
   const [legendOpen, setLegendOpen] = useState(false);
-  const [mapSession, setMapSession] = useState(0);
+
+  // Batch Selection & Report Management States
+  const [showBatchModal, setShowBatchModal] = useState(false);
+  const [selectedPostIds, setSelectedPostIds] = useState([]);
+  const [batchTab, setBatchTab] = useState("all"); // 'all' | 'duplicates' | 'selected'
+  const [showDeleteReasonModal, setShowDeleteReasonModal] = useState(false);
+  const [deleteReason, setDeleteReason] = useState(
+    "Duplicate report in same vicinity",
+  );
+  const [notifyUsersOnDelete, setNotifyUsersOnDelete] = useState(true);
+  const [deletingBatch, setDeletingBatch] = useState(false);
+  const [showLocationModal, setShowLocationModal] = useState(false);
+
+  const handleSaveReportLocation = async ({
+    locationName,
+    street,
+    purok,
+    barangay,
+    municipality,
+    coordinates,
+  }) => {
+    if (!selectedPost?.id) return;
+    try {
+      const postRef = doc(db, "posts", selectedPost.id);
+      const updates = {
+        locationName,
+        street: street || null,
+        purok: normalizePurok(purok) || null,
+        barangay: barangay || null,
+        municipality: municipality || "Pinamungajan",
+      };
+      if (coordinates) {
+        updates.coordinates = coordinates;
+      }
+      await updateDoc(postRef, updates);
+
+      setSelectedPost((prev) =>
+        prev
+          ? {
+              ...prev,
+              ...updates,
+            }
+          : null,
+      );
+      setShowLocationModal(false);
+      Alert.alert("Success", "Report location updated successfully.");
+    } catch (err) {
+      console.error("Error updating report location:", err);
+      Alert.alert("Error", "Could not update location. Please try again.");
+    }
+  };
 
   // 1. Fetch uncleaned posts from Firestore
   useEffect(() => {
@@ -247,11 +311,16 @@ export default function AdminMap() {
           statusLabel: statusMeta.label,
           statusColor: statusMeta.color,
           locationName:
-            formatLocationWithPurok(post.locationName, post.purok) ||
+            formatLocationWithPurok(post) ||
             post.locationName ||
-            "Pinamungajan",
+            "Pinamungajan, Cebu",
           authorName,
           authorPoints,
+          isDuplicate: Boolean(
+            post.isDuplicate || post.isPointEligible === false,
+          ),
+          isPointEligible: post.isPointEligible !== false,
+          linkedReportId: post.linkedReportId || null,
           post,
         };
       })
@@ -277,6 +346,87 @@ export default function AdminMap() {
         return true;
       });
   }, [posts, users, activeFilter, search]);
+
+  // Flagged duplicate pins
+  const duplicatePins = useMemo(() => {
+    return mappedPins.filter((pin) => pin.isDuplicate || !pin.isPointEligible);
+  }, [mappedPins]);
+
+  // Filtered pins for the batch modal
+  const batchListPins = useMemo(() => {
+    if (batchTab === "duplicates") {
+      return duplicatePins;
+    }
+    if (batchTab === "selected") {
+      return mappedPins.filter((pin) => selectedPostIds.includes(pin.id));
+    }
+    return mappedPins;
+  }, [mappedPins, duplicatePins, batchTab, selectedPostIds]);
+
+  const toggleSelectPost = (postId) => {
+    setSelectedPostIds((prev) =>
+      prev.includes(postId)
+        ? prev.filter((id) => id !== postId)
+        : [...prev, postId],
+    );
+  };
+
+  const selectAllDuplicates = () => {
+    const dupIds = duplicatePins.map((p) => p.id);
+    setSelectedPostIds((prev) => Array.from(new Set([...prev, ...dupIds])));
+  };
+
+  const selectAllCurrentBatch = () => {
+    const ids = batchListPins.map((p) => p.id);
+    setSelectedPostIds((prev) => Array.from(new Set([...prev, ...ids])));
+  };
+
+  const clearSelection = () => {
+    setSelectedPostIds([]);
+  };
+
+  const handleConfirmBatchDelete = async () => {
+    if (selectedPostIds.length === 0 || deletingBatch) return;
+
+    setDeletingBatch(true);
+    try {
+      const reasonToUse =
+        deleteReason.trim() || "Duplicate report removed by LGU administrator";
+      const postsToDelete = posts.filter((p) => selectedPostIds.includes(p.id));
+
+      for (const p of postsToDelete) {
+        if (notifyUsersOnDelete && p.userId) {
+          try {
+            await notifyPostModerated({
+              post: p,
+              postId: p.id,
+              reason: reasonToUse,
+            });
+          } catch (notifErr) {
+            console.warn("Could not notify user for post deletion:", notifErr);
+          }
+        }
+        await deleteRelatedDocuments(p.id);
+      }
+
+      const count = selectedPostIds.length;
+      setSelectedPostIds([]);
+      setShowDeleteReasonModal(false);
+      setShowBatchModal(false);
+      Alert.alert(
+        "Reports Deleted",
+        `Successfully deleted ${count} report(s) and notified affected residents.`,
+      );
+    } catch (err) {
+      console.error("Batch delete error:", err);
+      Alert.alert(
+        "Error",
+        "Could not delete reports: " + (err.message || "Please try again."),
+      );
+    } finally {
+      setDeletingBatch(false);
+    }
+  };
 
   // Counts for each status tab
   const statusCounts = useMemo(() => {
@@ -462,6 +612,8 @@ export default function AdminMap() {
         <div style="font-size: 11px;">
           <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 3px;">
             <span style="background: \${p.statusColor}; color: #fff; padding: 2px 6px; border-radius: 4px; font-weight: 700; font-size: 9px; text-transform: uppercase;">\${p.statusLabel}</span>
+            \${!p.isPointEligible ? '<span style="background: #EF4444; color: #fff; padding: 2px 5px; border-radius: 4px; font-weight: 700; font-size: 8px;">DUPLICATE (0 PTS)</span>' : ''}
+            \${p.linkedReportId ? '<span style="background: #0284C7; color: #fff; padding: 2px 5px; border-radius: 4px; font-weight: 700; font-size: 8px;">LINKED SITE</span>' : ''}
             <span style="color: #A3E635; font-weight: 600;">🪙 \${p.authorPoints} pts</span>
           </div>
           <div style="font-weight: 700; font-size: 13px; color: #fff; max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px;">\${p.title}</div>
@@ -562,27 +714,60 @@ export default function AdminMap() {
             </View>
           </View>
 
-          <View
-            style={[styles.summaryBadge, isMobile && styles.summaryBadgeMobile]}
-          >
-            <Ionicons
-              name="location"
-              size={isMobile ? 14 : 16}
-              color="#599A74"
-            />
-            <Text
+          <View style={styles.titleRightActions}>
+            <TouchableOpacity
               style={[
-                styles.summaryBadgeText,
-                isMobile && styles.summaryBadgeTextMobile,
+                styles.batchListBtn,
+                duplicatePins.length > 0 && styles.batchListBtnHasDuplicates,
+                isMobile && styles.batchListBtnMobile,
+              ]}
+              onPress={() => setShowBatchModal(true)}
+              activeOpacity={0.8}
+            >
+              <Ionicons
+                name="albums-outline"
+                size={isMobile ? 14 : 16}
+                color={duplicatePins.length > 0 ? "#DC2626" : "#2E6944"}
+              />
+              <Text
+                style={[
+                  styles.batchListBtnText,
+                  duplicatePins.length > 0 &&
+                    styles.batchListBtnTextHasDuplicates,
+                  isMobile && styles.batchListBtnTextMobile,
+                ]}
+              >
+                {duplicatePins.length > 0
+                  ? `Batch (${duplicatePins.length} Duplicates)`
+                  : "Batch List"}
+              </Text>
+            </TouchableOpacity>
+
+            <View
+              style={[
+                styles.summaryBadge,
+                isMobile && styles.summaryBadgeMobile,
               ]}
             >
-              {mappedPins.length}{" "}
-              {isMobile
-                ? "Active"
-                : mappedPins.length === 1
-                  ? "Active Pin"
-                  : "Active Pins"}
-            </Text>
+              <Ionicons
+                name="location"
+                size={isMobile ? 14 : 16}
+                color="#599A74"
+              />
+              <Text
+                style={[
+                  styles.summaryBadgeText,
+                  isMobile && styles.summaryBadgeTextMobile,
+                ]}
+              >
+                {mappedPins.length}{" "}
+                {isMobile
+                  ? "Active"
+                  : mappedPins.length === 1
+                    ? "Active Pin"
+                    : "Active Pins"}
+              </Text>
+            </View>
           </View>
         </View>
 
@@ -591,9 +776,9 @@ export default function AdminMap() {
           style={[styles.controlsRow, isMobile && styles.controlsRowMobile]}
         >
           <View style={[styles.searchBox, isMobile && styles.searchBoxMobile]}>
-            <Ionicons name="search" size={18} color="#78847C" />
+            <Ionicons name="search" size={isMobile ? 20 : 18} color="#78847C" />
             <TextInput
-              style={styles.searchInput}
+              style={[styles.searchInput, isMobile && styles.searchInputMobile]}
               placeholder={
                 isMobile
                   ? "Search reports..."
@@ -901,43 +1086,100 @@ export default function AdminMap() {
                     </Text>
                   </View>
                 )}
-              </TouchableOpacity>
 
-              {/* REPORT DETAILS */}
-              <TouchableOpacity
-                activeOpacity={0.8}
-                onPress={handleRedirectToPostDetail}
-                style={styles.detailsBody}
-              >
-                <Text style={styles.reportTitle} numberOfLines={2}>
-                  {selectedPost?.title || "Environmental Concern Report"}
-                </Text>
+                {selectedPost?.isPointEligible === false && (
+                  <View
+                    style={[
+                      styles.wasteBadgeOverlay,
+                      {
+                        top: 40,
+                        backgroundColor: "#DC2626",
+                      },
+                    ]}
+                  >
+                    <Text style={styles.wasteBadgeText}>
+                      ⚠️ Duplicate (0 Pts)
+                    </Text>
+                  </View>
+                )}
 
-                <View style={styles.locationRow}>
-                  <Image
-                    source={require("../../assets/images/location.png")}
-                    style={{ width: 14, height: 14, marginRight: 6 }}
-                    resizeMode="contain"
-                  />
-                  <Text style={styles.locationText} numberOfLines={1}>
-                    {formatLocationWithPurok(
-                      selectedPost?.locationName,
-                      selectedPost?.purok,
-                    ) ||
-                      selectedPost?.locationName ||
-                      "Pinamungajan, Cebu"}
-                  </Text>
-                </View>
-
-                {!!selectedPost?.caption && (
-                  <Text style={styles.captionText} numberOfLines={2}>
-                    {selectedPost.caption}
-                  </Text>
+                {Boolean(selectedPost?.linkedReportId) && (
+                  <View
+                    style={[
+                      styles.wasteBadgeOverlay,
+                      {
+                        top: selectedPost?.isPointEligible === false ? 70 : 40,
+                        backgroundColor: "#0284C7",
+                      },
+                    ]}
+                  >
+                    <Text style={styles.wasteBadgeText}>🔗 Linked Site</Text>
+                  </View>
                 )}
               </TouchableOpacity>
 
+              {/* REPORT DETAILS */}
+              <View style={styles.detailsBody}>
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={handleRedirectToPostDetail}
+                >
+                  <Text style={styles.reportTitle} numberOfLines={2}>
+                    {selectedPost?.title || "Environmental Concern Report"}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.locationRowClickable}
+                  onPress={() => setShowLocationModal(true)}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.locationRowLeft}>
+                    <Image
+                      source={require("../../assets/images/location.png")}
+                      style={{ width: 14, height: 14, marginRight: 6 }}
+                      resizeMode="contain"
+                    />
+                    <Text style={styles.locationText} numberOfLines={1}>
+                      {formatLocationWithPurok(selectedPost) ||
+                        selectedPost?.locationName ||
+                        "Pinamungajan, Cebu"}
+                    </Text>
+                  </View>
+                  <View style={styles.locationAdjustBadge}>
+                    <Ionicons
+                      name="location-outline"
+                      size={13}
+                      color="#276344"
+                    />
+                    <Text style={styles.locationAdjustBadgeText}>Adjust</Text>
+                  </View>
+                </TouchableOpacity>
+
+                {!!selectedPost?.caption && (
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    onPress={handleRedirectToPostDetail}
+                  >
+                    <Text style={styles.captionText} numberOfLines={2}>
+                      {selectedPost.caption}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
               {/* ACTION BUTTONS */}
               <View style={styles.actionButtonsRow}>
+                <TouchableOpacity
+                  style={styles.adjustLocationBtn}
+                  onPress={() => setShowLocationModal(true)}
+                >
+                  <Ionicons name="map-outline" size={16} color="#276344" />
+                  <Text style={styles.adjustLocationBtnText}>
+                    Set / Adjust Location
+                  </Text>
+                </TouchableOpacity>
+
                 <TouchableOpacity
                   style={styles.viewDetailBtn}
                   onPress={handleRedirectToPostDetail}
@@ -959,6 +1201,409 @@ export default function AdminMap() {
           </View>
         </View>
       </Modal>
+
+      {/* BATCH REPORT MANAGEMENT MODAL */}
+      <Modal
+        visible={showBatchModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowBatchModal(false)}
+      >
+        <View style={styles.batchOverlay}>
+          <View
+            style={[
+              styles.batchModalCard,
+              isMobile && styles.batchModalCardMobile,
+            ]}
+          >
+            {/* MODAL HEADER */}
+            <View style={styles.batchHeaderRow}>
+              <View style={{ flex: 1 }}>
+                <View
+                  style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+                >
+                  <Ionicons name="albums" size={22} color="#276344" />
+                  <Text style={styles.batchTitle}>Batch Report Management</Text>
+                </View>
+                <Text style={styles.batchSubtitle}>
+                  Multi-select duplicate or active reports to batch delete with
+                  user notices.
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.batchCloseBtn}
+                onPress={() => setShowBatchModal(false)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons name="close" size={22} color="#4A5568" />
+              </TouchableOpacity>
+            </View>
+
+            {/* TABS & QUICK SELECTION BAR */}
+            <View style={styles.batchControlsBar}>
+              <View style={styles.batchTabsRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.batchTabBtn,
+                    batchTab === "all" && styles.batchTabBtnActive,
+                  ]}
+                  onPress={() => setBatchTab("all")}
+                >
+                  <Text
+                    style={[
+                      styles.batchTabBtnText,
+                      batchTab === "all" && styles.batchTabBtnTextActive,
+                    ]}
+                  >
+                    All ({mappedPins.length})
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.batchTabBtn,
+                    batchTab === "duplicates" && styles.batchTabBtnActive,
+                    duplicatePins.length > 0 && { borderColor: "#FCA5A5" },
+                  ]}
+                  onPress={() => setBatchTab("duplicates")}
+                >
+                  <Text
+                    style={[
+                      styles.batchTabBtnText,
+                      batchTab === "duplicates" && styles.batchTabBtnTextActive,
+                      duplicatePins.length > 0 && {
+                        color: batchTab === "duplicates" ? "#fff" : "#DC2626",
+                      },
+                    ]}
+                  >
+                    Duplicates ({duplicatePins.length})
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.batchTabBtn,
+                    batchTab === "selected" && styles.batchTabBtnActive,
+                  ]}
+                  onPress={() => setBatchTab("selected")}
+                >
+                  <Text
+                    style={[
+                      styles.batchTabBtnText,
+                      batchTab === "selected" && styles.batchTabBtnTextActive,
+                    ]}
+                  >
+                    Selected ({selectedPostIds.length})
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.batchQuickActionsRow}>
+                {duplicatePins.length > 0 && (
+                  <TouchableOpacity
+                    style={styles.batchQuickBtnDuplicate}
+                    onPress={selectAllDuplicates}
+                  >
+                    <Ionicons name="flash" size={14} color="#B91C1C" />
+                    <Text style={styles.batchQuickBtnDuplicateText}>
+                      Select All Duplicates
+                    </Text>
+                  </TouchableOpacity>
+                )}
+
+                <TouchableOpacity
+                  style={styles.batchQuickBtn}
+                  onPress={selectAllCurrentBatch}
+                >
+                  <Text style={styles.batchQuickBtnText}>
+                    Select All Filtered
+                  </Text>
+                </TouchableOpacity>
+
+                {selectedPostIds.length > 0 && (
+                  <TouchableOpacity
+                    style={styles.batchQuickBtn}
+                    onPress={clearSelection}
+                  >
+                    <Text style={styles.batchQuickBtnText}>
+                      Clear ({selectedPostIds.length})
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+
+            {/* SCROLLABLE REPORTS LIST */}
+            <ScrollView
+              style={styles.batchListScroll}
+              contentContainerStyle={{ paddingVertical: 8, gap: 8 }}
+            >
+              {batchListPins.length === 0 ? (
+                <View style={styles.batchEmptyBox}>
+                  <Ionicons
+                    name="document-text-outline"
+                    size={36}
+                    color="#A0AEC0"
+                  />
+                  <Text style={styles.batchEmptyText}>
+                    {batchTab === "duplicates"
+                      ? "No duplicate reports detected in current view."
+                      : batchTab === "selected"
+                        ? "No reports selected yet."
+                        : "No reports found."}
+                  </Text>
+                </View>
+              ) : (
+                batchListPins.map((pin) => {
+                  const isSelected = selectedPostIds.includes(pin.id);
+                  const isDup = pin.isDuplicate || !pin.isPointEligible;
+
+                  return (
+                    <TouchableOpacity
+                      key={pin.id}
+                      style={[
+                        styles.batchItemCard,
+                        isSelected && styles.batchItemCardSelected,
+                        isDup && !isSelected && styles.batchItemCardDuplicate,
+                      ]}
+                      onPress={() => toggleSelectPost(pin.id)}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons
+                        name={isSelected ? "checkbox" : "square-outline"}
+                        size={22}
+                        color={isSelected ? "#2E6944" : "#A0AEC0"}
+                        style={{ marginRight: 10 }}
+                      />
+
+                      {pin.imageUrl ? (
+                        <Image
+                          source={{ uri: pin.imageUrl }}
+                          style={styles.batchItemThumb}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <View style={styles.batchItemThumbPlaceholder}>
+                          <Ionicons
+                            name="image-outline"
+                            size={18}
+                            color="#999"
+                          />
+                        </View>
+                      )}
+
+                      <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+                        <Text style={styles.batchItemTitle} numberOfLines={1}>
+                          {pin.title}
+                        </Text>
+                        <Text
+                          style={styles.batchItemLocation}
+                          numberOfLines={1}
+                        >
+                          📍 {pin.locationName}
+                        </Text>
+                        <Text style={styles.batchItemAuthor} numberOfLines={1}>
+                          By {pin.authorName}
+                        </Text>
+                      </View>
+
+                      <View style={styles.batchItemBadgesCol}>
+                        {isDup ? (
+                          <View style={styles.batchBadgeDuplicate}>
+                            <Text style={styles.batchBadgeDuplicateText}>
+                              DUPLICATE (0 PTS)
+                            </Text>
+                          </View>
+                        ) : pin.linkedReportId ? (
+                          <View style={styles.batchBadgeLinked}>
+                            <Text style={styles.batchBadgeLinkedText}>
+                              LINKED SITE
+                            </Text>
+                          </View>
+                        ) : (
+                          <View style={styles.batchBadgeOriginal}>
+                            <Text style={styles.batchBadgeOriginalText}>
+                              ORIGINAL
+                            </Text>
+                          </View>
+                        )}
+
+                        <View
+                          style={[
+                            styles.batchBadgeStatus,
+                            { backgroundColor: pin.statusColor },
+                          ]}
+                        >
+                          <Text style={styles.batchBadgeStatusText}>
+                            {pin.statusLabel}
+                          </Text>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </ScrollView>
+
+            {/* BOTTOM STICKY ACTION BAR */}
+            <View style={styles.batchBottomActionBar}>
+              <Text style={styles.batchSelectedCountText}>
+                {selectedPostIds.length}{" "}
+                {selectedPostIds.length === 1 ? "report" : "reports"} selected
+              </Text>
+
+              <TouchableOpacity
+                style={[
+                  styles.batchDeleteBtn,
+                  selectedPostIds.length === 0 && styles.batchDeleteBtnDisabled,
+                ]}
+                disabled={selectedPostIds.length === 0}
+                onPress={() => setShowDeleteReasonModal(true)}
+              >
+                <Ionicons name="trash-outline" size={18} color="#FFFFFF" />
+                <Text style={styles.batchDeleteBtnText}>
+                  Delete Selected ({selectedPostIds.length})
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* BATCH DELETE REASON & NOTICE MODAL */}
+      <Modal
+        visible={showDeleteReasonModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!deletingBatch) setShowDeleteReasonModal(false);
+        }}
+      >
+        <View style={styles.deleteModalOverlay}>
+          <View style={styles.deleteConfirmCard} accessibilityRole="alert">
+            <View style={styles.deleteConfirmIconWrapper}>
+              <Ionicons name="trash-outline" size={28} color="#DC2626" />
+            </View>
+            <Text style={styles.deleteConfirmTitle}>
+              Delete {selectedPostIds.length} Report(s)?
+            </Text>
+            <Text style={styles.deleteConfirmMessage}>
+              This will permanently delete the selected reports. Affected
+              resident users will receive an official notification notice
+              explaining the deletion.
+            </Text>
+
+            {/* QUICK PRESET REASONS */}
+            <View style={styles.presetReasonsContainer}>
+              <Text style={styles.presetLabel}>
+                Select or customize reason:
+              </Text>
+              <View style={styles.presetChipsRow}>
+                {[
+                  "Duplicate report in same vicinity",
+                  "Already cleaned / resolved",
+                  "Inaccurate location / false report",
+                  "Spam or invalid content",
+                ].map((reasonOption) => (
+                  <TouchableOpacity
+                    key={reasonOption}
+                    style={[
+                      styles.presetChip,
+                      deleteReason === reasonOption && styles.presetChipActive,
+                    ]}
+                    onPress={() => setDeleteReason(reasonOption)}
+                  >
+                    <Text
+                      style={[
+                        styles.presetChipText,
+                        deleteReason === reasonOption &&
+                          styles.presetChipTextActive,
+                      ]}
+                    >
+                      {reasonOption}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            <TextInput
+              style={styles.deleteReasonInput}
+              placeholder="Reason for deletion..."
+              placeholderTextColor="#8FA396"
+              value={deleteReason}
+              onChangeText={setDeleteReason}
+              multiline
+              numberOfLines={2}
+            />
+
+            {/* NOTIFY USERS TOGGLE */}
+            <TouchableOpacity
+              style={styles.notifyToggleRow}
+              onPress={() => setNotifyUsersOnDelete((prev) => !prev)}
+              activeOpacity={0.8}
+            >
+              <Ionicons
+                name={notifyUsersOnDelete ? "checkbox" : "square-outline"}
+                size={20}
+                color={notifyUsersOnDelete ? "#276344" : "#999"}
+              />
+              <Text style={styles.notifyToggleText}>
+                Send notification notice to affected users in app
+              </Text>
+            </TouchableOpacity>
+
+            <View style={styles.deleteConfirmActions}>
+              <TouchableOpacity
+                style={styles.deleteCancelBtn}
+                onPress={() => setShowDeleteReasonModal(false)}
+                disabled={deletingBatch}
+              >
+                <Text style={styles.deleteCancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.deleteSubmitBtn,
+                  deletingBatch && styles.disabledBtn,
+                ]}
+                onPress={handleConfirmBatchDelete}
+                disabled={deletingBatch}
+              >
+                {deletingBatch ? (
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <ActivityIndicator size="small" color="#fff" />
+                    <Text style={styles.deleteSubmitBtnText}>Deleting...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.deleteSubmitBtnText}>Confirm Delete</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* POST LOCATION MODAL FOR ADMIN TO SET / ADJUST REPORT LOCATION */}
+      <PostLocationModal
+        key={
+          showLocationModal
+            ? `admin-loc-${selectedPost?.id}-open`
+            : "admin-loc-closed"
+        }
+        visible={showLocationModal}
+        onClose={() => setShowLocationModal(false)}
+        initialLocation={selectedPost?.locationName}
+        initialCoords={selectedPost?.coordinates}
+        post={selectedPost}
+        onSelectLocation={handleSaveReportLocation}
+      />
     </View>
   );
 }
@@ -1060,7 +1705,7 @@ const styles = StyleSheet.create({
   controlsRowMobile: {
     flexDirection: "column",
     alignItems: "stretch",
-    gap: 8,
+    gap: 10,
   },
 
   searchBox: {
@@ -1078,9 +1723,15 @@ const styles = StyleSheet.create({
   },
 
   searchBoxMobile: {
+    flex: 0,
+    flexGrow: 0,
+    flexShrink: 0,
     minWidth: "100%",
     width: "100%",
-    height: 38,
+    height: 46,
+    minHeight: 46,
+    borderRadius: 10,
+    paddingHorizontal: 14,
   },
 
   searchInput: {
@@ -1088,7 +1739,12 @@ const styles = StyleSheet.create({
     height: "100%",
     fontSize: 13,
     color: "#24352A",
+    paddingVertical: 0,
     outlineStyle: "none",
+  },
+
+  searchInputMobile: {
+    fontSize: 14,
   },
 
   filterTabs: {
@@ -1450,6 +2106,42 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
 
+  locationRowClickable: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#F4F8F5",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#E2ECE5",
+    marginBottom: 8,
+  },
+
+  locationRowLeft: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    marginRight: 8,
+  },
+
+  locationAdjustBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#E8F4EC",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    gap: 4,
+  },
+
+  locationAdjustBadgeText: {
+    color: "#276344",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+
   locationText: {
     fontSize: 12,
     color: "#52675A",
@@ -1466,11 +2158,32 @@ const styles = StyleSheet.create({
   actionButtonsRow: {
     flexDirection: "row",
     alignItems: "center",
+    flexWrap: "wrap",
     gap: 10,
+  },
+
+  adjustLocationBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#E8F4EC",
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#CDE3D4",
+    gap: 6,
+  },
+
+  adjustLocationBtnText: {
+    color: "#276344",
+    fontSize: 13,
+    fontWeight: "700",
   },
 
   viewDetailBtn: {
     flex: 1,
+    minWidth: 140,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -1500,5 +2213,494 @@ const styles = StyleSheet.create({
     color: "#52675A",
     fontSize: 13,
     fontWeight: "600",
+  },
+
+  /* BATCH MANAGEMENT STYLES */
+  titleRightActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+
+  batchListBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: "#EAF4EE",
+    borderWidth: 1,
+    borderColor: "#C2DFC9",
+  },
+
+  batchListBtnHasDuplicates: {
+    backgroundColor: "#FEF2F2",
+    borderColor: "#FECACA",
+  },
+
+  batchListBtnMobile: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    gap: 4,
+  },
+
+  batchListBtnText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#2E6944",
+  },
+
+  batchListBtnTextHasDuplicates: {
+    color: "#DC2626",
+  },
+
+  batchListBtnTextMobile: {
+    fontSize: 11,
+  },
+
+  batchOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 16,
+  },
+
+  batchModalCard: {
+    width: "100%",
+    maxWidth: 680,
+    maxHeight: "88%",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 20,
+    display: "flex",
+    flexDirection: "column",
+  },
+
+  batchModalCardMobile: {
+    maxWidth: "98%",
+    maxHeight: "94%",
+    padding: 14,
+  },
+
+  batchHeaderRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+
+  batchTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#1F2937",
+  },
+
+  batchSubtitle: {
+    fontSize: 12,
+    color: "#6B7280",
+    marginTop: 2,
+  },
+
+  batchCloseBtn: {
+    padding: 4,
+  },
+
+  batchControlsBar: {
+    gap: 10,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E5E7EB",
+  },
+
+  batchTabsRow: {
+    flexDirection: "row",
+    gap: 6,
+    flexWrap: "wrap",
+  },
+
+  batchTabBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: "#F3F4F6",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+
+  batchTabBtnActive: {
+    backgroundColor: "#2E6944",
+    borderColor: "#2E6944",
+  },
+
+  batchTabBtnText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#4B5563",
+  },
+
+  batchTabBtnTextActive: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+  },
+
+  batchQuickActionsRow: {
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "center",
+    flexWrap: "wrap",
+  },
+
+  batchQuickBtnDuplicate: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    backgroundColor: "#FEE2E2",
+    borderWidth: 1,
+    borderColor: "#FCA5A5",
+  },
+
+  batchQuickBtnDuplicateText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#B91C1C",
+  },
+
+  batchQuickBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
+    backgroundColor: "#F3F4F6",
+  },
+
+  batchQuickBtnText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#4B5563",
+  },
+
+  batchListScroll: {
+    flex: 1,
+    marginVertical: 8,
+  },
+
+  batchEmptyBox: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 40,
+    gap: 8,
+  },
+
+  batchEmptyText: {
+    fontSize: 13,
+    color: "#9CA3AF",
+  },
+
+  batchItemCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+
+  batchItemCardSelected: {
+    backgroundColor: "#F0FDF4",
+    borderColor: "#86EFAC",
+  },
+
+  batchItemCardDuplicate: {
+    backgroundColor: "#FFFBFB",
+    borderColor: "#FED7D7",
+  },
+
+  batchItemThumb: {
+    width: 44,
+    height: 44,
+    borderRadius: 6,
+    marginRight: 10,
+  },
+
+  batchItemThumbPlaceholder: {
+    width: 44,
+    height: 44,
+    borderRadius: 6,
+    marginRight: 10,
+    backgroundColor: "#F3F4F6",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  batchItemTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#1F2937",
+  },
+
+  batchItemLocation: {
+    fontSize: 11,
+    color: "#4B5563",
+  },
+
+  batchItemAuthor: {
+    fontSize: 10,
+    color: "#9CA3AF",
+  },
+
+  batchItemBadgesCol: {
+    alignItems: "flex-end",
+    gap: 4,
+    marginLeft: 8,
+  },
+
+  batchBadgeDuplicate: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: "#FEE2E2",
+  },
+
+  batchBadgeDuplicateText: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: "#DC2626",
+  },
+
+  batchBadgeLinked: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: "#E0F2FE",
+  },
+
+  batchBadgeLinkedText: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: "#0284C7",
+  },
+
+  batchBadgeOriginal: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: "#DCFCE7",
+  },
+
+  batchBadgeOriginalText: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: "#16A34A",
+  },
+
+  batchBadgeStatus: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+
+  batchBadgeStatusText: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+
+  batchBottomActionBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#E5E7EB",
+  },
+
+  batchSelectedCountText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#4B5563",
+  },
+
+  batchDeleteBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#DC2626",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+
+  batchDeleteBtnDisabled: {
+    backgroundColor: "#D1D5DB",
+  },
+
+  batchDeleteBtnText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 13,
+  },
+
+  presetReasonsContainer: {
+    width: "100%",
+    marginTop: 12,
+    marginBottom: 8,
+  },
+
+  presetLabel: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#4B5563",
+    marginBottom: 6,
+  },
+
+  presetChipsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+
+  presetChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: "#F3F4F6",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+
+  presetChipActive: {
+    backgroundColor: "#FEE2E2",
+    borderColor: "#FCA5A5",
+  },
+
+  presetChipText: {
+    fontSize: 11,
+    color: "#4B5563",
+  },
+
+  presetChipTextActive: {
+    color: "#DC2626",
+    fontWeight: "700",
+  },
+
+  deleteReasonInput: {
+    width: "100%",
+    minHeight: 60,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    borderRadius: 8,
+    fontSize: 12,
+    color: "#1F2937",
+    backgroundColor: "#F9FAFB",
+    marginBottom: 12,
+  },
+
+  notifyToggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    width: "100%",
+    marginBottom: 16,
+  },
+
+  notifyToggleText: {
+    fontSize: 12,
+    color: "#374151",
+    fontWeight: "500",
+  },
+
+  deleteModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.65)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 16,
+    zIndex: 99999,
+  },
+
+  deleteConfirmCard: {
+    width: "100%",
+    maxWidth: 440,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 24,
+    alignItems: "center",
+    boxShadow: "0 20px 40px rgba(0, 0, 0, 0.3)",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    zIndex: 100000,
+  },
+
+  deleteConfirmIconWrapper: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "#FEE2E2",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
+  },
+
+  deleteConfirmTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#1F2937",
+    textAlign: "center",
+    marginBottom: 6,
+  },
+
+  deleteConfirmMessage: {
+    fontSize: 13,
+    color: "#4B5563",
+    lineHeight: 18,
+    textAlign: "center",
+    marginBottom: 14,
+  },
+
+  deleteConfirmActions: {
+    flexDirection: "row",
+    gap: 12,
+    width: "100%",
+    marginTop: 6,
+  },
+
+  deleteCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: "#F3F4F6",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  deleteCancelBtnText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#4B5563",
+  },
+
+  deleteSubmitBtn: {
+    flex: 1.2,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: "#DC2626",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  deleteSubmitBtnText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 13,
+  },
+
+  disabledBtn: {
+    opacity: 0.6,
   },
 });

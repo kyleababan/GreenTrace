@@ -17,6 +17,10 @@ import {
 } from "react-native";
 import { uploadToCloudinary } from "../../cloudinary";
 import PostLocationModal from "../../components/PostLocationModal";
+import {
+  formatLocationWithPurok,
+  formatPurokOrSitio,
+} from "../../constants/locationFormat";
 import { auth, db } from "../../firebaseConfig";
 import { hideBadWords } from "../../utils/hideBadWords";
 import { notifyAllResidentsOnActivityCreated } from "../../utils/notificationHelpers";
@@ -84,13 +88,16 @@ export default function AddEvent() {
   const router = useRouter();
   const { width } = useWindowDimensions();
   const isNarrow = width < 760;
+  const isMobile = width < 600;
   const [title, setTitle] = useState("Community Cleanup Event");
   const [description, setDescription] = useState("");
   const [requirements, setRequirements] = useState(INITIAL_REQUIREMENTS);
   const [location, setLocation] = useState("");
   const [coordinates, setCoordinates] = useState(null);
+  const [manualStreet, setManualStreet] = useState("");
   const [manualBarangay, setManualBarangay] = useState("");
   const [manualPurok, setManualPurok] = useState("");
+  const [manualMunicipality, setManualMunicipality] = useState("Pinamungajan");
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
   const [maxVolunteers, setMaxVolunteers] = useState("");
@@ -139,8 +146,14 @@ export default function AddEvent() {
   };
 
   const selectLocation = () => {
-    if (!manualBarangay || !manualPurok) return;
-    setLocation(`${manualBarangay}, Pk. ${manualPurok}`);
+    if (!manualBarangay) return;
+    const formatted = formatLocationWithPurok(
+      manualStreet.trim(),
+      manualPurok.trim(),
+      manualBarangay.trim(),
+      manualMunicipality.trim() || "Pinamungajan",
+    );
+    setLocation(formatted);
     setCoordinates(null);
     clearError("location");
     setManualLocationVisible(false);
@@ -249,6 +262,10 @@ export default function AddEvent() {
         imageUrl,
         meetingLocation: location.trim(),
         locationName: location.trim(),
+        street: manualStreet.trim() || null,
+        purok: manualPurok ? formatPurokOrSitio(manualPurok.trim()) : null,
+        barangay: manualBarangay.trim() || null,
+        municipality: manualMunicipality.trim() || "Pinamungajan",
         ...(coordinates?.latitude != null && coordinates?.longitude != null
           ? {
               coordinates: {
@@ -289,59 +306,94 @@ export default function AddEvent() {
 
   return (
     <View style={styles.page}>
-      <View style={styles.fixedHeader}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-          accessibilityLabel="Back to Volunteer List"
-        >
-          <Image
-            source={require("../../assets/images/backG.png")}
-            style={styles.backIcon}
-            resizeMode="contain"
-          />
-        </TouchableOpacity>
+      <View style={[styles.fixedHeader, isMobile && styles.fixedHeaderMobile]}>
+        {isMobile ? (
+          <View style={styles.mobileHeader}>
+            <TouchableOpacity
+              style={styles.backButtonMobile}
+              onPress={() => router.back()}
+              accessibilityLabel="Back to Volunteer List"
+            >
+              <Image
+                source={require("../../assets/images/backG.png")}
+                style={styles.backIconMobile}
+                resizeMode="contain"
+              />
+            </TouchableOpacity>
 
-        <View style={styles.header}>
-          <View style={styles.headerIcon}>
-            <Ionicons name="leaf" size={22} color="#EAF5EE" />
+            <View style={styles.mobileHeaderCenter}>
+              <Text style={styles.headingMobile}>Add Event</Text>
+              <Text style={styles.eyebrowMobile}>NATURE & WASTE RESPONSE</Text>
+            </View>
+
+            <View style={styles.headerIconMobile}>
+              <Ionicons name="leaf" size={18} color="#397A51" />
+            </View>
           </View>
-          <View style={styles.headerCopy}>
-            <Text style={styles.eyebrow}>NATURE AND WASTE RESPONSE</Text>
-            <Text style={styles.heading}>Add Event</Text>
-            <Text style={styles.subheading}>
-              Create a cleanup or environmental activity for volunteers.
-            </Text>
-          </View>
-        </View>
+        ) : (
+          <>
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => router.back()}
+              accessibilityLabel="Back to Volunteer List"
+            >
+              <Image
+                source={require("../../assets/images/backG.png")}
+                style={styles.backIcon}
+                resizeMode="contain"
+              />
+            </TouchableOpacity>
+
+            <View style={styles.header}>
+              <View style={styles.headerIcon}>
+                <Ionicons name="leaf" size={22} color="#397A51" />
+              </View>
+              <View style={styles.headerCopy}>
+                <Text style={styles.eyebrow}>NATURE AND WASTE RESPONSE</Text>
+                <Text style={styles.heading}>Add Event</Text>
+                <Text style={styles.subheading}>
+                  Create a cleanup or environmental activity for volunteers.
+                </Text>
+              </View>
+            </View>
+          </>
+        )}
       </View>
       <ScrollView
         style={styles.formScroll}
         contentContainerStyle={[
           styles.content,
           {
-            paddingHorizontal: isNarrow ? 12 : width < 1024 ? 16 : 24,
-            paddingTop: isNarrow ? 12 : 18,
+            paddingHorizontal: isMobile ? 12 : isNarrow ? 14 : width < 1024 ? 16 : 24,
+            paddingTop: isMobile ? 10 : isNarrow ? 12 : 18,
+            paddingBottom: isMobile ? 24 : 36,
           },
         ]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={styles.formCard}>
-          <View style={styles.formIntro}>
-            <Text style={styles.formIntroTitle}>Event details</Text>
+        <View style={[styles.formCard, isMobile && styles.formCardMobile]}>
+          <View style={[styles.formIntro, isMobile && styles.formIntroMobile]}>
+            <Text style={[styles.formIntroTitle, isMobile && styles.formIntroTitleMobile]}>
+              Event details
+            </Text>
             <Text style={styles.formIntroHint}>
               Add the key information volunteers need to join.
             </Text>
           </View>
 
           <View
-            style={[styles.formColumns, isNarrow && styles.formColumnsStacked]}
+            style={isNarrow ? styles.formColumnsStacked : styles.formColumns}
           >
-            <View style={styles.formColumn}>
+            <View
+              style={isNarrow ? styles.formColumnStacked : styles.formColumn}
+            >
               <Text style={styles.label}>Event image</Text>
               <TouchableOpacity
-                style={styles.imagePicker}
+                style={[
+                  styles.imagePicker,
+                  isMobile && styles.imagePickerMobile,
+                ]}
                 onPress={pickImage}
                 accessibilityRole="button"
                 accessibilityLabel={
@@ -352,13 +404,29 @@ export default function AddEvent() {
                   <Image
                     source={{ uri: image.uri }}
                     style={styles.previewImage}
-                    resizeMode="contain"
+                    resizeMode="cover"
                   />
                 ) : (
                   <>
-                    <Ionicons name="image-outline" size={42} color="#5F9C76" />
-                    <Text style={styles.imagePickerTitle}>Upload image</Text>
-                    <Text style={styles.imagePickerHint}>
+                    <Ionicons
+                      name="image-outline"
+                      size={isMobile ? 32 : 42}
+                      color="#5F9C76"
+                    />
+                    <Text
+                      style={[
+                        styles.imagePickerTitle,
+                        isMobile && styles.imagePickerTitleMobile,
+                      ]}
+                    >
+                      Upload image
+                    </Text>
+                    <Text
+                      style={[
+                        styles.imagePickerHint,
+                        isMobile && styles.imagePickerHintMobile,
+                      ]}
+                    >
                       Add a clear photo of the nature or waste activity
                     </Text>
                   </>
@@ -371,7 +439,7 @@ export default function AddEvent() {
               <View
                 style={[
                   styles.twoColumnRow,
-                  isNarrow && styles.twoColumnRowStacked,
+                  width < 340 && styles.twoColumnRowStacked,
                 ]}
               >
                 <View style={styles.column}>
@@ -462,6 +530,12 @@ export default function AddEvent() {
                 accessibilityRole="button"
                 accessibilityLabel="Enter meetup area manually"
               >
+                <Ionicons
+                  name="create-outline"
+                  size={14}
+                  color="#397A51"
+                  style={{ marginRight: 4 }}
+                />
                 <Text style={styles.manualLocationLinkText}>
                   Enter location manually
                 </Text>
@@ -471,7 +545,9 @@ export default function AddEvent() {
               )}
             </View>
 
-            <View style={styles.formColumn}>
+            <View
+              style={isNarrow ? styles.formColumnStacked : styles.formColumn}
+            >
               <Text style={styles.label}>Event title</Text>
               <TextInput
                 value={title}
@@ -497,13 +573,21 @@ export default function AddEvent() {
                 <Text style={styles.error}>{errors.description}</Text>
               )}
 
-              <View style={styles.requirementsPanel}>
+              <View
+                style={[
+                  styles.requirementsPanel,
+                  isMobile && styles.requirementsPanelMobile,
+                ]}
+              >
                 <Text style={styles.requirementsTitle}>
                   Volunteer requirements
                 </Text>
                 <ScrollView
                   ref={requirementsScrollRef}
-                  style={styles.requirementsList}
+                  style={[
+                    styles.requirementsList,
+                    isMobile && styles.requirementsListMobile,
+                  ]}
                   contentContainerStyle={styles.requirementsListContent}
                   nestedScrollEnabled
                   keyboardShouldPersistTaps="handled"
@@ -567,7 +651,11 @@ export default function AddEvent() {
           )}
 
           <TouchableOpacity
-            style={[styles.saveButton, saving && styles.disabledButton]}
+            style={[
+              styles.saveButton,
+              isMobile && styles.saveButtonMobile,
+              saving && styles.disabledButton,
+            ]}
             onPress={saveEvent}
             disabled={saving}
           >
@@ -586,67 +674,110 @@ export default function AddEvent() {
         animationType="fade"
         onRequestClose={() => setManualLocationVisible(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Meet up area</Text>
-            <TouchableOpacity
-              style={styles.dropdown}
-              onPress={() => setBarangayDropdownOpen((current) => !current)}
-            >
-              <Text
-                style={
-                  manualBarangay
-                    ? styles.dropdownText
-                    : styles.pickerPlaceholder
-                }
+        <View style={[styles.modalOverlay, isMobile && styles.modalOverlayMobile]}>
+          <View style={[styles.modalCard, isMobile && styles.modalCardMobile]}>
+            <View style={styles.modalHeaderRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.modalTitle}>Meet up area</Text>
+                <Text style={styles.manualModalSubtitle}>
+                  Specify Street, Sitio/Purok, Barangay, and Municipality.
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => setManualLocationVisible(false)}
+                accessibilityLabel="Close"
               >
-                {manualBarangay || "Select Barangay"}
-              </Text>
-              <Text style={styles.dropdownArrow}>
-                {barangayDropdownOpen ? "^" : "v"}
-              </Text>
-            </TouchableOpacity>
-            {barangayDropdownOpen && (
-              <ScrollView style={styles.dropdownList} nestedScrollEnabled>
-                {BARANGAYS.map((barangay) => (
-                  <TouchableOpacity
-                    key={barangay}
-                    style={styles.dropdownOption}
-                    onPress={() => {
-                      setManualBarangay(barangay);
-                      setBarangayDropdownOpen(false);
-                    }}
-                  >
-                    <Text style={styles.dropdownText}>{barangay}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            )}
-            <View style={styles.purokRow}>
-              <Text style={styles.purokPrefix}>Pk.</Text>
+                <Ionicons name="close" size={22} color="#52675A" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ paddingBottom: 8 }}
+            >
+              <Text style={styles.inputSubLabel}>Street / Landmark (Optional)</Text>
+              <TextInput
+                value={manualStreet}
+                onChangeText={setManualStreet}
+                placeholder="e.g. Rizal Street, Near Chapel"
+                placeholderTextColor="#91A198"
+                style={styles.modalInput}
+              />
+
+              <Text style={styles.inputSubLabel}>Sitio or Purok (Optional)</Text>
               <TextInput
                 value={manualPurok}
-                onChangeText={(value) =>
-                  setManualPurok(value.replace(/\D/g, ""))
-                }
-                placeholder="Purok number"
+                onChangeText={setManualPurok}
+                placeholder="e.g. Purok 4, Sitio Riverside"
                 placeholderTextColor="#91A198"
-                keyboardType="number-pad"
-                style={styles.purokInput}
+                style={styles.modalInput}
               />
-            </View>
-            <TouchableOpacity
-              style={styles.modalButton}
-              onPress={selectLocation}
-            >
-              <Text style={styles.modalButtonText}>Save meetup area</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.modalCancel}
-              onPress={() => setManualLocationVisible(false)}
-            >
-              <Text style={styles.modalCancelText}>Cancel</Text>
-            </TouchableOpacity>
+
+              <Text style={styles.inputSubLabel}>
+                Barangay <Text style={{ color: "#E05353" }}>*</Text>
+              </Text>
+              <TouchableOpacity
+                style={styles.dropdown}
+                onPress={() => setBarangayDropdownOpen((current) => !current)}
+              >
+                <Text
+                  style={
+                    manualBarangay
+                      ? styles.dropdownText
+                      : styles.pickerPlaceholder
+                  }
+                >
+                  {manualBarangay || "Select Barangay"}
+                </Text>
+                <Text style={styles.dropdownArrow}>
+                  {barangayDropdownOpen ? "^" : "v"}
+                </Text>
+              </TouchableOpacity>
+              {barangayDropdownOpen && (
+                <ScrollView style={styles.dropdownList} nestedScrollEnabled>
+                  {BARANGAYS.map((barangay) => (
+                    <TouchableOpacity
+                      key={barangay}
+                      style={styles.dropdownOption}
+                      onPress={() => {
+                        setManualBarangay(barangay);
+                        setBarangayDropdownOpen(false);
+                      }}
+                    >
+                      <Text style={styles.dropdownText}>{barangay}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
+
+              <Text style={styles.inputSubLabel}>Municipality or City</Text>
+              <TextInput
+                value={manualMunicipality}
+                onChangeText={setManualMunicipality}
+                placeholder="e.g. Pinamungajan"
+                placeholderTextColor="#91A198"
+                style={styles.modalInput}
+              />
+
+              <TouchableOpacity
+                style={[
+                  styles.modalButton,
+                  !manualBarangay && { opacity: 0.5 },
+                ]}
+                onPress={selectLocation}
+                disabled={!manualBarangay}
+              >
+                <Text style={styles.modalButtonText}>Save meetup area</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalCancel}
+                onPress={() => setManualLocationVisible(false)}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -657,8 +788,20 @@ export default function AddEvent() {
         onClose={() => setGpsVisible(false)}
         initialLocation={location}
         initialCoords={coordinates}
+        post={{
+          locationName: location,
+          street: manualStreet,
+          purok: manualPurok,
+          barangay: manualBarangay,
+          municipality: manualMunicipality,
+          coordinates,
+        }}
         onSelectLocation={(selected) => {
           setLocation(selected.locationName);
+          setManualStreet(selected.street || "");
+          setManualPurok(selected.purok || "");
+          setManualBarangay(selected.barangay || "");
+          setManualMunicipality(selected.municipality || "Pinamungajan");
           setCoordinates(selected.coordinates);
           clearError("location");
           setGpsVisible(false);
@@ -671,8 +814,8 @@ export default function AddEvent() {
         animationType="fade"
         onRequestClose={() => setCalendarVisible(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.calendarCard}>
+        <View style={[styles.modalOverlay, isMobile && styles.modalOverlayMobile]}>
+          <View style={[styles.calendarCard, isMobile && styles.modalCardMobile]}>
             <View style={styles.calendarHeader}>
               <View>
                 <Text style={styles.modalTitle}>Choose Date</Text>
@@ -751,8 +894,8 @@ export default function AddEvent() {
         animationType="fade"
         onRequestClose={() => setTimeVisible(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
+        <View style={[styles.modalOverlay, isMobile && styles.modalOverlayMobile]}>
+          <View style={[styles.modalCard, isMobile && styles.modalCardMobile]}>
             <View style={styles.calendarHeader}>
               <Text style={styles.modalTitle}>Choose Time</Text>
               <TouchableOpacity onPress={() => setTimeVisible(false)}>
@@ -793,8 +936,57 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     backgroundColor: "#F2F6F3",
   },
-  formScroll: { flex: 1 },
+  fixedHeaderMobile: {
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 8,
+  },
+  mobileHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  mobileHeaderCenter: {
+    flex: 1,
+    paddingHorizontal: 10,
+  },
+  headerIconMobile: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#E5EFE8",
+  },
+  backButtonMobile: {
+    width: 36,
+    height: 36,
+    marginBottom: 0,
+    borderRadius: 10,
+    backgroundColor: "#E5EFE8",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  backIconMobile: {
+    width: 22,
+    height: 22,
+    tintColor: "#397A51",
+  },
+  headingMobile: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#234B33",
+  },
+  eyebrowMobile: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#5F9C76",
+    letterSpacing: 0.5,
+    marginTop: 1,
+  },
+  formScroll: { flex: 1, width: "100%" },
   content: {
+    width: "100%",
     paddingHorizontal: 16,
     paddingTop: 18,
     paddingBottom: 36,
@@ -854,20 +1046,33 @@ const styles = StyleSheet.create({
     borderColor: "#E2EBE5",
     boxShadow: "0 8px 24px rgba(35, 75, 51, 0.08)",
   },
+  formCardMobile: {
+    padding: 14,
+    borderRadius: 14,
+    width: "100%",
+  },
   formColumns: {
     flexDirection: "row",
     alignItems: "flex-start",
     gap: 24,
+    width: "100%",
   },
   formColumnsStacked: {
     flexDirection: "column",
-    gap: 8,
+    alignItems: "stretch",
+    gap: 16,
+    width: "100%",
   },
   formColumn: {
     flex: 1,
     minWidth: 0,
+    width: "100%",
+  },
+  formColumnStacked: {
+    width: "100%",
   },
   requirementsPanel: {
+    width: "100%",
     height: 300,
     padding: 14,
     marginTop: 18,
@@ -876,11 +1081,26 @@ const styles = StyleSheet.create({
     borderColor: "#E2EBE5",
     backgroundColor: "#F8FBF9",
   },
+  requirementsPanelMobile: {
+    width: "100%",
+    height: "auto",
+    minHeight: 120,
+    maxHeight: 260,
+    padding: 12,
+    marginTop: 14,
+  },
   requirementsList: {
+    width: "100%",
     height: 180,
     flexGrow: 0,
   },
+  requirementsListMobile: {
+    width: "100%",
+    height: "auto",
+    maxHeight: 160,
+  },
   requirementsListContent: {
+    width: "100%",
     paddingBottom: 4,
   },
   requirementsTitle: {
@@ -895,10 +1115,17 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#EAF0EC",
   },
+  formIntroMobile: {
+    paddingBottom: 10,
+    marginBottom: 0,
+  },
   formIntroTitle: {
     color: "#234B33",
     fontSize: 17,
     fontWeight: "800",
+  },
+  formIntroTitleMobile: {
+    fontSize: 16,
   },
   formIntroHint: {
     color: "#718078",
@@ -913,6 +1140,7 @@ const styles = StyleSheet.create({
     marginBottom: 7,
   },
   input: {
+    width: "100%",
     minHeight: 46,
     borderWidth: 1,
     borderColor: "#DCE6DF",
@@ -924,12 +1152,14 @@ const styles = StyleSheet.create({
     outlineStyle: "none",
   },
   multilineInput: {
+    width: "100%",
     minHeight: 100,
     paddingTop: 12,
     textAlignVertical: "top",
     lineHeight: 20,
   },
   locationRow: {
+    width: "100%",
     minHeight: 48,
     flexDirection: "row",
     alignItems: "center",
@@ -947,8 +1177,11 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   manualLocationLink: {
+    flexDirection: "row",
+    alignItems: "center",
     alignSelf: "flex-start",
     paddingVertical: 7,
+    marginTop: 3,
   },
   manualLocationLinkText: {
     color: "#397A51",
@@ -956,6 +1189,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   pickerInput: {
+    width: "100%",
     minHeight: 46,
     flexDirection: "row",
     alignItems: "center",
@@ -979,12 +1213,18 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     overflow: "hidden",
   },
+  imagePickerMobile: {
+    aspectRatio: 16 / 9,
+    maxHeight: 180,
+    minHeight: 130,
+  },
   previewImage: {
     width: "100%",
     height: "100%",
     backgroundColor: "#EAF1EC",
   },
   imagePickerTitle: { color: "#397A51", fontSize: 15, fontWeight: "800" },
+  imagePickerTitleMobile: { fontSize: 14 },
   imagePickerHint: {
     color: "#718078",
     fontSize: 12,
@@ -992,8 +1232,14 @@ const styles = StyleSheet.create({
     textAlign: "center",
     paddingHorizontal: 16,
   },
+  imagePickerHintMobile: {
+    fontSize: 11,
+    marginTop: 3,
+    paddingHorizontal: 12,
+  },
   error: { color: "#B42318", fontSize: 12, marginTop: 4 },
   requirementRow: {
+    width: "100%",
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
@@ -1011,17 +1257,23 @@ const styles = StyleSheet.create({
   removeText: { color: "#B42318", fontSize: 22, lineHeight: 22 },
   addRequirement: { alignSelf: "flex-start", marginTop: 2 },
   addRequirementText: { color: "#397A51", fontSize: 13, fontWeight: "700" },
-  twoColumnRow: { flexDirection: "row", gap: 10 },
-  twoColumnRowStacked: { flexDirection: "column", gap: 0 },
-  column: { flex: 1, minWidth: 0 },
+  twoColumnRow: { width: "100%", flexDirection: "row", gap: 10 },
+  twoColumnRowStacked: { width: "100%", flexDirection: "column", gap: 10 },
+  column: { flex: 1, minWidth: 0, width: "100%" },
   saveButton: {
+    width: "100%",
     minHeight: 52,
     borderRadius: 11,
     backgroundColor: "#397A51",
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 22,
+    marginTop: 26,
     boxShadow: "0 5px 12px rgba(57, 122, 81, 0.2)",
+  },
+  saveButtonMobile: {
+    width: "100%",
+    minHeight: 48,
+    marginTop: 22,
   },
   disabledButton: { opacity: 0.65 },
   saveText: { color: "#FFFFFF", fontSize: 15, fontWeight: "800" },
@@ -1032,6 +1284,9 @@ const styles = StyleSheet.create({
     padding: 20,
     backgroundColor: "rgba(0, 0, 0, 0.4)",
   },
+  modalOverlayMobile: {
+    padding: 12,
+  },
   modalCard: {
     width: "100%",
     maxWidth: 460,
@@ -1040,7 +1295,46 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: "#FFFFFF",
   },
+  modalCardMobile: {
+    padding: 14,
+    maxHeight: "92%",
+    width: "95%",
+    borderRadius: 14,
+  },
+  modalHeaderRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    marginBottom: 6,
+  },
+  modalCloseButton: {
+    padding: 4,
+    marginLeft: 8,
+  },
   modalTitle: { color: "#234B33", fontSize: 19, fontWeight: "800" },
+  manualModalSubtitle: {
+    color: "#718078",
+    fontSize: 12,
+    marginTop: 4,
+    marginBottom: 10,
+  },
+  inputSubLabel: {
+    color: "#24352A",
+    fontSize: 13,
+    fontWeight: "600",
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  modalInput: {
+    minHeight: 44,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: "#D8E3DC",
+    borderRadius: 8,
+    color: "#24352A",
+    fontSize: 14,
+    backgroundColor: "#FAFCFB",
+  },
   modalButton: {
     minHeight: 44,
     alignItems: "center",

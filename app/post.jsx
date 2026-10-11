@@ -40,6 +40,7 @@ import {
 import FormError from "../components/form-error";
 import Navbar from "../components/navbar";
 import PostLocationModal from "../components/PostLocationModal";
+import { formatLocationWithPurok } from "../constants/locationFormat";
 import {
     formatWasteLabel,
     getWasteCategoryColor,
@@ -120,6 +121,8 @@ export default function Post() {
   const [savingEditComment, setSavingEditComment] = useState(false);
   const [commentToDelete, setCommentToDelete] = useState(null);
   const [deletingComment, setDeletingComment] = useState(false);
+  const [linkedPostsCount, setLinkedPostsCount] = useState(0);
+  const [linkedVolunteerPost, setLinkedVolunteerPost] = useState(null);
   const lastCommentDocRef = useRef(null);
   const fallbackCommentsRef = useRef(null);
   const fallbackOffsetRef = useRef(0);
@@ -215,6 +218,31 @@ export default function Post() {
 
     return () => unsubscribeUsers.forEach((unsubscribe) => unsubscribe());
   }, [commentUserIdsKey]);
+
+  useEffect(() => {
+    if (!id) return;
+    const fetchLinkedVolunteer = async () => {
+      try {
+        const snap = await getDocs(
+          query(
+            collection(db, "volunteer_posts"),
+            where("postId", "==", id),
+          ),
+        );
+        if (!snap.empty) {
+          setLinkedVolunteerPost({
+            id: snap.docs[0].id,
+            ...snap.docs[0].data(),
+          });
+        } else {
+          setLinkedVolunteerPost(null);
+        }
+      } catch (err) {
+        console.error("Unable to check linked volunteer post:", err);
+      }
+    };
+    fetchLinkedVolunteer();
+  }, [id, post?.status]);
 
   const loadPost = async () => {
     try {
@@ -369,11 +397,26 @@ export default function Post() {
     }
   };
 
+  const loadLinkedPosts = async () => {
+    if (!id) return;
+    try {
+      const q = query(
+        collection(db, "posts"),
+        where("linkedReportId", "==", id),
+      );
+      const snapshot = await getDocs(q);
+      setLinkedPostsCount(snapshot.size);
+    } catch (err) {
+      console.log("Error checking linked posts:", err);
+    }
+  };
+
   useEffect(() => {
     loadPost();
     loadComments(true);
     loadReaction();
     loadCurrentUser();
+    loadLinkedPosts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -719,7 +762,7 @@ export default function Post() {
                       style={styles.locationIcon}
                     />
                     <Text style={styles.locationText}>
-                      {post.locationName || "Unknown location"}
+                      {formatLocationWithPurok(post) || "Unknown location"}
                     </Text>
                   </TouchableOpacity>
 
@@ -771,6 +814,53 @@ export default function Post() {
                         </Text>
                       </View>
                     )}
+
+                    {Boolean(post.isDuplicate || post.isPointEligible === false) && (
+                      <View style={[styles.statusTag, styles.duplicateTag]}>
+                        <Ionicons
+                          name="copy-outline"
+                          size={10}
+                          color="#FFFFFF"
+                          style={{ marginRight: 3 }}
+                        />
+                        <Text style={styles.statusText}>Duplicate Report</Text>
+                      </View>
+                    )}
+
+                    {Boolean(post.linkedReportId) && (
+                      <TouchableOpacity
+                        style={[styles.statusTag, styles.linkedTag]}
+                        activeOpacity={0.7}
+                        onPress={() =>
+                          router.push({
+                            pathname: "/post",
+                            params: { id: post.linkedReportId },
+                          })
+                        }
+                      >
+                        <Ionicons
+                          name="link-outline"
+                          size={10}
+                          color="#FFFFFF"
+                          style={{ marginRight: 3 }}
+                        />
+                        <Text style={styles.statusText}>Linked Report</Text>
+                      </TouchableOpacity>
+                    )}
+
+                    {linkedPostsCount > 0 && (
+                      <View style={[styles.statusTag, styles.linkedTag]}>
+                        <Ionicons
+                          name="albums-outline"
+                          size={10}
+                          color="#FFFFFF"
+                          style={{ marginRight: 3 }}
+                        />
+                        <Text style={styles.statusText}>
+                          {linkedPostsCount} Linked {linkedPostsCount === 1 ? "Report" : "Reports"}
+                        </Text>
+                      </View>
+                    )}
                   </View>
 
                   <Text style={styles.postedAt}>
@@ -778,6 +868,88 @@ export default function Post() {
                   </Text>
                 </View>
               </View>
+
+              {/* VICINITY / DUPLICATE NOTICES */}
+              {Boolean(post.linkedReportId) && (
+                <TouchableOpacity
+                  style={styles.linkedNoticeBox}
+                  activeOpacity={0.7}
+                  onPress={() =>
+                    router.push({
+                      pathname: "/post",
+                      params: { id: post.linkedReportId },
+                    })
+                  }
+                >
+                  <Ionicons name="link" size={16} color="#1D4ED8" />
+                  <Text style={styles.linkedNoticeText}>
+                    Linked Vicinity Report: Tap to view the primary report for this location.
+                  </Text>
+                  <Ionicons name="chevron-forward" size={15} color="#1D4ED8" />
+                </TouchableOpacity>
+              )}
+
+              {Boolean(post.isDuplicate || post.isPointEligible === false) && (
+                <View
+                  style={[
+                    styles.duplicateNoticeBox,
+                    Boolean(post.linkedReportId) && { marginTop: 0 },
+                  ]}
+                >
+                  <Ionicons name="copy-outline" size={16} color="#DC2626" />
+                  <Text style={styles.duplicateNoticeText}>
+                    Duplicate Report: Marked as a duplicate report in the same vicinity (0 EcoPoints awarded).
+                  </Text>
+                </View>
+              )}
+
+              {/* VOLUNTEER CLEANUP INVITATION BANNER */}
+              {Boolean(
+                linkedVolunteerPost &&
+                  ["open", "ongoing", "on-going"].includes(
+                    String(linkedVolunteerPost.status || "").toLowerCase(),
+                  ),
+              ) && (
+                <TouchableOpacity
+                  style={styles.volunteerBannerBox}
+                  activeOpacity={0.8}
+                  onPress={() =>
+                    router.push({
+                      pathname: "/volunteering",
+                      params: { volunteerId: linkedVolunteerPost.id },
+                    })
+                  }
+                >
+                  <View style={styles.volunteerBannerIconCircle}>
+                    <Ionicons name="people" size={17} color="#FFFFFF" />
+                  </View>
+                  <View style={styles.volunteerBannerCopy}>
+                    <View style={styles.volunteerBannerHeaderRow}>
+                      <Text style={styles.volunteerBannerTitle}>
+                        {["ongoing", "on-going"].includes(
+                          String(linkedVolunteerPost.status || "").toLowerCase(),
+                        )
+                          ? "Clean-up Drive in Progress"
+                          : "Volunteer Clean-up Drive"}
+                      </Text>
+                      <View style={styles.volunteerBannerBadge}>
+                        <Text style={styles.volunteerBannerBadgeText}>
+                          {["ongoing", "on-going"].includes(
+                            String(linkedVolunteerPost.status || "").toLowerCase(),
+                          )
+                            ? "Active Now"
+                            : "Join Drive"}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={styles.volunteerBannerDesc} numberOfLines={2}>
+                      {linkedVolunteerPost.title} • Tap to view details and join
+                      the cleanup crew!
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color="#166534" />
+                </TouchableOpacity>
+              )}
 
               {/* CAPTION */}
               {Boolean(post.title) && (
@@ -1576,6 +1748,110 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 10,
     fontWeight: "700",
+  },
+  duplicateTag: {
+    backgroundColor: "#DC2626",
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  linkedTag: {
+    backgroundColor: "#2563EB",
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  linkedNoticeBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    marginTop: 12,
+    marginBottom: 10,
+    gap: 8,
+  },
+  linkedNoticeText: {
+    flex: 1,
+    fontSize: 12,
+    color: "#1E40AF",
+    fontWeight: "600",
+    lineHeight: 16,
+  },
+  duplicateNoticeBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    marginTop: 12,
+    marginBottom: 10,
+    gap: 8,
+  },
+  duplicateNoticeText: {
+    flex: 1,
+    fontSize: 12,
+    color: "#B91C1C",
+    fontWeight: "600",
+    lineHeight: 16,
+  },
+  volunteerBannerBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F0FDF4",
+    borderWidth: 1,
+    borderColor: "#86EFAC",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 10,
+    marginBottom: 10,
+    gap: 10,
+  },
+  volunteerBannerIconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#276344",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  volunteerBannerCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  volunteerBannerHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 2,
+  },
+  volunteerBannerTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#166534",
+  },
+  volunteerBannerBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 8,
+    backgroundColor: "#DCFCE7",
+  },
+  volunteerBannerBadgeText: {
+    fontSize: 9,
+    fontWeight: "800",
+    color: "#15803D",
+    textTransform: "uppercase",
+  },
+  volunteerBannerDesc: {
+    fontSize: 11,
+    color: "#4B5563",
+    lineHeight: 15,
   },
 
   beforeAfterSection: {

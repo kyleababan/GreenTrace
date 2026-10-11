@@ -6,9 +6,11 @@ import {
   Animated,
   Easing,
   Image,
+  Modal,
   Platform,
   RefreshControl,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -16,7 +18,7 @@ import {
 } from "react-native";
 import Navbar from "../components/navbar";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   collection,
@@ -35,11 +37,28 @@ import {
 import { auth, db } from "../firebaseConfig";
 import { subscribeToUnreadNotifications } from "../utils/notificationHelpers";
 
+const OFFICIAL_TYPES = [
+  "deleted_post",
+  "deleted_comment",
+  "status_update",
+  "activity_started",
+  "activity_cancelled",
+  "activity_reverted",
+  "activity_created",
+  "activity_rescheduled",
+  "attendance_marked",
+  "attendance_reverted",
+  "volunteer_kicked",
+  "points_reward",
+  "account_warning",
+  "announcement",
+];
+
 export default function Notification() {
   const router = useRouter();
 
   const currentUser = auth.currentUser;
-  const listEntrance = useRef(new Animated.Value(0)).current;
+  const [listEntrance] = useState(() => new Animated.Value(0));
 
   const getActorText = (item) => {
     const names = item.actorNames || [];
@@ -56,11 +75,44 @@ export default function Notification() {
   const getNotificationIcon = (type) => {
     if (type === "comment") return "chatbubble-ellipses";
     if (type === "reaction" || type === "priority") return "heart";
-    if (type === "deleted_post") return "shield-checkmark";
+    if (type === "deleted_post" || type === "deleted_comment") return "trash-outline";
     if (type === "volunteer_kicked") return "person-remove";
     if (type === "activity_created") return "calendar-outline";
+    if (type === "activity_rescheduled") return "time-outline";
+    if (type === "activity_started") return "play-circle-outline";
+    if (type === "activity_cancelled") return "close-circle-outline";
+    if (type === "activity_reverted") return "refresh-circle-outline";
+    if (type === "attendance_marked") return "checkmark-done-circle-outline";
+    if (type === "attendance_reverted") return "alert-circle-outline";
     if (type === "status_update") return "alert-circle";
+    if (type === "points_reward") return "gift-outline";
+    if (type === "account_warning") return "warning-outline";
+    if (type === "announcement") return "megaphone-outline";
     return "notifications";
+  };
+
+  const getNotificationIconBg = (type) => {
+    if (
+      type === "deleted_post" ||
+      type === "deleted_comment" ||
+      type === "account_warning"
+    )
+      return "#B42318";
+    if (type === "activity_cancelled") return "#D92D20";
+    if (type === "activity_reverted" || type === "attendance_reverted")
+      return "#D97706";
+    if (type === "activity_rescheduled") return "#2563EB";
+    if (type === "points_reward") return "#E68A00";
+    if (type === "status_update") return "#F59E0B";
+    if (type === "announcement") return "#1D70B8";
+    if (
+      type === "activity_started" ||
+      type === "activity_created" ||
+      type === "attendance_marked"
+    )
+      return "#2E7D32";
+    if (type === "reaction" || type === "priority") return "#E11D48";
+    return "#5F9C76";
   };
 
   const formatNotificationTime = (timestamp) => {
@@ -83,6 +135,8 @@ export default function Notification() {
   const NOTIFICATIONS_PER_PAGE = 10;
 
   const [notifications, setNotifications] = useState([]);
+  const [activeTab, setActiveTab] = useState("all");
+  const [selectedNotice, setSelectedNotice] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -207,7 +261,10 @@ export default function Notification() {
   }, [loadNotifications]);
 
   useEffect(() => {
-    loadNotifications(true);
+    const timer = setTimeout(() => {
+      loadNotifications(true);
+    }, 0);
+    return () => clearTimeout(timer);
   }, [loadNotifications]);
 
   useEffect(() => {
@@ -258,6 +315,26 @@ export default function Notification() {
     }
   };
 
+  const officialCount = useMemo(
+    () =>
+      notifications.filter((item) => OFFICIAL_TYPES.includes(item.type)).length,
+    [notifications],
+  );
+  const communityCount = useMemo(
+    () =>
+      notifications.filter((item) => !OFFICIAL_TYPES.includes(item.type)).length,
+    [notifications],
+  );
+  const displayedNotifications = useMemo(() => {
+    if (activeTab === "official") {
+      return notifications.filter((item) => OFFICIAL_TYPES.includes(item.type));
+    }
+    if (activeTab === "community") {
+      return notifications.filter((item) => !OFFICIAL_TYPES.includes(item.type));
+    }
+    return notifications;
+  }, [notifications, activeTab]);
+
   const openNotification = async (item) => {
     if (item.read !== true) {
       try {
@@ -271,26 +348,51 @@ export default function Notification() {
         );
       } catch (error) {
         console.error("Unable to mark notification as read:", error);
-        Alert.alert(
-          "Unable to update notification",
-          "The notification will still open. Please try again later.",
-        );
       }
     }
 
     if (
-      (item.type === "volunteer_kicked" || item.type === "activity_created") &&
+      item.type === "deleted_post" ||
+      item.type === "deleted_comment" ||
+      item.type === "account_warning" ||
+      item.type === "announcement" ||
+      item.type === "points_reward"
+    ) {
+      setSelectedNotice(item);
+      return;
+    }
+
+    if (
+      (item.type === "volunteer_kicked" ||
+        item.type === "activity_created" ||
+        item.type === "activity_started" ||
+        item.type === "activity_cancelled" ||
+        item.type === "activity_reverted" ||
+        item.type === "activity_rescheduled" ||
+        item.type === "attendance_marked" ||
+        item.type === "attendance_reverted") &&
       item.volunteerPostId
     ) {
       router.push({
         pathname: "/volunteering",
         params: { volunteerId: item.volunteerPostId },
       });
+    } else if (item.type === "status_update") {
+      if (item.postId && item.postAvailable) {
+        router.push({
+          pathname: "/post",
+          params: { id: item.postId },
+        });
+      } else {
+        setSelectedNotice(item);
+      }
     } else if (item.postAvailable) {
       router.push({
         pathname: "/post",
         params: { id: item.postId },
       });
+    } else if (OFFICIAL_TYPES.includes(item.type)) {
+      setSelectedNotice(item);
     } else {
       router.push("/post-unavailable");
     }
@@ -359,7 +461,7 @@ export default function Notification() {
               <View style={styles.sectionHeader}>
                 <Text style={styles.sectionTitle}>Recent activity</Text>
                 <Text style={styles.notificationCount}>
-                  {notifications.length}
+                  {displayedNotifications.length}
                 </Text>
                 {unreadCount > 0 && (
                   <TouchableOpacity
@@ -379,7 +481,80 @@ export default function Notification() {
                   </TouchableOpacity>
                 )}
               </View>
-              {notifications.map((item) => (
+
+              {/* FILTER TABS ROW: ALL | OFFICIAL (LGU) | COMMUNITY */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.tabsScroll}
+                contentContainerStyle={styles.tabsRow}
+              >
+                <TouchableOpacity
+                  style={[
+                    styles.tabBtn,
+                    activeTab === "all" && styles.tabBtnActive,
+                  ]}
+                  onPress={() => setActiveTab("all")}
+                  activeOpacity={0.7}
+                >
+                  <Text
+                    style={[
+                      styles.tabBtnText,
+                      activeTab === "all" && styles.tabBtnTextActive,
+                    ]}
+                  >
+                    All ({notifications.length})
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.tabBtn,
+                    activeTab === "official" && styles.tabBtnActive,
+                  ]}
+                  onPress={() => setActiveTab("official")}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name="shield-checkmark"
+                    size={12}
+                    color={activeTab === "official" ? "#FFFFFF" : "#2E7D32"}
+                  />
+                  <Text
+                    style={[
+                      styles.tabBtnText,
+                      activeTab === "official" && styles.tabBtnTextActive,
+                    ]}
+                  >
+                    Official ({officialCount})
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.tabBtn,
+                    activeTab === "community" && styles.tabBtnActive,
+                  ]}
+                  onPress={() => setActiveTab("community")}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name="people"
+                    size={12}
+                    color={activeTab === "community" ? "#FFFFFF" : "#556E60"}
+                  />
+                  <Text
+                    style={[
+                      styles.tabBtnText,
+                      activeTab === "community" && styles.tabBtnTextActive,
+                    ]}
+                  >
+                    Community ({communityCount})
+                  </Text>
+                </TouchableOpacity>
+              </ScrollView>
+
+              {displayedNotifications.map((item) => (
                 <TouchableOpacity
                   key={item.id}
                   style={[
@@ -388,9 +563,14 @@ export default function Notification() {
                   ]}
                   activeOpacity={0.8}
                   onPress={() => openNotification(item)}
-                  accessibilityLabel={`${item.read === true ? "Read" : "Unread"} notification from ${item.type === "deleted_post" || item.type === "activity_created" || item.type === "status_update" ? item.title || "GreenTrace LGU" : getActorText(item)}`}
+                  accessibilityLabel={`${item.read === true ? "Read" : "Unread"} notification`}
                 >
-                  <View style={styles.iconWrapper}>
+                  <View
+                    style={[
+                      styles.iconWrapper,
+                      { backgroundColor: getNotificationIconBg(item.type) },
+                    ]}
+                  >
                     <Ionicons
                       name={getNotificationIcon(item.type)}
                       size={19}
@@ -401,19 +581,26 @@ export default function Notification() {
                   {/* CENTER: Text Content */}
                   <View style={styles.textContainer}>
                     <Text style={styles.userName}>
-                      {item.type === "deleted_post" ||
-                      item.type === "activity_created" ||
-                      item.type === "status_update"
+                      {OFFICIAL_TYPES.includes(item.type)
                         ? item.title || "GreenTrace LGU"
                         : getActorText(item)}
                     </Text>
 
-                    <Text style={styles.userAction} numberOfLines={2}>
+                    <Text
+                      style={styles.userAction}
+                      numberOfLines={
+                        item.type === "deleted_post" ||
+                        item.type === "deleted_comment" ||
+                        item.type === "account_warning"
+                          ? 3
+                          : 2
+                      }
+                    >
                       {item.type === "comment"
                         ? "commented on your post."
                         : item.type === "reaction" || item.type === "priority"
                           ? "Increased your priority."
-                          : item.message}
+                          : (item.message || "").replace(/\n+/g, " ")}
                     </Text>
                     <Text style={styles.notificationTime}>
                       {formatNotificationTime(item.createdAt)}
@@ -449,7 +636,7 @@ export default function Notification() {
               ))}
 
               {/* Load More Button */}
-              {notifications.length > 0 && hasMore && (
+              {displayedNotifications.length > 0 && hasMore && (
                 <View style={styles.loadMoreContainer}>
                   <TouchableOpacity
                     style={styles.loadMoreButton}
@@ -476,7 +663,7 @@ export default function Notification() {
               )}
 
               {/* All caught up indicator */}
-              {notifications.length > 0 && !hasMore && (
+              {displayedNotifications.length > 0 && !hasMore && (
                 <View style={styles.endOfListContainer}>
                   <Ionicons
                     name="checkmark-circle-outline"
@@ -490,13 +677,143 @@ export default function Notification() {
                 </View>
               )}
 
-              {notifications.length === 0 && (
-                <View style={styles.emptyState}>
-                  <Text style={styles.emptyText}>No notifications yet.</Text>
+              {displayedNotifications.length === 0 && (
+                <View style={styles.emptyContainer}>
+                  <Ionicons
+                    name="notifications-off-outline"
+                    size={38}
+                    color="#94A3B8"
+                  />
+                  <Text style={styles.emptyTitle}>No notifications</Text>
+                  <Text style={styles.emptySubtext}>
+                    {activeTab === "official"
+                      ? "You have no official LGU notices at this time."
+                      : activeTab === "community"
+                        ? "You have no community comments or priority votes yet."
+                        : "You're all caught up! No recent notifications."}
+                  </Text>
                 </View>
               )}
             </Animated.ScrollView>
           )}
+
+          {/* DETAILED OFFICIAL NOTICE MODAL */}
+          <Modal
+            visible={Boolean(selectedNotice)}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setSelectedNotice(null)}
+          >
+            <View style={styles.modalOverlay}>
+              <View style={styles.noticeModalCard} accessibilityRole="dialog">
+                <View
+                  style={[
+                    styles.noticeIconCircle,
+                    {
+                      backgroundColor: getNotificationIconBg(
+                        selectedNotice?.type,
+                      ),
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name={getNotificationIcon(selectedNotice?.type)}
+                    size={28}
+                    color="#FFFFFF"
+                  />
+                </View>
+
+                <View style={styles.noticeHeaderBadge}>
+                  <Ionicons name="shield-checkmark" size={13} color="#276344" />
+                  <Text style={styles.noticeHeaderBadgeText}>
+                    Official LGU Advisory
+                  </Text>
+                </View>
+
+                <Text style={styles.noticeTitle}>
+                  {selectedNotice?.title || "Notice from GreenTrace LGU"}
+                </Text>
+
+                <Text style={styles.noticeDate}>
+                  {formatNotificationTime(selectedNotice?.createdAt)}
+                </Text>
+
+                {/* Special points highlight if points_reward */}
+                {Boolean(selectedNotice?.pointsAmount) && (
+                  <View style={styles.pointsBadgeWrap}>
+                    <Ionicons name="gift" size={18} color="#B45309" />
+                    <Text style={styles.pointsBadgeText}>
+                      +{selectedNotice.pointsAmount} EcoPoints Awarded
+                    </Text>
+                  </View>
+                )}
+
+                {/* Special strike chips if account_warning */}
+                {selectedNotice?.type === "account_warning" && (
+                  <View style={styles.warningStripWrap}>
+                    <Ionicons name="alert-circle" size={15} color="#B42318" />
+                    <Text style={styles.warningStripText}>
+                      Strike {selectedNotice.warningNumber || 1} of{" "}
+                      {selectedNotice.maxWarnings || 3}
+                    </Text>
+                  </View>
+                )}
+
+                <View style={styles.noticeMessageBox}>
+                  <Text style={styles.noticeMessageText}>
+                    {selectedNotice?.message || "No additional message."}
+                  </Text>
+                </View>
+
+                <View style={styles.noticeActions}>
+                  {Boolean(
+                    selectedNotice?.postId && selectedNotice?.postAvailable,
+                  ) && (
+                    <TouchableOpacity
+                      style={styles.noticeSecondaryBtn}
+                      onPress={() => {
+                        const pId = selectedNotice.postId;
+                        setSelectedNotice(null);
+                        router.push({ pathname: "/post", params: { id: pId } });
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.noticeSecondaryBtnText}>
+                        View Post
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {Boolean(selectedNotice?.volunteerPostId) && (
+                    <TouchableOpacity
+                      style={styles.noticeSecondaryBtn}
+                      onPress={() => {
+                        const vId = selectedNotice.volunteerPostId;
+                        setSelectedNotice(null);
+                        router.push({
+                          pathname: "/volunteering",
+                          params: { volunteerId: vId },
+                        });
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.noticeSecondaryBtnText}>
+                        View Activity
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+
+                  <TouchableOpacity
+                    style={styles.noticePrimaryBtn}
+                    onPress={() => setSelectedNotice(null)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.noticePrimaryBtnText}>Understood</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </Modal>
 
           {/* NAVBAR */}
           <View style={styles.navbarContainer}>
@@ -730,6 +1047,207 @@ const styles = StyleSheet.create({
     color: "#777",
     fontSize: 16,
     textAlign: "center",
+  },
+
+  /* TABS ROW */
+  tabsScroll: {
+    flexGrow: 0,
+    flexShrink: 0,
+    marginBottom: 14,
+  },
+  tabsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingRight: 16,
+  },
+  tabBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: "#EAF2EC",
+    borderWidth: 1,
+    borderColor: "#D1E2D7",
+  },
+  tabBtnActive: {
+    backgroundColor: "#2E6944",
+    borderColor: "#2E6944",
+  },
+  tabBtnText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#4B6154",
+  },
+  tabBtnTextActive: {
+    color: "#FFFFFF",
+  },
+
+  /* EMPTY STATE */
+  emptyContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 60,
+    paddingHorizontal: 20,
+    gap: 8,
+  },
+  emptyTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#334155",
+    marginTop: 6,
+  },
+  emptySubtext: {
+    fontSize: 13,
+    color: "#64748B",
+    textAlign: "center",
+    maxWidth: 280,
+    lineHeight: 18,
+  },
+
+  /* DETAILED NOTICE MODAL */
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.55)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  noticeModalCard: {
+    width: "100%",
+    maxWidth: 420,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    padding: 22,
+    alignItems: "center",
+    elevation: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+  },
+  noticeIconCircle: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
+    elevation: 3,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+  },
+  noticeHeaderBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "#EAF4ED",
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  noticeHeaderBadgeText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#276344",
+  },
+  noticeTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#0F172A",
+    textAlign: "center",
+    marginBottom: 4,
+  },
+  noticeDate: {
+    fontSize: 11,
+    color: "#94A3B8",
+    marginBottom: 14,
+  },
+  pointsBadgeWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#FEF3C7",
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 14,
+    marginBottom: 14,
+  },
+  pointsBadgeText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#92400E",
+  },
+  warningStripWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#FEE2E2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 14,
+    marginBottom: 14,
+  },
+  warningStripText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#B42318",
+  },
+  noticeMessageBox: {
+    width: "100%",
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 18,
+  },
+  noticeMessageText: {
+    fontSize: 13,
+    color: "#334155",
+    lineHeight: 19,
+    textAlign: "center",
+  },
+  noticeActions: {
+    width: "100%",
+    gap: 8,
+  },
+  noticePrimaryBtn: {
+    width: "100%",
+    backgroundColor: "#2E6944",
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  noticePrimaryBtnText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+  noticeSecondaryBtn: {
+    width: "100%",
+    backgroundColor: "#F1F5F3",
+    borderWidth: 1,
+    borderColor: "#D3E4D8",
+    paddingVertical: 11,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  noticeSecondaryBtnText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#276344",
   },
 
   navbarContainer: {

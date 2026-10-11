@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
+import { collection, doc, getDoc, onSnapshot, orderBy, query } from "firebase/firestore";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
     Image,
@@ -14,6 +14,7 @@ import {
 import {
     formatLocationWithPurok,
     normalizePurok,
+    splitLocationDetails,
 } from "../../../constants/locationFormat";
 import {
     formatWasteLabel,
@@ -31,38 +32,15 @@ const STATUS_DETAILS = {
   ongoing: { label: "On-going", color: "#FFC940", textColor: "#FFFFFF" },
 };
 
-const getLocationParts = (locationName = "") =>
-  locationName
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean);
-
-const getPostPurok = (post) => {
-  const savedPurok = normalizePurok(post.purok || "");
-  if (savedPurok) return savedPurok.toLowerCase();
-
-  const purokPart = getLocationParts(post.locationName).find((part) =>
-    /^(?:purok|pk\.?)\s+/i.test(part),
-  );
-  return purokPart ? normalizePurok(purokPart).toLowerCase() : "";
+const getPostPurok = (post = {}) => {
+  const parsed = splitLocationDetails(post.locationName, post.purok, post.barangay);
+  return (parsed.purokOrSitio || normalizePurok(post.purok || "")).toLowerCase();
 };
 
-const getPostBarangay = (post) => {
+const getPostBarangay = (post = {}) => {
   if (post.barangay) return String(post.barangay).trim().toLowerCase();
-
-  const locationParts = getLocationParts(post.locationName);
-  const hasPurokSegment = locationParts.some((part) =>
-    /^(?:purok|pk\.?)\s+/i.test(part),
-  );
-  const parts = locationParts.filter(
-    (part) => !/^(?:purok|pk\.?)\s+/i.test(part),
-  );
-
-  // Current posts use "Province, Barangay, Pk.". Older posts generally use
-  // "Barangay, Municipality", so their first segment is the barangay.
-  const usesCurrentFormat =
-    (hasPurokSegment || Boolean(post.purok)) && parts.length >= 2;
-  return (usesCurrentFormat ? parts[1] : parts[0] || "").toLowerCase();
+  const parsed = splitLocationDetails(post.locationName, post.purok, post.barangay);
+  return (parsed.barangay || "").toLowerCase();
 };
 
 const formatRelativeTime = (timestamp, now) => {
@@ -131,6 +109,17 @@ export default function AssessmentList({
   ]);
   const visibleCount =
     pagination.key === paginationKey ? pagination.count : initialBatchSize;
+
+  const linkedCountsMap = useMemo(() => {
+    const counts = {};
+    posts.forEach((p) => {
+      const targetId = p.linkedReportId || p.duplicateOf;
+      if (targetId) {
+        counts[targetId] = (counts[targetId] || 0) + 1;
+      }
+    });
+    return counts;
+  }, [posts]);
 
   useEffect(() => {
     loadedNearEnd.current = false;
@@ -408,10 +397,7 @@ export default function AssessmentList({
                           style={styles.locationIcon}
                         />
                         <Text style={styles.locationText} numberOfLines={1}>
-                          {formatLocationWithPurok(
-                            event.locationName,
-                            event.purok,
-                          )}
+                          {formatLocationWithPurok(event)}
                         </Text>
                       </View>
                     ) : null}
@@ -507,10 +493,7 @@ export default function AssessmentList({
                           style={styles.locationIcon}
                         />
                         <Text style={styles.locationText} numberOfLines={1}>
-                          {formatLocationWithPurok(
-                            post.locationName,
-                            post.purok,
-                          )}
+                          {formatLocationWithPurok(post)}
                         </Text>
                       </View>
 
@@ -547,6 +530,59 @@ export default function AssessmentList({
                           >
                             <Text style={styles.wasteTagText}>
                               {formatWasteLabel(post.wasteClassification)}
+                            </Text>
+                          </View>
+                        )}
+
+                        {Boolean(post.isDuplicate || post.isPointEligible === false) && (
+                          <View style={[styles.statusTag, styles.duplicateTag]}>
+                            <Ionicons
+                              name="copy-outline"
+                              size={10}
+                              color="#FFFFFF"
+                              style={{ marginRight: 3 }}
+                            />
+                            <Text style={styles.statusText}>Duplicate Report</Text>
+                          </View>
+                        )}
+
+                        {Boolean(post.linkedReportId || post.duplicateOf) && (
+                          <TouchableOpacity
+                            style={[styles.statusTag, styles.linkedTag]}
+                            activeOpacity={0.7}
+                            onPress={async (e) => {
+                              e?.stopPropagation?.();
+                              const targetId = post.linkedReportId || post.duplicateOf;
+                              try {
+                                const snap = await getDoc(doc(db, "posts", targetId));
+                                if (snap.exists()) {
+                                  setSelectedPost?.({ id: snap.id, ...snap.data() });
+                                }
+                              } catch (err) {
+                                console.log("Error loading linked report:", err);
+                              }
+                            }}
+                          >
+                            <Ionicons
+                              name="link-outline"
+                              size={10}
+                              color="#FFFFFF"
+                              style={{ marginRight: 3 }}
+                            />
+                            <Text style={styles.statusText}>Linked Report</Text>
+                          </TouchableOpacity>
+                        )}
+
+                        {(linkedCountsMap[post.id] || 0) > 0 && (
+                          <View style={[styles.statusTag, styles.linkedTag]}>
+                            <Ionicons
+                              name="albums-outline"
+                              size={10}
+                              color="#FFFFFF"
+                              style={{ marginRight: 3 }}
+                            />
+                            <Text style={styles.statusText}>
+                              {linkedCountsMap[post.id]} Linked {linkedCountsMap[post.id] === 1 ? "Report" : "Reports"}
                             </Text>
                           </View>
                         )}
@@ -770,6 +806,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 9,
     paddingVertical: 4,
     borderRadius: 6,
+  },
+  duplicateTag: {
+    backgroundColor: "#DC2626",
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  linkedTag: {
+    backgroundColor: "#2563EB",
+    flexDirection: "row",
+    alignItems: "center",
   },
   statusText: { color: "#FFFFFF", fontSize: 10, fontWeight: "700" },
   wasteTag: {

@@ -4,7 +4,7 @@ import { ActivityIndicator, View } from "react-native";
 
 import { Redirect } from "expo-router";
 
-import { onAuthStateChanged } from "firebase/auth";
+import { onAuthStateChanged, signOut } from "firebase/auth";
 
 import { doc, getDoc } from "firebase/firestore";
 
@@ -29,17 +29,11 @@ export default function Index() {
         }
 
         try {
-          const userRef = doc(
-            db,
-
-            "users",
-
-            user.uid,
-          );
-
+          const userRef = doc(db, "users", user.uid);
           const userSnap = await getDoc(userRef);
 
           if (!userSnap.exists()) {
+            await signOut(auth);
             setRoute("/signin");
           } else {
             const userData = userSnap.data();
@@ -52,7 +46,7 @@ export default function Index() {
           }
         } catch (error) {
           console.log(error);
-
+          await signOut(auth);
           setRoute("/signin");
         }
 

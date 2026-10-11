@@ -16,7 +16,8 @@ import {
 } from "react-native";
 
 import Navbar from "../components/navbar";
-import { db } from "../firebaseConfig";
+import { formatLocationWithPurok } from "../constants/locationFormat";
+import { auth, db } from "../firebaseConfig";
 
 const formatMeetingDate = (value) => {
   if (!value) return "";
@@ -34,10 +35,22 @@ const formatMeetingDate = (value) => {
   });
 };
 
+const FILTER_TABS = [
+  { id: "all", label: "All Activities", icon: "grid-outline" },
+  { id: "my_activities", label: "My Activities", icon: "checkmark-circle-outline" },
+  { id: "ongoing", label: "On-Going", icon: "flash-outline" },
+  { id: "events", label: "Events", icon: "calendar-outline" },
+  { id: "cleanups", label: "Cleanups", icon: "trash-bin-outline" },
+  { id: "open", label: "Open Slots", icon: "people-outline" },
+];
+
 export default function Volunteer() {
   const router = useRouter();
+  const currentUserId = auth.currentUser?.uid || "";
+
   const [activities, setActivities] = useState([]);
   const [search, setSearch] = useState("");
+  const [selectedFilter, setSelectedFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -53,10 +66,14 @@ export default function Volunteer() {
         .map((activity) => ({ id: activity.id, ...activity.data() }))
         .filter((activity) => {
           const status = String(activity.status || "").toLowerCase();
-          const isCompletedEvent =
-            Boolean(activity.eventType) &&
-            ["completed", "cleaned"].includes(status);
-          return status === "open" && !isCompletedEvent;
+          const isCompleted = ["completed", "cleaned"].includes(status);
+          const isVisible = [
+            "open",
+            "ongoing",
+            "on-going",
+            "cancelled",
+          ].includes(status);
+          return isVisible && !isCompleted;
         });
 
       const checkedActivities = await Promise.all(
@@ -103,43 +120,149 @@ export default function Volunteer() {
 
   const filteredActivities = useMemo(() => {
     const keyword = search.trim().toLowerCase();
-    if (!keyword) return activities;
 
-    return activities.filter((activity) =>
-      [activity.title, activity.description, activity.locationName]
-        .filter(Boolean)
-        .some((value) => value.toLowerCase().includes(keyword)),
-    );
-  }, [activities, search]);
+    return activities.filter((activity) => {
+      const isStandaloneEvent =
+        !activity.postId && Boolean(activity.eventType);
+      const memberCount = Number.isFinite(Number(activity.joinedCount))
+        ? Number(activity.joinedCount)
+        : activity.volunteers?.length || 0;
+      const maxVolunteers = Number(activity.maxVolunteers) || 0;
+      const isFull = maxVolunteers > 0 && memberCount >= maxVolunteers;
+      const status = String(activity.status || "").toLowerCase();
+      const isOngoing = ["ongoing", "on-going"].includes(status);
+      const isCancelled = status === "cancelled";
+
+      // Category Filter Check
+      if (selectedFilter === "my_activities") {
+        if (!currentUserId) return false;
+        const vols = Array.isArray(activity.volunteers) ? activity.volunteers : [];
+        const isUserJoined = vols.some((v) => {
+          const uid = typeof v === "string" ? v : v?.userId || v?.uid || v?.id;
+          return uid === currentUserId;
+        });
+        if (!isUserJoined) return false;
+      } else if (selectedFilter === "ongoing" && !isOngoing) {
+        return false;
+      } else if (selectedFilter === "events" && !isStandaloneEvent) {
+        return false;
+      } else if (selectedFilter === "cleanups" && isStandaloneEvent) {
+        return false;
+      } else if (selectedFilter === "open" && (isFull || isCancelled)) {
+        return false;
+      }
+
+      // Keyword Search Check
+      if (keyword) {
+        const matchesKeyword = [
+          activity.title,
+          activity.description,
+          activity.locationName,
+          activity.purok,
+          activity.barangay,
+        ]
+          .filter(Boolean)
+          .some((val) => String(val).toLowerCase().includes(keyword));
+
+        if (!matchesKeyword) return false;
+      }
+
+      return true;
+    });
+  }, [activities, search, selectedFilter, currentUserId]);
+
+  const myJoinedCount = useMemo(() => {
+    if (!currentUserId) return 0;
+    return activities.filter((activity) => {
+      const vols = Array.isArray(activity.volunteers) ? activity.volunteers : [];
+      return vols.some(
+        (v) =>
+          (typeof v === "string" ? v : v?.userId || v?.uid || v?.id) ===
+          currentUserId,
+      );
+    }).length;
+  }, [activities, currentUserId]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.wrapper}>
         <View style={styles.container}>
-          {/* HOME-STYLE VOLUNTEER HEADER */}
+          {/* TOP HEADER SECTION */}
           <View style={styles.topSection}>
             <View style={styles.headerRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.headerTitle}>Volunteer Activities</Text>
+                <Text style={styles.headerSubtitle}>
+                  Join community cleanup drives & earn EcoPoints
+                </Text>
+              </View>
               <Image
                 source={require("../assets/images/logo.png")}
                 style={styles.logo}
                 resizeMode="contain"
               />
-              <View style={styles.searchBox}>
-                <Ionicons name="search" size={18} color="#6B7B70" />
-                <TextInput
-                  placeholder="Search volunteer activities..."
-                  style={styles.searchInput}
-                  placeholderTextColor="#6B7B70"
-                  value={search}
-                  onChangeText={setSearch}
-                />
-                {search.length > 0 && (
-                  <TouchableOpacity onPress={() => setSearch("")} hitSlop={8}>
-                    <Ionicons name="close-circle" size={16} color="#94A3B8" />
-                  </TouchableOpacity>
-                )}
-              </View>
             </View>
+          </View>
+
+          {/* FIXED CONTROLS BELOW HEADER: SEARCH BAR + FILTER TABS */}
+          <View style={styles.controlsWrapper}>
+            <View style={styles.searchBox}>
+              <Ionicons name="search" size={17} color="#5C7366" />
+              <TextInput
+                placeholder="Search activity, purok, or location..."
+                style={styles.searchInput}
+                placeholderTextColor="#7C9083"
+                value={search}
+                onChangeText={setSearch}
+              />
+              {search.length > 0 && (
+                <TouchableOpacity onPress={() => setSearch("")} hitSlop={8}>
+                  <Ionicons name="close-circle" size={17} color="#94A3B8" />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* Filter Tabs Row */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.filterChipsRow}
+            >
+              {FILTER_TABS.map((tab) => {
+                const isActive = selectedFilter === tab.id;
+                const labelText =
+                  tab.id === "my_activities" && myJoinedCount > 0
+                    ? `${tab.label} (${myJoinedCount})`
+                    : tab.label;
+                return (
+                  <TouchableOpacity
+                    key={tab.id}
+                    style={[
+                      styles.filterChip,
+                      isActive && styles.filterChipActive,
+                    ]}
+                    onPress={() => setSelectedFilter(tab.id)}
+                    activeOpacity={0.7}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isActive }}
+                  >
+                    <Ionicons
+                      name={tab.icon}
+                      size={13}
+                      color={isActive ? "#FFFFFF" : "#4A6153"}
+                    />
+                    <Text
+                      style={[
+                        styles.filterChipText,
+                        isActive && styles.filterChipTextActive,
+                      ]}
+                    >
+                      {labelText}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
           </View>
 
           {loading ? (
@@ -170,7 +293,19 @@ export default function Volunteer() {
                 )
                   ? Number(activity.joinedCount)
                   : activity.volunteers?.length || 0;
-                const maxVolunteers = activity.maxVolunteers || 0;
+                const maxVolunteers = Number(activity.maxVolunteers) || 0;
+                const isFull =
+                  maxVolunteers > 0 && memberCount >= maxVolunteers;
+                const status = String(activity.status || "").toLowerCase();
+                const isOngoing = ["ongoing", "on-going"].includes(status);
+                const isCancelled = status === "cancelled";
+                const isUserJoined =
+                  Boolean(currentUserId) &&
+                  Array.isArray(activity.volunteers) &&
+                  activity.volunteers.some((v) => {
+                    const uid = typeof v === "string" ? v : v?.userId || v?.uid || v?.id;
+                    return uid === currentUserId;
+                  });
 
                 return (
                   <TouchableOpacity
@@ -190,18 +325,77 @@ export default function Volunteer() {
                           {activity.title || "Volunteer Activity"}
                         </Text>
                         <View style={styles.cardBadges}>
-                          {isStandaloneEvent && (
+                          {isUserJoined && (
+                            <View style={styles.joinedBadge}>
+                              <Ionicons
+                                name="checkmark-circle"
+                                size={10}
+                                color="#166534"
+                                style={{ marginRight: 2 }}
+                              />
+                              <Text style={styles.joinedBadgeText}>Joined</Text>
+                            </View>
+                          )}
+                          {isCancelled ? (
+                            <View style={styles.cancelledBadge}>
+                              <Ionicons
+                                name="close-circle"
+                                size={10}
+                                color="#DC2626"
+                                style={{ marginRight: 2 }}
+                              />
+                              <Text style={styles.cancelledBadgeText}>
+                                Cancelled
+                              </Text>
+                            </View>
+                          ) : isOngoing ? (
+                            <View style={styles.ongoingBadge}>
+                              <Ionicons
+                                name="flash"
+                                size={10}
+                                color="#D97706"
+                                style={{ marginRight: 2 }}
+                              />
+                              <Text style={styles.ongoingBadgeText}>
+                                On-Going
+                              </Text>
+                            </View>
+                          ) : isStandaloneEvent ? (
                             <View style={styles.eventBadge}>
                               <Text style={styles.eventBadgeText}>Event</Text>
                             </View>
-                          )}
-                          <View style={styles.badge}>
-                            <Text style={styles.badgeText}>
-                              {memberCount}/{maxVolunteers}
+                          ) : null}
+
+                          <View
+                            style={[
+                              styles.badge,
+                              isFull && styles.badgeFull,
+                              isOngoing && styles.badgeOngoing,
+                              isCancelled && styles.badgeCancelled,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.badgeText,
+                                isFull && styles.badgeTextFull,
+                                isCancelled && styles.badgeTextCancelled,
+                              ]}
+                            >
+                              {isCancelled
+                                ? "Cancelled"
+                                : isFull
+                                  ? `Full ${memberCount}/${maxVolunteers}`
+                                  : `${memberCount}/${maxVolunteers}`}
                             </Text>
                           </View>
                         </View>
                       </View>
+
+                      {isCancelled && Boolean(activity.cancellationReason) ? (
+                        <Text style={styles.cancellationReasonText} numberOfLines={1}>
+                          Cancelled: {activity.cancellationReason}
+                        </Text>
+                      ) : null}
 
                       <Text style={styles.cardDescription} numberOfLines={2}>
                         {activity.description || "No description provided."}
@@ -228,11 +422,21 @@ export default function Volunteer() {
                             color="#64748B"
                           />
                           <Text style={styles.locationText} numberOfLines={1}>
-                            {activity.locationName || "Location not specified"}
+                            {formatLocationWithPurok(activity) ||
+                              "Location not specified"}
                           </Text>
                         </View>
-                        <Text style={styles.viewLink}>
-                          {isStandaloneEvent ? "Join event ›" : "View details ›"}
+                        <Text
+                          style={[
+                            styles.viewLink,
+                            isOngoing && styles.viewLinkOngoing,
+                          ]}
+                        >
+                          {isOngoing
+                            ? "Happening now ›"
+                            : isStandaloneEvent
+                              ? "Join event ›"
+                              : "View details ›"}
                         </Text>
                       </View>
                     </View>
@@ -255,9 +459,29 @@ export default function Volunteer() {
                 );
               })}
               {!loadError && !filteredActivities.length ? (
-                <Text style={styles.emptyText}>
-                  No open volunteer activities found.
-                </Text>
+                <View style={styles.emptyContainer}>
+                  <Ionicons name="search-outline" size={38} color="#94A3B8" />
+                  <Text style={styles.emptyTitle}>No activities found</Text>
+                  <Text style={styles.emptySubtext}>
+                    {search.trim() || selectedFilter !== "all"
+                      ? "No volunteer activities match your search or filter."
+                      : "There are currently no open volunteer activities."}
+                  </Text>
+                  {(search.trim() || selectedFilter !== "all") && (
+                    <TouchableOpacity
+                      style={styles.resetFilterBtn}
+                      onPress={() => {
+                        setSearch("");
+                        setSelectedFilter("all");
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.resetFilterBtnText}>
+                        Reset search & filters
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               ) : null}
             </ScrollView>
           )}
@@ -288,13 +512,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#f6f6f6",
   },
 
-  /* HEADER STYLES - ALIGNED WITH HOME FEED */
+  /* HEADER STYLES - ALIGNED WITH NOTIFICATIONS & PROFILE */
   topSection: {
-    height: 82,
-    justifyContent: "center",
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 16,
     backgroundColor: "#5F9C76",
-    paddingHorizontal: 16,
-    paddingVertical: 20,
     elevation: 3,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
@@ -304,28 +527,170 @@ const styles = StyleSheet.create({
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    justifyContent: "space-between",
+  },
+  headerTitle: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#FFFFFF",
+    letterSpacing: -0.3,
+  },
+  headerSubtitle: {
+    fontSize: 12,
+    color: "#E8F3EC",
+    marginTop: 2,
   },
   logo: {
-    width: 38,
-    height: 38,
-    tintColor: "#f6f6f6",
+    width: 36,
+    height: 36,
+    tintColor: "#FFFFFF",
+    opacity: 0.95,
+  },
+
+  /* FIXED CONTROLS BELOW HEADER */
+  controlsWrapper: {
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E2E8F0",
+    gap: 10,
   },
   searchBox: {
-    flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "#F1F5F3",
     borderRadius: 12,
     paddingHorizontal: 12,
     height: 42,
     gap: 8,
+    borderWidth: 1,
+    borderColor: "#E2EBE5",
   },
   searchInput: {
     flex: 1,
     height: "100%",
     color: "#0F172A",
-    fontSize: 14,
+    fontSize: 13,
+  },
+  filterChipsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 2,
+    paddingRight: 16,
+  },
+  filterChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: "#F1F5F3",
+    borderWidth: 1,
+    borderColor: "#E2EBE5",
+  },
+  filterChipActive: {
+    backgroundColor: "#276344",
+    borderColor: "#276344",
+  },
+  filterChipText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#556E60",
+  },
+  filterChipTextActive: {
+    color: "#FFFFFF",
+  },
+
+  /* SUB-FILTERS & SORTING ROW */
+  subFilterRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingTop: 2,
+    paddingBottom: 2,
+  },
+  subFilterLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#64748B",
+    marginRight: 2,
+  },
+  sortChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  sortChipActive: {
+    backgroundColor: "#334155",
+    borderColor: "#334155",
+  },
+  sortChipText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#475569",
+  },
+  sortChipTextActive: {
+    color: "#FFFFFF",
+  },
+  subFilterDivider: {
+    width: 1,
+    height: 16,
+    backgroundColor: "#CBD5E1",
+    marginHorizontal: 4,
+  },
+
+  /* USER MILESTONE BANNER */
+  milestoneCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#ECFDF5",
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: -4,
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#A7F3D0",
+    gap: 10,
+  },
+  milestoneIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#D1FAE5",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  milestoneTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#065F46",
+  },
+  milestoneSubtext: {
+    fontSize: 11,
+    color: "#047857",
+    marginTop: 1,
+  },
+  milestoneBtn: {
+    backgroundColor: "#059669",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  milestoneBtnText: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "700",
   },
 
   /* CONTENT STYLES */
@@ -342,6 +707,11 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     gap: 12,
     flexGrow: 1,
+  },
+  feedContentGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
   },
 
   /* CARD STYLES */
@@ -384,10 +754,32 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#DCFCE7",
   },
+  badgeFull: {
+    backgroundColor: "#FEF2F2",
+    borderColor: "#FECACA",
+  },
   badgeText: {
     fontSize: 11,
     fontWeight: "600",
     color: "#5F9C76",
+  },
+  badgeTextFull: {
+    color: "#DC2626",
+  },
+  joinedBadge: {
+    backgroundColor: "#DCFCE7",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#BBF7D0",
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  joinedBadgeText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#166534",
   },
   eventBadge: {
     backgroundColor: "#EAF4ED",
@@ -399,6 +791,53 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "700",
     color: "#276344",
+  },
+  ongoingBadge: {
+    backgroundColor: "#FEF3C7",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  ongoingBadgeText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#B45309",
+  },
+  cancelledBadge: {
+    backgroundColor: "#FEE2E2",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  cancelledBadgeText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#DC2626",
+  },
+  badgeOngoing: {
+    backgroundColor: "#FEF3C7",
+    borderColor: "#FDE68A",
+  },
+  badgeCancelled: {
+    backgroundColor: "#FEE2E2",
+    borderColor: "#FECACA",
+  },
+  badgeTextCancelled: {
+    color: "#DC2626",
+  },
+  cancellationReasonText: {
+    fontSize: 11,
+    color: "#DC2626",
+    fontStyle: "italic",
+    marginTop: 4,
   },
   cardDescription: {
     fontSize: 13,
@@ -440,6 +879,10 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#5F9C76",
   },
+  viewLinkOngoing: {
+    color: "#D97706",
+    fontWeight: "700",
+  },
   cardImage: {
     width: 84,
     height: 84,
@@ -455,6 +898,38 @@ const styles = StyleSheet.create({
     backgroundColor: "#F8FAFC",
     borderWidth: 1,
     borderColor: "#F1F5F9",
+  },
+  emptyContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 45,
+    paddingHorizontal: 20,
+    gap: 8,
+  },
+  emptyTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#334155",
+    marginTop: 6,
+  },
+  emptySubtext: {
+    fontSize: 13,
+    color: "#64748B",
+    textAlign: "center",
+    maxWidth: 280,
+    lineHeight: 18,
+  },
+  resetFilterBtn: {
+    marginTop: 8,
+    backgroundColor: "#EAF4ED",
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+  },
+  resetFilterBtnText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#276344",
   },
   emptyText: {
     textAlign: "center",

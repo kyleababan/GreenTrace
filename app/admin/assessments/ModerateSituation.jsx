@@ -1,15 +1,11 @@
 import AssessmentList from "../components/AssessmentList";
 
-export default function CriticalSituation(props) {
-
+export default function ModerateSituation(props) {
     return (
-
         <AssessmentList
-            status="Critical"
-            color="#FF6666"
+            status="Moderate"
+            color="#ff8c40"
             {...props}
         />
-
     );
-
 }

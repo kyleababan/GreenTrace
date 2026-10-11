@@ -1,7 +1,7 @@
 import { Link, useRouter } from "expo-router";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { doc, serverTimestamp, setDoc } from "firebase/firestore";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   Image,
   KeyboardAvoidingView,
@@ -22,6 +22,13 @@ import { getAuthErrorMessage } from "../utils/authErrors";
 export default function Signup() {
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const router = useRouter();
+
+  // Field Refs for Keyboard Navigation
+  const lastNameRef = useRef(null);
+  const emailRef = useRef(null);
+  const passwordRef = useRef(null);
+  const cellNumberRef = useRef(null);
+  const birthDateRef = useRef(null);
 
   // Form State
   const [firstName, setFirstName] = useState("");
@@ -184,7 +191,7 @@ export default function Signup() {
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
         style={styles.keyboardAvoidingView}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <ScrollView
           contentContainerStyle={styles.scrollContent}
@@ -231,10 +238,14 @@ export default function Signup() {
                 }}
                 placeholder="First Name"
                 placeholderTextColor={errors.firstName ? "#D66A6A" : "#888"}
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onSubmitEditing={() => lastNameRef.current?.focus()}
                 accessibilityState={{ invalid: Boolean(errors.firstName) }}
               />
               {renderFieldError("firstName")}
               <TextInput
+                ref={lastNameRef}
                 style={[styles.input, errors.lastName && styles.inputError]}
                 value={lastName}
                 onChangeText={(value) => {
@@ -242,10 +253,14 @@ export default function Signup() {
                 }}
                 placeholder="Last Name"
                 placeholderTextColor={errors.lastName ? "#D66A6A" : "#888"}
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onSubmitEditing={() => emailRef.current?.focus()}
                 accessibilityState={{ invalid: Boolean(errors.lastName) }}
               />
               {renderFieldError("lastName")}
               <TextInput
+                ref={emailRef}
                 style={[styles.input, errors.email && styles.inputError]}
                 value={email}
                 onChangeText={(value) => {
@@ -255,10 +270,14 @@ export default function Signup() {
                 placeholderTextColor={errors.email ? "#D66A6A" : "#888"}
                 keyboardType="email-address"
                 autoCapitalize="none"
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onSubmitEditing={() => passwordRef.current?.focus()}
                 accessibilityState={{ invalid: Boolean(errors.email) }}
               />
               {renderFieldError("email")}
               <TextInput
+                ref={passwordRef}
                 style={[styles.input, errors.password && styles.inputError]}
                 placeholder="Password"
                 placeholderTextColor={errors.password ? "#D66A6A" : "#888"}
@@ -267,10 +286,14 @@ export default function Signup() {
                 onChangeText={(value) => {
                   updateField("password", value, setPassword);
                 }}
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onSubmitEditing={() => cellNumberRef.current?.focus()}
                 accessibilityState={{ invalid: Boolean(errors.password) }}
               />
               {renderFieldError("password")}
               <TextInput
+                ref={cellNumberRef}
                 style={[styles.input, errors.cellNumber && styles.inputError]}
                 value={cellNumber}
                 onChangeText={(value) => {
@@ -280,10 +303,14 @@ export default function Signup() {
                 placeholderTextColor={errors.cellNumber ? "#D66A6A" : "#888"}
                 keyboardType="phone-pad"
                 maxLength={11}
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onSubmitEditing={() => birthDateRef.current?.focus()}
                 accessibilityState={{ invalid: Boolean(errors.cellNumber) }}
               />
               {renderFieldError("cellNumber")}
               <TextInput
+                ref={birthDateRef}
                 style={[styles.input, errors.birthDate && styles.inputError]}
                 value={birthDate}
                 onChangeText={(value) => {
@@ -297,6 +324,8 @@ export default function Signup() {
                 placeholderTextColor={errors.birthDate ? "#D66A6A" : "#888"}
                 keyboardType="number-pad"
                 maxLength={10}
+                returnKeyType="go"
+                onSubmitEditing={registerUser}
                 accessibilityState={{ invalid: Boolean(errors.birthDate) }}
               />
               {renderFieldError("birthDate")}
@@ -371,7 +400,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   content: {
-    flex: 1,
+    flexGrow: 1,
     justifyContent: "center",
     alignItems: "center",
     paddingHorizontal: 24,

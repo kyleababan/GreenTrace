@@ -2,12 +2,12 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { signOut } from "firebase/auth";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
     ActivityIndicator,
+    Alert,
     Image,
     Modal,
-    Platform,
     SafeAreaView,
     ScrollView,
     StyleSheet,
@@ -19,52 +19,31 @@ import {
 import { uploadToCloudinary } from "../cloudinary";
 import Navbar from "../components/navbar";
 import NsfwWarningModal from "../components/nsfw-warning-modal";
+import DuplicateReportModal from "../components/duplicate-report-modal";
+import PostLocationModal from "../components/PostLocationModal";
+import { checkVicinity } from "../constants/geoUtils";
 import { normalizePurok } from "../constants/locationFormat";
 import { auth, db } from "../firebaseConfig";
 import { getCurrentCoordinates } from "../utils/getCurrentCoordinates";
 import { getNameInitials } from "../utils/getNameInitials";
 import { hideBadWords } from "../utils/hideBadWords";
+import { notifyUserAccountWarning } from "../utils/notificationHelpers";
 
 import {
     addDoc,
     collection,
     doc,
     getDoc,
+    getDocs,
+    limit,
+    orderBy,
+    query,
     serverTimestamp,
     updateDoc,
 } from "firebase/firestore";
 
-const BARANGAYS = [
-  "Anislag",
-  "Anopog",
-  "Binabag",
-  "Buhingtubig",
-  "Busay",
-  "Butong",
-  "Cabiangon",
-  "Camugao",
-  "Duangan",
-  "Guimbawian",
-  "Lamac",
-  "Lut-od",
-  "Mangoto",
-  "Opao",
-  "Poblacion",
-  "Punod",
-  "Rizal",
-  "Sacsac",
-  "Sambagon",
-  "Sibago",
-  "Tajao",
-  "Tangub",
-  "Tanibag",
-  "Tupas",
-  "Tutay",
-].sort((first, second) => first.localeCompare(second));
-
 export default function CreateReport() {
   const [uploading, setUploading] = useState(false);
-
   const [userName, setUserName] = useState("");
   const router = useRouter();
   const [title, setTitle] = useState("");
@@ -74,9 +53,10 @@ export default function CreateReport() {
 
   const [manualBarangay, setManualBarangay] = useState("");
   const [manualPurok, setManualPurok] = useState("");
+  const [manualStreet, setManualStreet] = useState("");
+  const [manualMunicipality, setManualMunicipality] = useState("Pinamungajan");
   const [gpsModalVisible, setGpsModalVisible] = useState(false);
   const [errors, setErrors] = useState({});
-  const [gpsErrors, setGpsErrors] = useState({});
   const [locationName, setLocationName] = useState("");
 
   // NSFW Warning & Ban Modal States
@@ -85,9 +65,17 @@ export default function CreateReport() {
   const [warningsCount, setWarningsCount] = useState(1);
   const [warningReason, setWarningReason] = useState("");
 
+  // Duplicate Report & Vicinity Warning Modal States
+  const [duplicateModalConfig, setDuplicateModalConfig] = useState({
+    visible: false,
+    mode: "warning", // 'warning' (same user) | 'notice' (different user)
+    existingReport: null,
+    extraFields: {},
+  });
+  const [duplicateSubmitting, setDuplicateSubmitting] = useState(false);
+
   const validateLocation = () => ({
     ...(!manualBarangay ? { barangay: "Barangay is required." } : {}),
-    ...(!manualPurok ? { purok: "Street / Purok is required." } : {}),
   });
 
   useEffect(() => {
@@ -99,6 +87,14 @@ export default function CreateReport() {
         const userSnap = await getDoc(doc(db, "users", currentUser.uid));
         if (userSnap.exists()) {
           const data = userSnap.data();
+          if (data.role === "admin") {
+            Alert.alert(
+              "Access Restricted",
+              "Administrators cannot post waste reports. Please use the administrative portal.",
+            );
+            router.replace("/admin/dashboard");
+            return;
+          }
           if (data.isBanned) {
             setWarningIsBanned(true);
             setWarningsCount(data.nsfwWarnings || 3);
@@ -121,18 +117,7 @@ export default function CreateReport() {
 
   // Camera & GPS State
   const [imageSourceModalVisible, setImageSourceModalVisible] = useState(false);
-  const [coords, setCoords] = useState({
-    latitude: 10.2705,
-    longitude: 123.5855,
-  });
-  const [hasGpsCoordinates, setHasGpsCoordinates] = useState(false);
   const [postCoordinates, setPostCoordinates] = useState(null);
-  const [gpsBarangay, setGpsBarangay] = useState("");
-  const [gpsStreet, setGpsStreet] = useState("");
-  const [gpsLoading, setGpsLoading] = useState(false);
-  const [gpsReverseLoading, setGpsReverseLoading] = useState(false);
-  const [mapSessionId, setMapSessionId] = useState(1);
-  const reverseGeocodeTimeoutRef = useRef(null);
 
   // Report Posting Guidelines & Instructions Modal States
   const [guideModalVisible, setGuideModalVisible] = useState(false);
@@ -150,147 +135,10 @@ export default function CreateReport() {
       setLocationMessage(
         `✅ Location allowed & active! (GPS: ${currentCoordinates.latitude}, ${currentCoordinates.longitude})`,
       );
-      setCoords(currentCoordinates);
-      setHasGpsCoordinates(true);
-      setMapSessionId((prev) => prev + 1);
+      setPostCoordinates(currentCoordinates);
     } catch (err) {
       setLocationStatus("denied");
       setLocationMessage(`⚠️ ${err.message || "Could not retrieve GPS location."}`);
-    }
-  };
-
-  // Listen to pin drag/click events from the embedded Leaflet iframe
-  useEffect(() => {
-    if (Platform.OS === "web" && typeof window !== "undefined") {
-      const handleWindowMessage = (event) => {
-        try {
-          const payload =
-            typeof event.data === "string"
-              ? JSON.parse(event.data)
-              : event.data;
-          if (payload?.type === "GPS_PIN_MOVED") {
-            const newLat = Number(payload.lat);
-            const newLng = Number(payload.lng);
-            if (
-              !Number.isFinite(newLat) ||
-              !Number.isFinite(newLng) ||
-              newLat < -90 ||
-              newLat > 90 ||
-              newLng < -180 ||
-              newLng > 180
-            ) {
-              return;
-            }
-            const latitude = Number(newLat.toFixed(6));
-            const longitude = Number(newLng.toFixed(6));
-            setCoords({ latitude, longitude });
-            setHasGpsCoordinates(true);
-            setGpsErrors((previous) => {
-              const next = { ...previous };
-              delete next.location;
-              return next;
-            });
-            triggerReverseGeocode(latitude, longitude);
-          }
-        } catch (e) {
-          // Ignore non-JSON messages
-        }
-      };
-
-      window.addEventListener("message", handleWindowMessage);
-      return () => window.removeEventListener("message", handleWindowMessage);
-    }
-  }, [manualBarangay]);
-
-  const triggerReverseGeocode = (lat, lng) => {
-    if (reverseGeocodeTimeoutRef.current) {
-      clearTimeout(reverseGeocodeTimeoutRef.current);
-    }
-    reverseGeocodeTimeoutRef.current = setTimeout(() => {
-      reverseGeocodeCoordinates(lat, lng);
-    }, 400);
-  };
-
-  const reverseGeocodeCoordinates = async (lat, lng) => {
-    try {
-      setGpsReverseLoading(true);
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
-        {
-          headers: {
-            Accept: "application/json",
-          },
-        },
-      );
-      const data = await res.json();
-      if (data && data.address) {
-        const addr = data.address;
-        const candidateBarangay =
-          addr.suburb ||
-          addr.village ||
-          addr.quarter ||
-          addr.neighbourhood ||
-          addr.hamlet ||
-          "";
-
-        // Try to match against official Pinamungajan barangays
-        const matched = BARANGAYS.find(
-          (b) => b.toLowerCase() === candidateBarangay.toLowerCase().trim(),
-        );
-
-        const barangayVal =
-          matched || candidateBarangay || manualBarangay || "Poblacion";
-        const roadVal =
-          addr.road || addr.pedestrian || addr.street || addr.residential || "";
-
-        setGpsBarangay(barangayVal);
-        setGpsStreet(
-          roadVal ||
-            (addr.town || addr.city ? `${addr.town || addr.city}` : ""),
-        );
-      }
-    } catch (err) {
-      console.warn("Reverse geocode error:", err);
-    } finally {
-      setGpsReverseLoading(false);
-    }
-  };
-
-  const detectGpsLocation = async (refresh = false) => {
-    setGpsModalVisible(true);
-    setGpsErrors((previous) => {
-      const next = { ...previous };
-      delete next.location;
-      return next;
-    });
-    if (hasGpsCoordinates && !refresh) {
-      setMapSessionId((previous) => previous + 1);
-      if (!gpsBarangay && !gpsStreet) {
-        await reverseGeocodeCoordinates(coords.latitude, coords.longitude);
-      }
-      return;
-    }
-
-    setGpsLoading(true);
-    try {
-      const currentCoordinates = await getCurrentCoordinates();
-      setCoords(currentCoordinates);
-      setHasGpsCoordinates(true);
-      setMapSessionId((previous) => previous + 1);
-      await reverseGeocodeCoordinates(
-        currentCoordinates.latitude,
-        currentCoordinates.longitude,
-      );
-    } catch (locErr) {
-      console.warn("Could not get current GPS location:", locErr);
-      setGpsErrors((previous) => ({
-        ...previous,
-        location:
-          locErr.message ||
-          "Could not retrieve GPS location. Check your device settings and try again.",
-      }));
-    } finally {
-      setGpsLoading(false);
     }
   };
 
@@ -360,119 +208,9 @@ export default function CreateReport() {
     });
   };
 
-  const handleConfirmGpsLocation = () => {
-    const barangay = gpsBarangay.trim();
-    const street = gpsStreet.trim();
 
-    const newGpsErrors = {};
-    if (!barangay) {
-      newGpsErrors.barangay = "Barangay is required.";
-    }
-    if (!street) {
-      newGpsErrors.street = "Street / Purok is required.";
-    }
-    if (!hasGpsCoordinates) {
-      newGpsErrors.location =
-        Platform.OS === "web"
-          ? "Get your GPS location or move the map pin first."
-          : "Get your GPS location before confirming.";
-    }
 
-    if (Object.keys(newGpsErrors).length > 0) {
-      setGpsErrors(newGpsErrors);
-      return;
-    }
-
-    setGpsErrors({});
-
-    let purokVal = street;
-    const purokMatch = street.match(/(?:pk\.?|purok)\s*(\d+|[a-zA-Z0-9]+)/i);
-    if (purokMatch) {
-      purokVal = purokMatch[1];
-    }
-
-    setManualBarangay(barangay);
-    setManualPurok(purokVal);
-    setLocationName(`${barangay}, ${street}`);
-    setPostCoordinates({
-      latitude: coords.latitude,
-      longitude: coords.longitude,
-    });
-
-    setErrors((prev) => {
-      const next = { ...prev };
-      delete next.location;
-      delete next.barangay;
-      delete next.purok;
-      return next;
-    });
-
-    setGpsModalVisible(false);
-  };
-
-  const leafletHtml = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <style>
-    html, body, #map { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; }
-  </style>
-</head>
-<body>
-  <div id="map"></div>
-  <script>
-    var lat = ${coords.latitude ?? 10.2705};
-    var lng = ${coords.longitude ?? 123.5855};
-    var map = L.map('map', {
-      zoomControl: true,
-      attributionControl: false
-    }).setView([lat, lng], 16);
-
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-    }).addTo(map);
-
-    var marker = L.marker([lat, lng], { draggable: true }).addTo(map);
-
-    function notify(pos) {
-      window.parent.postMessage(JSON.stringify({ type: 'GPS_PIN_MOVED', lat: pos.lat, lng: pos.lng }), '*');
-    }
-
-    marker.on('dragend', function() {
-      notify(marker.getLatLng());
-    });
-
-    map.on('click', function(e) {
-      marker.setLatLng(e.latlng);
-      notify(e.latlng);
-    });
-  </script>
-</body>
-</html>
-`;
-
-  const createPost = async () => {
-    if (uploading) return;
-
-    const locationErrors = validateLocation();
-    const nextErrors = {
-      ...locationErrors,
-      ...(Object.keys(locationErrors).length
-        ? { location: "Please set your location using GPS map before posting." }
-        : {}),
-      ...(!image ? { image: "Please select an image." } : {}),
-    };
-    setErrors(nextErrors);
-
-    if (Object.values(nextErrors).some(Boolean)) {
-      if (Object.keys(locationErrors).length) detectGpsLocation();
-      return;
-    }
-
+  const performPostSubmission = async (extraFields = {}) => {
     try {
       setUploading(true);
 
@@ -480,12 +218,25 @@ export default function CreateReport() {
 
       if (!currentUser) {
         setErrors({ form: "You must be signed in to create a post." });
+        setUploading(false);
+        setDuplicateSubmitting(false);
         return;
       }
 
       const userSnap = await getDoc(doc(db, "users", currentUser.uid));
 
-      const userData = userSnap.data();
+      const userData = userSnap.data() || {};
+
+      if (userData.role === "admin") {
+        Alert.alert(
+          "Access Restricted",
+          "Administrators cannot post waste reports. Please use the administrative portal.",
+        );
+        setUploading(false);
+        setDuplicateSubmitting(false);
+        router.replace("/admin/dashboard");
+        return;
+      }
 
       const uploadRes = await uploadToCloudinary(image, {
         classifyWaste: true,
@@ -497,7 +248,6 @@ export default function CreateReport() {
 
       await addDoc(
         collection(db, "posts"),
-
         {
           userId: currentUser.uid,
 
@@ -518,7 +268,8 @@ export default function CreateReport() {
           barangay: manualBarangay || null,
 
           purok: normalizePurok(manualPurok) || null,
-
+          street: manualStreet || null,
+          municipality: manualMunicipality || "Pinamungajan",
           coordinates:
             postCoordinates,
 
@@ -531,9 +282,23 @@ export default function CreateReport() {
           commentCount: 0,
 
           createdAt: serverTimestamp(),
+
+          // Duplicate report prevention fields
+          isDuplicate: extraFields.isDuplicate ?? false,
+          isPointEligible: extraFields.isPointEligible ?? true,
+          ...(extraFields.duplicateOf
+            ? { duplicateOf: extraFields.duplicateOf }
+            : {}),
+          ...(extraFields.linkedReportId
+            ? { linkedReportId: extraFields.linkedReportId }
+            : {}),
+          ...(extraFields.vicinityGroupId
+            ? { vicinityGroupId: extraFields.vicinityGroupId }
+            : {}),
         },
       );
 
+      setDuplicateModalConfig((prev) => ({ ...prev, visible: false }));
       router.replace("/home");
     } catch (error) {
       console.log(error);
@@ -584,6 +349,12 @@ export default function CreateReport() {
                 changedAt: serverTimestamp(),
                 createdAt: serverTimestamp(),
               });
+              await notifyUserAccountWarning({
+                userId: currentUser.uid,
+                warningNumber: newCount,
+                maxWarnings: 3,
+                reason: cleanedReason || "Uploaded inappropriate/NSFW content.",
+              });
             } catch (logErr) {
               console.warn("Could not write violation log:", logErr);
             }
@@ -607,6 +378,110 @@ export default function CreateReport() {
       }
     } finally {
       setUploading(false);
+      setDuplicateSubmitting(false);
+    }
+  };
+
+  const createPost = async () => {
+    if (uploading || duplicateSubmitting) return;
+
+    const locationErrors = validateLocation();
+    const nextErrors = {
+      ...locationErrors,
+      ...(Object.keys(locationErrors).length
+        ? { location: "Please set your location using GPS map before posting." }
+        : {}),
+      ...(!image ? { image: "Please select an image." } : {}),
+    };
+    setErrors(nextErrors);
+
+    if (Object.values(nextErrors).some(Boolean)) {
+      if (Object.keys(locationErrors).length) setGpsModalVisible(true);
+      return;
+    }
+
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      setErrors({ form: "You must be signed in to create a post." });
+      return;
+    }
+
+    try {
+      setUploading(true);
+
+      // Pre-check for active uncleaned reports in vicinity
+      const postsSnapshot = await getDocs(
+        query(collection(db, "posts"), orderBy("createdAt", "desc"), limit(80)),
+      );
+
+      const candidateReport = {
+        coordinates: postCoordinates,
+        barangay: manualBarangay,
+        purok: manualPurok,
+      };
+
+      const nearbyReports = [];
+      postsSnapshot.forEach((docSnap) => {
+        const postData = docSnap.data();
+        const postStatus = (postData.status || "moderate").toLowerCase();
+        if (postStatus === "cleaned") return;
+
+        const vicResult = checkVicinity(candidateReport, postData);
+        if (vicResult.isVicinity) {
+          nearbyReports.push({
+            id: docSnap.id,
+            ...postData,
+            distanceMeters: vicResult.distanceMeters,
+          });
+        }
+      });
+
+      if (nearbyReports.length > 0) {
+        // 1. If the SAME user already submitted in this vicinity -> Warning Modal (No Points)
+        const sameUserReport = nearbyReports.find(
+          (p) => p.userId === currentUser.uid,
+        );
+
+        if (sameUserReport) {
+          setUploading(false);
+          setDuplicateModalConfig({
+            visible: true,
+            mode: "warning",
+            existingReport: sameUserReport,
+            extraFields: {
+              isDuplicate: true,
+              isPointEligible: false,
+              duplicateOf: sameUserReport.id,
+              vicinityGroupId:
+                sameUserReport.vicinityGroupId || sameUserReport.id,
+            },
+          });
+          return;
+        }
+
+        // 2. If a DIFFERENT user reported in this same vicinity -> Notice Modal (Point Eligible on Cleaned)
+        const existingNearby = nearbyReports[0];
+        setUploading(false);
+        setDuplicateModalConfig({
+          visible: true,
+          mode: "notice",
+          existingReport: existingNearby,
+          extraFields: {
+            isDuplicate: false,
+            isPointEligible: true,
+            linkedReportId: existingNearby.id,
+            vicinityGroupId:
+              existingNearby.vicinityGroupId || existingNearby.id,
+          },
+        });
+        return;
+      }
+
+      // 3. No existing report in vicinity -> normal submission
+      await performPostSubmission({ isDuplicate: false, isPointEligible: true });
+    } catch (err) {
+      console.warn("Vicinity pre-check skipped due to error, proceeding:", err);
+      await performPostSubmission({ isDuplicate: false, isPointEligible: true });
     }
   };
 
@@ -614,7 +489,7 @@ export default function CreateReport() {
     try {
       await signOut(auth);
       router.replace("/signin");
-    } catch (e) {
+    } catch (_e) {
       router.replace("/signin");
     }
   };
@@ -707,12 +582,12 @@ export default function CreateReport() {
             <View style={styles.locationTipsBox}>
               <Text style={styles.locationTipItem}>
                 • <Text style={{ fontWeight: "700" }}>Browser:</Text> If
-                prompted, click 'Allow'. If blocked, click the lock/settings
+                prompted, click &apos;Allow&apos;. If blocked, click the lock/settings
                 icon next to the URL bar and enable Location.
               </Text>
               <Text style={styles.locationTipItem}>
                 • <Text style={{ fontWeight: "700" }}>Device:</Text> Ensure your
-                phone's GPS / Location switch is turned ON.
+                phone&apos;s GPS / Location switch is turned ON.
               </Text>
             </View>
           </View>
@@ -864,8 +739,8 @@ export default function CreateReport() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.guidelineTitle}>Descriptive Title</Text>
                 <Text style={styles.guidelineDesc}>
-                  Provide a concise title, e.g., 'Illegal plastic dump along
-                  creek' or 'Trash pile behind public market'.
+                  Provide a concise title, e.g., &apos;Illegal plastic dump along
+                  creek&apos; or &apos;Trash pile behind public market&apos;.
                 </Text>
               </View>
             </View>
@@ -973,7 +848,7 @@ export default function CreateReport() {
                 styles.locationRow,
                 errors.location && styles.errorBorder,
               ]}
-              onPress={() => detectGpsLocation()}
+              onPress={() => setGpsModalVisible(true)}
             >
               <Image
                 source={require("../assets/images/location.png")}
@@ -1046,166 +921,45 @@ export default function CreateReport() {
           </ScrollView>
         </View>
 
-        {/* GPS TRACKING MODAL */}
-        <Modal
+        {/* POST LOCATION MODAL */}
+        <PostLocationModal
+          key={gpsModalVisible ? "create-gps-open" : "create-gps-closed"}
           visible={gpsModalVisible}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setGpsModalVisible(false)}
-        >
-          <View style={styles.modalBackground}>
-            <View style={[styles.modalBox, styles.gpsModalBox]}>
-              <Text style={styles.modalTitle}>GPS Tracking</Text>
-              <TouchableOpacity
-                style={styles.gpsCurrentLocationBtn}
-                onPress={() => detectGpsLocation(true)}
-                disabled={gpsLoading}
-              >
-                {gpsLoading ? (
-                  <ActivityIndicator size="small" color="#276344" />
-                ) : (
-                  <Ionicons name="locate" size={16} color="#276344" />
-                )}
-                <Text style={styles.gpsCurrentLocationText}>
-                  {gpsLoading ? "Getting current location..." : "Use current GPS"}
-                </Text>
-              </TouchableOpacity>
-
-              {/* INTERACTIVE LEAFLET / OPENSTREETMAP */}
-              <View style={styles.gpsPlaceholder}>
-                {gpsLoading ? (
-                  <View style={styles.gpsLoadingCenter}>
-                    <ActivityIndicator size="large" color="#5F9C76" />
-                    <Text style={styles.gpsLoadingText}>
-                      Acquiring GPS location...
-                    </Text>
-                  </View>
-                ) : Platform.OS === "web" ? (
-                  <iframe
-                    key={`gps-map-${mapSessionId}`}
-                    srcDoc={leafletHtml}
-                    style={{
-                      width: "100%",
-                      height: "100%",
-                      border: "none",
-                      borderRadius: 8,
-                    }}
-                    title="GPS Location Map"
-                  />
-                ) : (
-                  <View style={styles.gpsLoadingCenter}>
-                    <Text style={{ color: "#24352A", fontWeight: "600" }}>
-                      📍 Pin: {coords.latitude}, {coords.longitude}
-                    </Text>
-                  </View>
-                )}
-              </View>
-              <Text style={styles.gpsInstruction}>
-                📍 Drag the pin or tap on the map to adjust location if
-                inaccurate.
-              </Text>
-              {!!gpsErrors.location && (
-                <Text style={styles.gpsLocationError}>
-                  {gpsErrors.location}
-                </Text>
-              )}
-
-              <View style={styles.gpsDetails}>
-                <View style={styles.gpsCoordinateRow}>
-                  <View style={styles.gpsDetailItem}>
-                    <Text style={styles.gpsDetailLabel}>Latitude</Text>
-                    <Text style={styles.gpsDetailValue}>
-                      {hasGpsCoordinates ? coords.latitude.toFixed(6) : "--"}
-                    </Text>
-                  </View>
-                  <View style={styles.gpsDetailItem}>
-                    <Text style={styles.gpsDetailLabel}>Longitude</Text>
-                    <Text style={styles.gpsDetailValue}>
-                      {hasGpsCoordinates ? coords.longitude.toFixed(6) : "--"}
-                    </Text>
-                  </View>
-                </View>
-
-                {/* CHANGED: Barangay / Purok -> Barangay */}
-                <View style={styles.gpsAddressRow}>
-                  <View style={styles.gpsLabelRow}>
-                    <Text style={styles.gpsDetailLabel}>
-                      Barangay <Text style={{ color: "#D93025" }}>*</Text>
-                    </Text>
-                    {gpsReverseLoading && (
-                      <ActivityIndicator size="small" color="#5F9C76" />
-                    )}
-                  </View>
-                  <TextInput
-                    style={[
-                      styles.gpsInput,
-                      gpsErrors.barangay && styles.inputError,
-                    ]}
-                    value={gpsBarangay}
-                    onChangeText={(text) => {
-                      setGpsBarangay(text);
-                      if (gpsErrors.barangay) {
-                        setGpsErrors((prev) => {
-                          const next = { ...prev };
-                          delete next.barangay;
-                          return next;
-                        });
-                      }
-                    }}
-                    placeholder="Barangay"
-                    placeholderTextColor="#999"
-                  />
-                  {!!gpsErrors.barangay && (
-                    <Text style={styles.fieldError}>{gpsErrors.barangay}</Text>
-                  )}
-                </View>
-
-                {/* CHANGED: Street -> Street / Purok */}
-                <View style={styles.gpsAddressRow}>
-                  <Text style={styles.gpsDetailLabel}>
-                    Street / Purok <Text style={{ color: "#D93025" }}>*</Text>
-                  </Text>
-                  <TextInput
-                    style={[
-                      styles.gpsInput,
-                      gpsErrors.street && styles.inputError,
-                    ]}
-                    value={gpsStreet}
-                    onChangeText={(text) => {
-                      setGpsStreet(text);
-                      if (gpsErrors.street) {
-                        setGpsErrors((prev) => {
-                          const next = { ...prev };
-                          delete next.street;
-                          return next;
-                        });
-                      }
-                    }}
-                    placeholder="e.g. Pinya / Pk. 2"
-                    placeholderTextColor="#999"
-                  />
-                  {!!gpsErrors.street && (
-                    <Text style={styles.fieldError}>{gpsErrors.street}</Text>
-                  )}
-                </View>
-              </View>
-
-              <TouchableOpacity
-                style={styles.confirmLocationBtn}
-                onPress={handleConfirmGpsLocation}
-              >
-                <Text style={styles.confirmLocationText}>Confirm Location</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.modalCancel}
-                onPress={() => setGpsModalVisible(false)}
-              >
-                <Text style={styles.modalCancelText}>Close</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
+          onClose={() => setGpsModalVisible(false)}
+          initialLocation={locationName}
+          initialCoords={postCoordinates}
+          post={{
+            locationName,
+            street: manualStreet,
+            purok: manualPurok,
+            barangay: manualBarangay,
+            municipality: manualMunicipality,
+            coordinates: postCoordinates,
+          }}
+          onSelectLocation={({
+            locationName: finalLocation,
+            street,
+            purok,
+            barangay,
+            municipality,
+            coordinates,
+          }) => {
+            setLocationName(finalLocation);
+            setManualStreet(street);
+            setManualPurok(purok);
+            setManualBarangay(barangay);
+            setManualMunicipality(municipality || "Pinamungajan");
+            setPostCoordinates(coordinates);
+            setErrors((prev) => {
+              const next = { ...prev };
+              delete next.location;
+              delete next.barangay;
+              delete next.purok;
+              return next;
+            });
+            setGpsModalVisible(false);
+          }}
+        />
 
         {/* IMAGE SOURCE MODAL: Use Camera or Upload */}
         <Modal
@@ -1253,6 +1007,22 @@ export default function CreateReport() {
           reason={warningReason}
           onClose={() => setWarningModalVisible(false)}
           onSignOut={handleSignOut}
+        />
+
+        {/* Duplicate Report & Vicinity Warning Modal */}
+        <DuplicateReportModal
+          visible={duplicateModalConfig.visible}
+          mode={duplicateModalConfig.mode}
+          existingReport={duplicateModalConfig.existingReport}
+          loading={duplicateSubmitting}
+          onCancel={() => {
+            setDuplicateModalConfig((prev) => ({ ...prev, visible: false }));
+            setUploading(false);
+          }}
+          onConfirm={async () => {
+            setDuplicateSubmitting(true);
+            await performPostSubmission(duplicateModalConfig.extraFields);
+          }}
         />
 
         {/* HOW TO POST REPORT - STEP BY STEP GUIDE MODAL */}
@@ -1380,7 +1150,7 @@ export default function CreateReport() {
                     onPress={() => setGuideModalVisible(false)}
                   >
                     <Text style={styles.guideFinishText}>
-                      Got it, Let's Post!
+                      Got it, Let&apos;s Post!
                     </Text>
                   </TouchableOpacity>
                 )}

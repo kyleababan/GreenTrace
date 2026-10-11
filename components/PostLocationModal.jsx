@@ -14,41 +14,20 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
-import { formatLocationWithPurok } from "../constants/locationFormat";
+import {
+  BARANGAY_COORDINATES,
+  MUNICIPALITY_OR_PROVINCE_NAMES,
+  PINAMUNGAJAN_BARANGAYS,
+  findMatchingBarangay,
+  findNearestBarangay,
+  formatLocationWithPurok,
+  formatPurokOrSitio,
+  splitLocationDetails,
+} from "../constants/locationFormat";
 import {
   formatWasteLabel,
   getWasteCategoryColor,
 } from "../constants/wasteCategories";
-
-// Pinamungajan barangay coordinates fallback
-const BARANGAY_COORDINATES = {
-  anislag: { lat: 10.285, lng: 123.57 },
-  anopog: { lat: 10.292, lng: 123.615 },
-  binabag: { lat: 10.26, lng: 123.575 },
-  buhingtubig: { lat: 10.252, lng: 123.602 },
-  busay: { lat: 10.28, lng: 123.63 },
-  butong: { lat: 10.245, lng: 123.58 },
-  cabiangon: { lat: 10.275, lng: 123.61 },
-  camugao: { lat: 10.295, lng: 123.59 },
-  duangan: { lat: 10.24, lng: 123.62 },
-  guimbawian: { lat: 10.265, lng: 123.635 },
-  lamac: { lat: 10.3, lng: 123.64 },
-  lutod: { lat: 10.31, lng: 123.61 },
-  "lut-od": { lat: 10.31, lng: 123.61 },
-  mangoto: { lat: 10.285, lng: 123.56 },
-  opao: { lat: 10.27, lng: 123.57 },
-  poblacion: { lat: 10.2705, lng: 123.5855 },
-  punod: { lat: 10.29, lng: 123.575 },
-  rizal: { lat: 10.26, lng: 123.62 },
-  sacsac: { lat: 10.255, lng: 123.63 },
-  sambagon: { lat: 10.282, lng: 123.6 },
-  sibago: { lat: 10.298, lng: 123.58 },
-  tajao: { lat: 10.305, lng: 123.565 },
-  tangub: { lat: 10.25, lng: 123.565 },
-  tanibag: { lat: 10.275, lng: 123.565 },
-  tupas: { lat: 10.265, lng: 123.56 },
-  tutay: { lat: 10.278, lng: 123.588 },
-};
 
 const STATUS_DETAILS = {
   critical: { label: "Critical", color: "#FF5B5B", badgeBg: "#FFEBEB" },
@@ -61,14 +40,6 @@ const STATUS_DETAILS = {
 const LOCATION_ICON_BASE64 =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAACXBIWXMAAAsTAAALEwEAmpwYAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAOdEVYdFNvZnR3YXJlAEZpZ21hnrGWYwAAAQBJREFUeAGFU7sNwkAMfQkwAIxBhmAF6GACWACJmgaxA+PQJlJoESWioeBTUPAJNvgO5+4SLD1d5M/zs+8ClK0p54iwJbwID8KOMHRyPDOBsxQyCoEhukhOyy2O5OSEuyoqnG+OnQLNPwQT6VLImRO6hISQqRiTjVVTawclPRVfLIAQmvgxpKJQSJwOkfj0SLaDJgh9A75cTz5ElpG4gT9CpuJ7BBhnKG87Fdm8yBy/23kSpkZFpAi4k9l0pE4Icax8doSGo4ITem6SQzQnrOHvySZdlVwN9t3wx/g5t1H9EjuO6qBxQj9QPEDNjxQaZ4HvxplgiYq7ryNgWwm0r2RvqGhfQgsI7XsAAAAASUVORK5CYII=";
 
-const splitLocation = (location) => {
-  const [barangay = "", ...streetParts] = String(location || "").split(",");
-  return {
-    barangay: barangay.trim(),
-    street: streetParts.join(",").trim(),
-  };
-};
-
 export default function PostLocationModal({
   post,
   visible,
@@ -77,24 +48,146 @@ export default function PostLocationModal({
   initialCoords = null,
   onSelectLocation,
 }) {
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const isSmallScreen = width < 480;
+  const isTablet = width >= 600 && width < 1024;
+  const isDesktop = width >= 1024;
   const isSelectingLocation = typeof onSelectLocation === "function";
-  const initialAddress = splitLocation(initialLocation);
+  const initialAddress = useMemo(() => {
+    const loc =
+      initialLocation ||
+      (post
+        ? formatLocationWithPurok(post) || post.locationName || ""
+        : "");
+    const parsed = splitLocationDetails(
+      loc,
+      post?.purok,
+      post?.barangay,
+      post?.municipality || post?.city || post?.municipal,
+    );
+    return {
+      street:
+        parsed.street ||
+        (typeof post?.street === "string" ? post.street : ""),
+      purokOrSitio:
+        parsed.purokOrSitio ||
+        (typeof post?.purok === "string" ? formatPurokOrSitio(post.purok) : ""),
+      barangay:
+        parsed.barangay ||
+        (typeof post?.barangay === "string" ? post.barangay : ""),
+      municipality:
+        parsed.municipality ||
+        (typeof post?.municipality === "string"
+          ? post.municipality
+          : "Pinamungajan"),
+    };
+  }, [initialLocation, post]);
+
   const [selectionBarangay, setSelectionBarangay] = useState(
     initialAddress.barangay,
+  );
+  const [selectionPurok, setSelectionPurok] = useState(
+    initialAddress.purokOrSitio,
   );
   const [selectionStreet, setSelectionStreet] = useState(
     initialAddress.street,
   );
-  const [selectionCoords, setSelectionCoords] = useState(initialCoords);
+  const [selectionMunicipality, setSelectionMunicipality] = useState(
+    initialAddress.municipality,
+  );
+  const [barangayDropdownOpen, setBarangayDropdownOpen] = useState(false);
+  const [selectionCoords, setSelectionCoords] = useState(
+    initialCoords ||
+      (post?.coordinates?.latitude && post?.coordinates?.longitude
+        ? {
+            latitude: Number(post.coordinates.latitude),
+            longitude: Number(post.coordinates.longitude),
+          }
+        : null),
+  );
   const [loadingLocation, setLoadingLocation] = useState(false);
   const [reverseGeocodeLoading, setReverseGeocodeLoading] = useState(false);
   const [selectionErrors, setSelectionErrors] = useState({});
   const [mapCenterCoords, setMapCenterCoords] = useState(
-    initialCoords || { latitude: 10.2705, longitude: 123.5855 },
+    initialCoords ||
+      (post?.coordinates?.latitude && post?.coordinates?.longitude
+        ? {
+            latitude: Number(post.coordinates.latitude),
+            longitude: Number(post.coordinates.longitude),
+          }
+        : { latitude: 10.2705, longitude: 123.5855 }),
   );
   const [mapSessionId, setMapSessionId] = useState(0);
+
+  const [prevSyncKey, setPrevSyncKey] = useState(
+    () => `${visible}_${initialLocation}_${post?.id}`,
+  );
+  const currentSyncKey = `${visible}_${initialLocation}_${post?.id}`;
+
+  if (prevSyncKey !== currentSyncKey) {
+    setPrevSyncKey(currentSyncKey);
+    if (visible) {
+      setSelectionBarangay(initialAddress.barangay);
+      setSelectionPurok(initialAddress.purokOrSitio);
+      setSelectionStreet(initialAddress.street);
+      setSelectionMunicipality(initialAddress.municipality || "Pinamungajan");
+
+      const resolvedCoords =
+        initialCoords ||
+        (post?.coordinates?.latitude && post?.coordinates?.longitude
+          ? {
+              latitude: Number(post.coordinates.latitude),
+              longitude: Number(post.coordinates.longitude),
+            }
+          : null);
+
+      if (resolvedCoords) {
+        setSelectionCoords(resolvedCoords);
+        setMapCenterCoords(resolvedCoords);
+        setMapSessionId((id) => id + 1);
+      }
+      setSelectionErrors({});
+      setBarangayDropdownOpen(false);
+    }
+  }
+
+  const previewModalWidthStyle = useMemo(() => {
+    if (isDesktop) {
+      return {
+        maxWidth: 780,
+        padding: 22,
+        borderRadius: 18,
+      };
+    }
+    if (isTablet) {
+      return {
+        maxWidth: 620,
+        padding: 18,
+        borderRadius: 16,
+      };
+    }
+    return {
+      maxWidth: 440,
+      padding: isSmallScreen ? 12 : 16,
+      borderRadius: 16,
+    };
+  }, [isDesktop, isTablet, isSmallScreen]);
+
+  const mapHeightStyle = useMemo(() => {
+    if (isDesktop) {
+      return { height: Math.min(460, Math.round(height * 0.52)) };
+    }
+    if (isTablet) {
+      return { height: Math.min(380, Math.round(height * 0.46)) };
+    }
+    return { height: 260 };
+  }, [isDesktop, isTablet, height]);
+
+  const selectionMapCardHeightStyle = useMemo(() => {
+    if (isDesktop) return { height: 320 };
+    if (isTablet) return { height: 280 };
+    return { height: 240 };
+  }, [isDesktop, isTablet]);
 
   const selectionMapHtml = useMemo(
     () => `
@@ -149,33 +242,67 @@ export default function PostLocationModal({
         }
         const data = await response.json();
         const address = data?.address;
-        if (!address) return;
 
-        const barangay =
-          address.suburb ||
-          address.village ||
-          address.quarter ||
-          address.neighbourhood ||
-          address.hamlet ||
+        const candidateBarangay =
+          address?.suburb ||
+          address?.village ||
+          address?.quarter ||
+          address?.neighbourhood ||
+          address?.hamlet ||
           "";
-        const street =
-          address.road ||
-          address.pedestrian ||
-          address.street ||
-          address.residential ||
-          address.town ||
-          address.city ||
+
+        const matchedBarangay = findMatchingBarangay(candidateBarangay);
+        // If OpenStreetMap does not detect a known Pinamungajan barangay,
+        // use GPS distance to identify the nearest barangay automatically!
+        const resolvedBarangay =
+          matchedBarangay || findNearestBarangay(latitude, longitude);
+
+        const rawStreet =
+          address?.road ||
+          address?.pedestrian ||
+          address?.street ||
+          address?.residential ||
           "";
-        if (barangay) setSelectionBarangay(barangay);
-        if (street) setSelectionStreet(street);
+
+        // Never assign municipality / province names like Pinamungajan to street!
+        const cleanStreet =
+          rawStreet &&
+          !MUNICIPALITY_OR_PROVINCE_NAMES.has(
+            rawStreet.toLowerCase().replace(/[^a-z]/g, ""),
+          )
+            ? rawStreet
+            : "";
+
+        const detectedMuni =
+          address?.town ||
+          address?.municipality ||
+          address?.city ||
+          "Pinamungajan";
+
+        if (resolvedBarangay) setSelectionBarangay(resolvedBarangay);
+        if (cleanStreet) setSelectionStreet(cleanStreet);
+        if (detectedMuni) setSelectionMunicipality(detectedMuni);
+        // Note: selectionPurok is kept blank if OpenStreetMap has no purok/sitio data!
       } catch (error) {
-        console.warn("Unable to reverse geocode meetup location:", error);
+        console.warn("Unable to reverse geocode location:", error);
+        // Fallback to nearest barangay by coordinates even if reverse geocode fails
+        const nearest = findNearestBarangay(latitude, longitude);
+        if (nearest) setSelectionBarangay(nearest);
       } finally {
         setReverseGeocodeLoading(false);
       }
     },
     [],
   );
+
+  const filteredBarangays = useMemo(() => {
+    if (!selectionBarangay) return PINAMUNGAJAN_BARANGAYS;
+    const query = selectionBarangay.toLowerCase().trim();
+    const matched = PINAMUNGAJAN_BARANGAYS.filter((b) =>
+      b.toLowerCase().includes(query),
+    );
+    return matched.length > 0 ? matched : PINAMUNGAJAN_BARANGAYS;
+  }, [selectionBarangay]);
 
   useEffect(() => {
     if (
@@ -335,7 +462,8 @@ export default function PostLocationModal({
   const statusMeta = STATUS_DETAILS[statusKey] || STATUS_DETAILS.moderate;
 
   const displayLocation = post
-    ? formatLocationWithPurok(post.locationName, post.purok) ||
+    ? formatLocationWithPurok(post) ||
+      post.meetingLocation ||
       post.locationName ||
       "Pinamungajan, Cebu"
     : "";
@@ -585,7 +713,7 @@ export default function PostLocationModal({
           >
             <Text style={styles.gpsModalTitle}>GPS Tracking</Text>
 
-            <View style={styles.selectionMapCard}>
+            <View style={[styles.selectionMapCard, selectionMapCardHeightStyle]}>
               {loadingLocation ? (
                 <View style={styles.gpsLoadingCenter}>
                   <ActivityIndicator size="large" color="#5F9C76" />
@@ -648,38 +776,17 @@ export default function PostLocationModal({
                 </View>
               </View>
 
-              <View style={styles.gpsAddressRow}>
-                <View style={styles.gpsLabelRow}>
-                  <Text style={styles.gpsDetailLabel}>
-                    Barangay <Text style={styles.requiredMark}>*</Text>
-                  </Text>
-                  {reverseGeocodeLoading && (
-                    <ActivityIndicator size="small" color="#5F9C76" />
-                  )}
-                </View>
-                <TextInput
-                  style={styles.gpsInput}
-                  value={selectionBarangay}
-                  onChangeText={(value) => {
-                    setSelectionBarangay(value);
-                    setSelectionErrors((current) => ({
-                      ...current,
-                      barangay: "",
-                    }));
-                  }}
-                  placeholder="Barangay"
-                  placeholderTextColor="#999"
-                />
-                {selectionErrors.barangay ? (
-                  <Text style={styles.selectionErrorText}>
-                    {selectionErrors.barangay}
-                  </Text>
-                ) : null}
+              <View style={styles.osmNoticeBox}>
+                <Ionicons name="information-circle-outline" size={18} color="#2F5C3E" style={{ marginTop: 1 }} />
+                <Text style={styles.osmNoticeText}>
+                  OpenStreetMap detects roads and GPS coordinates, but cannot identify local Sitios or Puroks. Barangay is estimated automatically from your pin. Purok or Sitio is optional.
+                </Text>
               </View>
 
+              {/* 1. STREET / LANDMARK (OPTIONAL) */}
               <View style={styles.gpsAddressRow}>
                 <Text style={styles.gpsDetailLabel}>
-                  Street / Purok <Text style={styles.requiredMark}>*</Text>
+                  Street / Landmark (Optional)
                 </Text>
                 <TextInput
                   style={styles.gpsInput}
@@ -691,8 +798,8 @@ export default function PostLocationModal({
                       street: "",
                     }));
                   }}
-                  placeholder="e.g. Pinya / Pk. 2"
-                  placeholderTextColor="#999"
+                  placeholder="e.g. Rizal Street, Near Public Market"
+                  placeholderTextColor="#8C9A91"
                 />
                 {selectionErrors.street ? (
                   <Text style={styles.selectionErrorText}>
@@ -700,17 +807,149 @@ export default function PostLocationModal({
                   </Text>
                 ) : null}
               </View>
+
+              {/* 2. SITIO OR PUROK (OPTIONAL) */}
+              <View style={styles.gpsAddressRow}>
+                <View style={styles.gpsLabelRow}>
+                  <Text style={styles.gpsDetailLabel}>
+                    Sitio or Purok (Optional)
+                  </Text>
+                </View>
+                <TextInput
+                  style={styles.gpsInput}
+                  value={selectionPurok}
+                  onChangeText={(value) => {
+                    setSelectionPurok(value);
+                    setSelectionErrors((current) => ({
+                      ...current,
+                      purok: "",
+                    }));
+                  }}
+                  placeholder="e.g. Purok 3 / Sitio Bato (Optional)"
+                  placeholderTextColor="#8C9A91"
+                />
+                {selectionErrors.purok ? (
+                  <Text style={styles.selectionErrorText}>
+                    {selectionErrors.purok}
+                  </Text>
+                ) : null}
+              </View>
+
+              {/* 3. BARANGAY (REQUIRED - SEARCHABLE SELECTOR) */}
+              <View style={[styles.gpsAddressRow, styles.barangayRowContainer]}>
+                <View style={styles.gpsLabelRow}>
+                  <Text style={styles.gpsDetailLabel}>
+                    Barangay <Text style={styles.requiredMark}>*</Text>
+                  </Text>
+                  {reverseGeocodeLoading && (
+                    <View style={styles.detectingBadge}>
+                      <ActivityIndicator size="small" color="#5F9C76" />
+                      <Text style={styles.detectingText}>Detecting...</Text>
+                    </View>
+                  )}
+                </View>
+                <View style={styles.barangayInputWrapper}>
+                  <TextInput
+                    style={[styles.gpsInput, { flex: 1 }]}
+                    value={selectionBarangay}
+                    onChangeText={(value) => {
+                      setSelectionBarangay(value);
+                      setBarangayDropdownOpen(true);
+                      setSelectionErrors((current) => ({
+                        ...current,
+                        barangay: "",
+                      }));
+                    }}
+                    onFocus={() => setBarangayDropdownOpen(true)}
+                    placeholder="Select or type Barangay"
+                    placeholderTextColor="#8C9A91"
+                  />
+                  <TouchableOpacity
+                    style={styles.dropdownToggle}
+                    onPress={() => setBarangayDropdownOpen((prev) => !prev)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons
+                      name={barangayDropdownOpen ? "chevron-up" : "chevron-down"}
+                      size={18}
+                      color="#52675A"
+                    />
+                  </TouchableOpacity>
+                </View>
+
+                {barangayDropdownOpen && (
+                  <ScrollView
+                    style={styles.barangayDropdownMenu}
+                    nestedScrollEnabled
+                    keyboardShouldPersistTaps="handled"
+                  >
+                    {filteredBarangays.map((bName) => (
+                      <TouchableOpacity
+                        key={bName}
+                        style={[
+                          styles.barangayDropdownItem,
+                          selectionBarangay.toLowerCase() === bName.toLowerCase() &&
+                            styles.barangayDropdownItemSelected,
+                        ]}
+                        onPress={() => {
+                          setSelectionBarangay(bName);
+                          setBarangayDropdownOpen(false);
+                          setSelectionErrors((current) => ({
+                            ...current,
+                            barangay: "",
+                          }));
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.barangayDropdownItemText,
+                            selectionBarangay.toLowerCase() === bName.toLowerCase() &&
+                              styles.barangayDropdownItemTextSelected,
+                          ]}
+                        >
+                          {bName}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                    {filteredBarangays.length === 0 && (
+                      <Text style={styles.noBarangayMatch}>
+                        No matching barangay found in Pinamungajan.
+                      </Text>
+                    )}
+                  </ScrollView>
+                )}
+
+                {selectionErrors.barangay ? (
+                  <Text style={styles.selectionErrorText}>
+                    {selectionErrors.barangay}
+                  </Text>
+                ) : null}
+              </View>
+
+              {/* 4. MUNICIPALITY OR CITY */}
+              <View style={styles.gpsAddressRow}>
+                <View style={styles.gpsLabelRow}>
+                  <Text style={styles.gpsDetailLabel}>Municipality or City</Text>
+                </View>
+                <TextInput
+                  style={styles.gpsInput}
+                  value={selectionMunicipality}
+                  onChangeText={(value) => {
+                    setSelectionMunicipality(value);
+                  }}
+                  placeholder="Pinamungajan"
+                  placeholderTextColor="#8C9A91"
+                />
+              </View>
             </View>
 
             <TouchableOpacity
               style={styles.confirmLocationBtn}
               onPress={() => {
+                const formattedPurok = formatPurokOrSitio(selectionPurok);
                 const nextErrors = {
                   ...(!selectionBarangay.trim()
                     ? { barangay: "Barangay is required." }
-                    : {}),
-                  ...(!selectionStreet.trim()
-                    ? { street: "Street / Purok is required." }
                     : {}),
                   ...(!hasSelectionCoords
                     ? { coordinates: "Set GPS coordinates on the map." }
@@ -720,12 +959,26 @@ export default function PostLocationModal({
                 if (Object.keys(nextErrors).length) {
                   Alert.alert(
                     "Location details required",
-                    "Set the GPS pin and enter a barangay and street / purok.",
+                    "Set the GPS pin and select a Barangay.",
                   );
                   return;
                 }
+                const muni = selectionMunicipality.trim() || "Pinamungajan";
+                const formattedLocation = [
+                  selectionStreet.trim(),
+                  formattedPurok,
+                  selectionBarangay.trim(),
+                  muni,
+                ]
+                  .filter(Boolean)
+                  .join(", ");
+
                 onSelectLocation({
-                  locationName: `${selectionBarangay.trim()}, ${selectionStreet.trim()}`,
+                  locationName: formattedLocation,
+                  street: selectionStreet.trim(),
+                  purok: formattedPurok,
+                  barangay: selectionBarangay.trim(),
+                  municipality: muni,
                   coordinates: {
                     latitude: Number(selectionCoords.latitude),
                     longitude: Number(selectionCoords.longitude),
@@ -764,35 +1017,74 @@ export default function PostLocationModal({
           onPress={onClose}
         />
 
-        <View style={[styles.modalBox, isSmallScreen && styles.modalBoxSmall]}>
+        <View style={[styles.modalBox, previewModalWidthStyle]}>
           {/* HEADER */}
-          <View style={styles.header}>
+          <View
+            style={[
+              styles.header,
+              (isTablet || isDesktop) && styles.headerLarge,
+            ]}
+          >
             <View style={styles.headerTitleRow}>
-              <View style={styles.locationIconBadge}>
-                <Ionicons name="location" size={18} color="#2E7D32" />
+              <View
+                style={[
+                  styles.locationIconBadge,
+                  (isTablet || isDesktop) && styles.locationIconBadgeLarge,
+                ]}
+              >
+                <Ionicons
+                  name="location"
+                  size={isDesktop ? 22 : isTablet ? 20 : 18}
+                  color="#2E7D32"
+                />
               </View>
               <View style={styles.headerTextCol}>
-                <Text style={styles.headerSubtitle}>Pinned Location</Text>
-                <Text style={styles.headerTitle} numberOfLines={1}>
+                <Text
+                  style={[
+                    styles.headerSubtitle,
+                    (isTablet || isDesktop) && styles.headerSubtitleLarge,
+                  ]}
+                >
+                  Pinned Location
+                </Text>
+                <Text
+                  style={[
+                    styles.headerTitle,
+                    (isTablet || isDesktop) && styles.headerTitleLarge,
+                  ]}
+                  numberOfLines={1}
+                >
                   {displayLocation}
                 </Text>
-                <Text style={styles.coordsSubtitle}>
+                <Text
+                  style={[
+                    styles.coordsSubtitle,
+                    (isTablet || isDesktop) && styles.coordsSubtitleLarge,
+                  ]}
+                >
                   GPS: {postCoords.lat.toFixed(5)}, {postCoords.lng.toFixed(5)}
                 </Text>
               </View>
             </View>
 
             <TouchableOpacity
-              style={styles.closeBtn}
+              style={[
+                styles.closeBtn,
+                (isTablet || isDesktop) && styles.closeBtnLarge,
+              ]}
               onPress={onClose}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              <Ionicons name="close" size={20} color="#666" />
+              <Ionicons
+                name="close"
+                size={isDesktop ? 22 : isTablet ? 21 : 20}
+                color="#666"
+              />
             </TouchableOpacity>
           </View>
 
           {/* MAP DISPLAY (SHOWING ONLY THIS POST'S PIN) */}
-          <View style={styles.mapCard}>
+          <View style={[styles.mapCard, mapHeightStyle]}>
             {Platform.OS === "web" ? (
               <iframe
                 key={`post-loc-map-${post.id}-${postCoords.lat}-${postCoords.lng}`}
@@ -811,12 +1103,29 @@ export default function PostLocationModal({
           </View>
 
           {/* POST SUMMARY CHIP */}
-          <View style={styles.postMetaRow}>
+          <View
+            style={[
+              styles.postMetaRow,
+              (isTablet || isDesktop) && styles.postMetaRowLarge,
+            ]}
+          >
             <View style={styles.postMetaLeft}>
-              <Text style={styles.postTitle} numberOfLines={1}>
+              <Text
+                style={[
+                  styles.postTitle,
+                  (isTablet || isDesktop) && styles.postTitleLarge,
+                ]}
+                numberOfLines={1}
+              >
                 {post.title || "Waste Report"}
               </Text>
-              <Text style={styles.reportedByText} numberOfLines={1}>
+              <Text
+                style={[
+                  styles.reportedByText,
+                  (isTablet || isDesktop) && styles.reportedByTextLarge,
+                ]}
+                numberOfLines={1}
+              >
                 Reported by{" "}
                 <Text style={{ fontWeight: "700" }}>{authorName}</Text>
               </Text>
@@ -827,9 +1136,17 @@ export default function PostLocationModal({
                 style={[
                   styles.statusBadge,
                   { backgroundColor: statusMeta.color },
+                  (isTablet || isDesktop) && styles.statusBadgeLarge,
                 ]}
               >
-                <Text style={styles.statusBadgeText}>{statusMeta.label}</Text>
+                <Text
+                  style={[
+                    styles.statusBadgeText,
+                    (isTablet || isDesktop) && styles.statusBadgeTextLarge,
+                  ]}
+                >
+                  {statusMeta.label}
+                </Text>
               </View>
 
               {Boolean(formatWasteLabel(post.wasteClassification)) && (
@@ -841,9 +1158,15 @@ export default function PostLocationModal({
                         post.wasteClassification?.category,
                       ),
                     },
+                    (isTablet || isDesktop) && styles.wasteBadgeLarge,
                   ]}
                 >
-                  <Text style={styles.wasteBadgeText}>
+                  <Text
+                    style={[
+                      styles.wasteBadgeText,
+                      (isTablet || isDesktop) && styles.wasteBadgeTextLarge,
+                    ]}
+                  >
                     {formatWasteLabel(post.wasteClassification)}
                   </Text>
                 </View>
@@ -852,9 +1175,27 @@ export default function PostLocationModal({
           </View>
 
           {/* FOOTER ACTIONS */}
-          <View style={styles.actionsRow}>
-            <TouchableOpacity style={styles.doneBtn} onPress={onClose}>
-              <Text style={styles.doneBtnText}>Close</Text>
+          <View
+            style={[
+              styles.actionsRow,
+              (isTablet || isDesktop) && styles.actionsRowLarge,
+            ]}
+          >
+            <TouchableOpacity
+              style={[
+                styles.doneBtn,
+                (isTablet || isDesktop) && styles.doneBtnLarge,
+              ]}
+              onPress={onClose}
+            >
+              <Text
+                style={[
+                  styles.doneBtnText,
+                  (isTablet || isDesktop) && styles.doneBtnTextLarge,
+                ]}
+              >
+                Close
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -905,6 +1246,10 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
 
+  headerLarge: {
+    marginBottom: 16,
+  },
+
   headerTitleRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -922,6 +1267,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
 
+  locationIconBadgeLarge: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+  },
+
   headerTextCol: {
     flex: 1,
   },
@@ -934,11 +1285,20 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 
+  headerSubtitleLarge: {
+    fontSize: 12,
+  },
+
   headerTitle: {
     fontSize: 14,
     fontWeight: "700",
     color: "#24352A",
     marginTop: 1,
+  },
+
+  headerTitleLarge: {
+    fontSize: 17,
+    marginTop: 2,
   },
 
   coordsSubtitle: {
@@ -948,10 +1308,20 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 
+  coordsSubtitleLarge: {
+    fontSize: 13,
+    marginTop: 3,
+  },
+
   closeBtn: {
     padding: 6,
     borderRadius: 8,
     backgroundColor: "#F2F5F3",
+  },
+
+  closeBtnLarge: {
+    padding: 9,
+    borderRadius: 10,
   },
 
   mapCard: {
@@ -999,6 +1369,13 @@ const styles = StyleSheet.create({
     gap: 8,
   },
 
+  postMetaRowLarge: {
+    marginTop: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+  },
+
   postMetaLeft: {
     flex: 1,
   },
@@ -1009,10 +1386,19 @@ const styles = StyleSheet.create({
     color: "#24352A",
   },
 
+  postTitleLarge: {
+    fontSize: 15,
+  },
+
   reportedByText: {
     fontSize: 11,
     color: "#6B7C72",
     marginTop: 2,
+  },
+
+  reportedByTextLarge: {
+    fontSize: 12,
+    marginTop: 3,
   },
 
   badgesRow: {
@@ -1028,11 +1414,21 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
 
+  statusBadgeLarge: {
+    paddingHorizontal: 11,
+    paddingVertical: 5,
+    borderRadius: 9,
+  },
+
   statusBadgeText: {
     color: "#FFFFFF",
     fontSize: 10,
     fontWeight: "700",
     textTransform: "uppercase",
+  },
+
+  statusBadgeTextLarge: {
+    fontSize: 11,
   },
 
   wasteBadge: {
@@ -1041,10 +1437,20 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
 
+  wasteBadgeLarge: {
+    paddingHorizontal: 11,
+    paddingVertical: 5,
+    borderRadius: 9,
+  },
+
   wasteBadgeText: {
     color: "#FFFFFF",
     fontSize: 10,
     fontWeight: "700",
+  },
+
+  wasteBadgeTextLarge: {
+    fontSize: 11,
   },
 
   actionsRow: {
@@ -1052,6 +1458,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "flex-end",
     marginTop: 14,
+  },
+
+  actionsRowLarge: {
+    marginTop: 16,
   },
 
   doneBtn: {
@@ -1065,10 +1475,20 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
 
+  doneBtnLarge: {
+    paddingVertical: 11,
+    paddingHorizontal: 28,
+    borderRadius: 10,
+  },
+
   doneBtnText: {
     fontSize: 13,
     fontWeight: "700",
     color: "#2E7D32",
+  },
+
+  doneBtnTextLarge: {
+    fontSize: 14,
   },
   selectionMapCard: {
     width: "100%",
@@ -1211,6 +1631,76 @@ const styles = StyleSheet.create({
   modalCancelText: {
     color: "#405047",
     fontSize: 14,
+    fontWeight: "600",
+  },
+  osmNoticeBox: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    backgroundColor: "#EDF5F0",
+    padding: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#D2E6D9",
+    gap: 8,
+    marginVertical: 4,
+  },
+  osmNoticeText: {
+    flex: 1,
+    fontSize: 12,
+    color: "#2D5A3F",
+    lineHeight: 16,
+  },
+  barangayRowContainer: {
+    position: "relative",
+    zIndex: 10,
+  },
+  barangayInputWrapper: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  dropdownToggle: {
+    padding: 6,
+    marginLeft: 4,
+  },
+  barangayDropdownMenu: {
+    maxHeight: 160,
+    borderWidth: 1,
+    borderColor: "#D8E2DC",
+    borderRadius: 8,
+    backgroundColor: "#FFFFFF",
+    marginTop: 8,
+  },
+  barangayDropdownItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F5F3",
+  },
+  barangayDropdownItemSelected: {
+    backgroundColor: "#EAF5EE",
+  },
+  barangayDropdownItemText: {
+    fontSize: 13,
+    color: "#24352A",
+  },
+  barangayDropdownItemTextSelected: {
+    fontWeight: "700",
+    color: "#2E7D32",
+  },
+  noBarangayMatch: {
+    padding: 12,
+    fontSize: 12,
+    color: "#7A8A80",
+    textAlign: "center",
+  },
+  detectingBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  detectingText: {
+    fontSize: 11,
+    color: "#5F9C76",
     fontWeight: "600",
   },
 });

@@ -270,14 +270,15 @@ export default function PickupSchedule() {
     if (!selectedDate || saving) return;
 
     setFormError("");
-    const normalizedPurok = normalizePurok(purok);
+    const trimmedPurok = purok.trim();
+    const normalizedPurok = normalizePurok(trimmedPurok) || trimmedPurok;
     if (
       !operationName.trim() ||
       !barangay.trim() ||
-      !normalizedPurok ||
+      !trimmedPurok ||
       !pickupTime.trim()
     ) {
-      setFormError("Add the operation name, Barangay, Purok, and pickup time.");
+      setFormError("Add the operation name, Barangay, Purok and Sitio, and pickup time.");
       return;
     }
 
@@ -317,18 +318,24 @@ export default function PickupSchedule() {
 
       if (duplicateExists) {
         setFormError(
-          "A schedule for this Barangay and Purok already exists on this date.",
+          "A schedule for this Barangay and Purok / Sitio already exists on this date.",
         );
         return;
       }
+
+      const formattedPurokOrSitio = /^(?:purok|sitio|pk\.?)\s+/i.test(trimmedPurok)
+        ? trimmedPurok
+        : /^\d+$/.test(trimmedPurok)
+          ? `Purok ${trimmedPurok}`
+          : trimmedPurok;
 
       const operationData = {
         title: operationName.trim(),
         barangay: barangay.trim(),
         normalizedBarangay: normalizeLocationPart(barangay),
-        purok: normalizedPurok,
+        purok: formattedPurokOrSitio,
         normalizedPurok: normalizeLocationPart(normalizedPurok),
-        area: `${barangay.trim()}, Pk. ${normalizedPurok}`,
+        area: `${barangay.trim()}, ${formattedPurokOrSitio}`,
         time: pickupTime.trim(),
         message: instructions.trim(),
         recurrence,
@@ -657,7 +664,7 @@ export default function PickupSchedule() {
               </View>
 
               <View style={styles.purokSortRow}>
-                <Text style={styles.announcementFilterLabel}>Sort by Purok</Text>
+                <Text style={styles.announcementFilterLabel}>Sort by Purok / Sitio</Text>
                 {["asc", "desc"].map((order) => {
                   const isSelected = purokSortOrder === order;
                   return (
@@ -771,7 +778,7 @@ export default function PickupSchedule() {
 
                       <Text style={styles.allAnnouncementArea}>
                         {operation.area ||
-                          `${operation.barangay || ""}, Pk. ${operation.purok || "-"}`}
+                          `${operation.barangay || ""}${operation.purok ? `, ${operation.purok}` : ""}`}
                       </Text>
                       <Text style={styles.allAnnouncementSchedule}>
                         {operation.schedule}
@@ -884,7 +891,7 @@ export default function PickupSchedule() {
                 </View>
                 <Text style={styles.savedScheduleArea}>
                   {operation.area ||
-                    `${operation.barangay || "Unknown Barangay"}, Pk. ${operation.purok || "-"}`}
+                    `${operation.barangay || "Unknown Barangay"}${operation.purok ? `, ${operation.purok}` : ""}`}
                 </Text>
                 <Text style={styles.savedScheduleTime}>
                   {operation.time || operation.schedule}
@@ -1044,16 +1051,13 @@ export default function PickupSchedule() {
                   </View>
                 </View>
                 <View style={[styles.halfField, styles.purokHalfField]}>
-                  <Text style={styles.fieldLabel}>Purok</Text>
-                  <View style={styles.purokInputRow}>
-                    <Text style={styles.purokPrefix}>Pk.</Text>
-                    <TextInput
-                      style={styles.purokInput}
-                      value={purok}
-                      onChangeText={setPurok}
-                      placeholder="Example: 3"
-                    />
-                  </View>
+                  <Text style={styles.fieldLabel}>Purok and Sitio</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={purok}
+                    onChangeText={setPurok}
+                    placeholder="e.g. Purok 3 / Sitio Bato"
+                  />
                 </View>
               </View>
 
