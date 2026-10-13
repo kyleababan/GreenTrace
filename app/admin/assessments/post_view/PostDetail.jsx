@@ -3,52 +3,52 @@ import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Animated,
-    Image,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
-    useWindowDimensions,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Image,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+  useWindowDimensions,
 } from "react-native";
 
 import {
-    addDoc,
-    collection,
-    doc,
-    getDoc,
-    getDocs,
-    increment,
-    onSnapshot,
-    query,
-    runTransaction,
-    serverTimestamp,
-    updateDoc,
-    where,
-    writeBatch,
+  addDoc,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  increment,
+  onSnapshot,
+  query,
+  runTransaction,
+  serverTimestamp,
+  updateDoc,
+  where,
+  writeBatch,
 } from "firebase/firestore";
 
 import { uploadToCloudinary } from "../../../../cloudinary";
 import PostLocationModal from "../../../../components/PostLocationModal";
 import {
-    BADGES,
-    getUserContributionStats,
-    isBadgeEarned,
+  BADGES,
+  getUserContributionStats,
+  isBadgeEarned,
 } from "../../../../constants/badges";
 import {
   formatLocationWithPurok,
   normalizePurok,
 } from "../../../../constants/locationFormat";
 import {
-    formatWasteLabel,
-    getWasteCategoryColor,
+  formatWasteLabel,
+  getWasteCategoryColor,
 } from "../../../../constants/wasteCategories";
 import { auth, db } from "../../../../firebaseConfig";
 import { deleteRelatedDocuments } from "../../../../utils/deletePostHelper";
@@ -167,7 +167,8 @@ export default function PostDetail({
   const [loadingPost, setLoadingPost] = useState(!suppliedPost);
   const [postLoadError, setPostLoadError] = useState("");
   const [existingVolunteerId, setExistingVolunteerId] = useState("");
-  const [existingVolunteerActivity, setExistingVolunteerActivity] = useState(null);
+  const [existingVolunteerActivity, setExistingVolunteerActivity] =
+    useState(null);
   const [showCancelCleanupModal, setShowCancelCleanupModal] = useState(false);
   const [cancelCleanupReason, setCancelCleanupReason] = useState("");
   const [cancellingCleanup, setCancellingCleanup] = useState(false);
@@ -280,12 +281,13 @@ export default function PostDetail({
   const [rescheduleReason, setRescheduleReason] = useState("");
   const [reschedulingCleanup, setReschedulingCleanup] = useState(false);
 
-
   // QoL: Reporter contact details modal
   const [showReporterModal, setShowReporterModal] = useState(false);
 
   const commentUserIdsKey = JSON.stringify(
-    [...new Set(comments.map((comment) => comment.userId).filter(Boolean))].sort(),
+    [
+      ...new Set(comments.map((comment) => comment.userId).filter(Boolean)),
+    ].sort(),
   );
 
   useEffect(() => {
@@ -359,7 +361,10 @@ export default function PostDetail({
           }));
         },
         (error) => {
-          console.error(`Unable to subscribe to comment author ${userId}:`, error);
+          console.error(
+            `Unable to subscribe to comment author ${userId}:`,
+            error,
+          );
         },
       ),
     );
@@ -475,16 +480,16 @@ export default function PostDetail({
       );
 
       const linkedReportsSnapshot = await getDocs(
-        query(
-          collection(db, "posts"),
-          where("linkedReportId", "==", post.id),
-        ),
+        query(collection(db, "posts"), where("linkedReportId", "==", post.id)),
       );
 
       const settingsSnapshot = await getDoc(doc(db, "settings", "ecopoints"));
-      const ecoConfig = settingsSnapshot.exists() ? settingsSnapshot.data() : {};
+      const ecoConfig = settingsSnapshot.exists()
+        ? settingsSnapshot.data()
+        : {};
       const reportCleanedPoints = Number(ecoConfig.reportCleaned) || 5;
-      const linkedReportCleanedPoints = Number(ecoConfig.linkedReportCleaned) || 5;
+      const linkedReportCleanedPoints =
+        Number(ecoConfig.linkedReportCleaned) || 5;
       const volunteerCleanupPoints = Number(ecoConfig.volunteerCleanup) || 10;
 
       const eligibleLinkedUsers = [];
@@ -521,12 +526,20 @@ export default function PostDetail({
           if (lSnap.exists() && lSnap.data().status !== "cleaned") {
             linkedDocuments.push(lSnap);
             const lData = lSnap.data();
-            if (lData.userId && lData.isPointEligible !== false && !lData.isDuplicate) {
+            if (
+              lData.userId &&
+              lData.isPointEligible !== false &&
+              !lData.isDuplicate
+            ) {
               if (!rewardsByUserId.has(lData.userId)) {
                 rewardsByUserId.set(lData.userId, linkedReportCleanedPoints);
                 eligibleLinkedUsers.push({
                   userId: lData.userId,
-                  title: lData.title || lData.locationName || post.title || post.locationName,
+                  title:
+                    lData.title ||
+                    lData.locationName ||
+                    post.title ||
+                    post.locationName,
                   postId: linkedDoc.id,
                 });
               }
@@ -595,7 +608,10 @@ export default function PostDetail({
           transaction.set(doc(collection(db, "point_transactions")), {
             userId: userRef.id,
             amount: reward,
-            source: userRef.id === ownerId ? "cleanup_reward" : "linked_cleanup_reward",
+            source:
+              userRef.id === ownerId
+                ? "cleanup_reward"
+                : "linked_cleanup_reward",
             postId: post.id,
             createdAt: serverTimestamp(),
           });
@@ -828,9 +844,7 @@ export default function PostDetail({
       await updateDoc(doc(db, "volunteer_posts", existingVolunteerId), {
         meetingDate: rescheduleDate.trim(),
         meetingTime:
-          rescheduleTime.trim() ||
-          existingVolunteerActivity?.meetingTime ||
-          "",
+          rescheduleTime.trim() || existingVolunteerActivity?.meetingTime || "",
         rescheduledReason: rescheduleReason.trim() || null,
         updatedAt: serverTimestamp(),
       });
@@ -857,8 +871,7 @@ export default function PostDetail({
           ? {
               ...prev,
               meetingDate: rescheduleDate.trim(),
-              meetingTime:
-                rescheduleTime.trim() || prev.meetingTime || "",
+              meetingTime: rescheduleTime.trim() || prev.meetingTime || "",
             }
           : null,
       );
@@ -870,12 +883,14 @@ export default function PostDetail({
       );
     } catch (error) {
       console.error("Unable to reschedule operation:", error);
-      Alert.alert("Error", "Failed to reschedule cleanup drive. Please try again.");
+      Alert.alert(
+        "Error",
+        "Failed to reschedule cleanup drive. Please try again.",
+      );
     } finally {
       setReschedulingCleanup(false);
     }
   };
-
 
   const handleCopyReporterEmail = () => {
     const email = residentProfile?.email;
@@ -1247,9 +1262,7 @@ export default function PostDetail({
           },
           (updating || openingVolunteerActivity) && styles.disabledButton,
         ]}
-        onPress={
-          effectiveCurrentTab === "ongoing" ? markAsClean : setToOngoing
-        }
+        onPress={effectiveCurrentTab === "ongoing" ? markAsClean : setToOngoing}
       >
         {updating ? (
           <View style={styles.actionLoading}>
@@ -1440,8 +1453,7 @@ export default function PostDetail({
         <TouchableOpacity
           style={[
             styles.adminCommentButton,
-            (!commentText.trim() || submittingComment) &&
-              styles.disabledButton,
+            (!commentText.trim() || submittingComment) && styles.disabledButton,
           ]}
           onPress={submitAdminComment}
           disabled={!commentText.trim() || submittingComment}
@@ -1491,517 +1503,554 @@ export default function PostDetail({
         ]}
         showsVerticalScrollIndicator={false}
       >
-      {/* MAIN LAYOUT */}
-      <View
-        style={[
-          styles.mainContainer,
-          isCompactLayout && styles.mainContainerCompact,
-        ]}
-      >
-        {/* LEFT - POST */}
-        <View style={[styles.left, isCompactLayout && styles.leftCompact]}>
-          <Animated.View
-            style={[
-              styles.card,
-              effectiveHighlightedCommentId &&
-                isHighlighted && {
-                  borderColor: highlightFadeAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: ["transparent", "#3B82F6"],
-                  }),
-                  borderWidth: 3,
-                },
-            ]}
-          >
-            {!Boolean(isCleaned && post.afterImageUrl) && (
-              <TouchableOpacity
-                accessibilityRole="button"
-                accessibilityLabel="View report image full screen"
-                activeOpacity={0.9}
-                onPress={() => setFullImageUrl(post.imageUrl)}
-              >
-                <Image
-                  source={{ uri: post.imageUrl }}
-                  style={styles.postImage}
-                />
-              </TouchableOpacity>
-            )}
-
-            {Boolean(isCleaned && post.afterImageUrl) && (
-              <View style={styles.beforeAfterSection}>
-                <Text style={styles.beforeAfterTitle}>Cleanup Result</Text>
-                <View style={styles.beforeAfterRow}>
-                  <View style={styles.beforeAfterColumn}>
-                    <Text style={styles.beforeAfterLabel}>Before</Text>
-                    <TouchableOpacity
-                      accessibilityRole="button"
-                      accessibilityLabel="View before cleanup image full screen"
-                      activeOpacity={0.9}
-                      onPress={() => setFullImageUrl(post.imageUrl)}
-                    >
-                      <Image
-                        source={{ uri: post.imageUrl }}
-                        style={styles.beforeAfterImage}
-                      />
-                    </TouchableOpacity>
-                  </View>
-                  <View style={styles.beforeAfterColumn}>
-                    <Text style={styles.beforeAfterLabel}>After</Text>
-                    <TouchableOpacity
-                      accessibilityRole="button"
-                      accessibilityLabel="View after cleanup image full screen"
-                      activeOpacity={0.9}
-                      onPress={() => setFullImageUrl(post.afterImageUrl)}
-                    >
-                      <Image
-                        source={{ uri: post.afterImageUrl }}
-                        style={styles.beforeAfterImage}
-                      />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-                <Text style={styles.cleanedByText} numberOfLines={1}>
-                  Cleaned by {post.cleanedByName || "Admin"}
-                </Text>
-              </View>
-            )}
-
-            <View style={styles.postInfo}>
-              {/* PROFILE AND POST DETAILS */}
-              <View style={styles.authorRow}>
-                <Image
-                  source={require("../../../../assets/images/profile2.png")}
-                  style={styles.authorImage}
-                />
-                <View style={styles.authorDetails}>
-                  <View
-                    style={[
-                      styles.authorHeader,
-                      isMobile && styles.authorHeaderMobile,
-                    ]}
-                  >
-                    <View
-                      style={[
-                        styles.authorIdentity,
-                        isMobile && styles.authorIdentityMobile,
-                      ]}
-                    >
-                      <Text style={styles.profileName}>
-                        {residentProfile?.firstName ?? post.firstName}{" "}
-                        {residentProfile?.lastName ?? post.lastName}
-                        <Text style={styles.pointsText}>
-                          {" "}
-                          {"\u2022"} {residentPoints} pts
-                        </Text>
-                      </Text>
-
-                      <View style={styles.badgeRow}>
-                        {residentBadges.slice(0, 3).map((badge) => (
-                          <View key={badge.id} style={styles.badge}>
-                            <Text style={styles.badgeIcon}>{badge.icon}</Text>
-                          </View>
-                        ))}
-                        {residentBadges.length > 3 && (
-                          <View style={styles.badge}>
-                            <Text style={styles.badgeMore}>
-                              +{residentBadges.length - 3}
-                            </Text>
-                          </View>
-                        )}
-                      </View>
-                    </View>
-                    <View style={{ alignItems: isMobile ? "flex-start" : "flex-end", gap: 4 }}>
-                      <Text
-                        style={[
-                          styles.postedDate,
-                          isMobile && styles.postedDateMobile,
-                        ]}
-                      >
-                        {formatPostedDate(post.createdAt)}
-                      </Text>
-                      <TouchableOpacity
-                        style={styles.contactReporterButton}
-                        onPress={() => setShowReporterModal(true)}
-                        activeOpacity={0.8}
-                        accessibilityLabel="View reporter contact details"
-                      >
-                        <Ionicons
-                          name="person-circle-outline"
-                          size={13}
-                          color="#276344"
-                        />
-                        <Text style={styles.contactReporterButtonText}>
-                          Reporter Info
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-
-                  <TouchableOpacity
-                    style={styles.locationRow}
-                    onPress={() => setLocationModalVisible(true)}
-                    activeOpacity={0.7}
-                    hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
-                  >
-                    <Image
-                      source={require("../../../../assets/images/location.png")}
-                      style={styles.locationIcon}
-                    />
-                    <Text style={styles.locationText} numberOfLines={1}>
-                      {formatLocationWithPurok(post)}
-                    </Text>
-                  </TouchableOpacity>
-
-                  {/* Report Status & Waste Category Tags */}
-                  <View style={styles.tagsRow}>
-                    <View
-                      style={[
-                        styles.statusTag,
-                        {
-                          backgroundColor: (
-                            STATUS_DETAILS[post.status] ||
-                            STATUS_DETAILS.pending
-                          ).color,
-                        },
-                      ]}
-                    >
-                      <Text style={styles.statusTagText}>
-                        {
-                          (
-                            STATUS_DETAILS[post.status] ||
-                            STATUS_DETAILS.pending
-                          ).label
-                        }
-                      </Text>
-                    </View>
-
-                    {Boolean(formatWasteLabel(post.wasteClassification)) && (
-                      <View
-                        style={[
-                          styles.wasteTag,
-                          {
-                            backgroundColor: getWasteCategoryColor(
-                              post.wasteClassification?.category,
-                            ),
-                          },
-                        ]}
-                      >
-                        <Text style={styles.wasteTagText}>
-                          {formatWasteLabel(post.wasteClassification)}
-                        </Text>
-                      </View>
-                    )}
-
-                    {Boolean(post.isDuplicate || post.isPointEligible === false) && (
-                      <View style={[styles.statusTag, styles.duplicateTag]}>
-                        <Ionicons
-                          name="copy-outline"
-                          size={10}
-                          color="#FFFFFF"
-                          style={{ marginRight: 3 }}
-                        />
-                        <Text style={styles.statusTagText}>Duplicate Report</Text>
-                      </View>
-                    )}
-
-                    {Boolean(post.linkedReportId || post.duplicateOf) && (
-                      <TouchableOpacity
-                        style={[styles.statusTag, styles.linkedTag]}
-                        activeOpacity={0.7}
-                        onPress={async () => {
-                          const targetId = post.linkedReportId || post.duplicateOf;
-                          try {
-                            const snap = await getDoc(doc(db, "posts", targetId));
-                            if (snap.exists()) {
-                              setSelectedPost({ id: snap.id, ...snap.data() });
-                            } else {
-                              Alert.alert("Notice", "The primary linked report is no longer available.");
-                            }
-                          } catch (err) {
-                            console.error("Error loading linked report:", err);
-                          }
-                        }}
-                      >
-                        <Ionicons
-                          name="link-outline"
-                          size={10}
-                          color="#FFFFFF"
-                          style={{ marginRight: 3 }}
-                        />
-                        <Text style={styles.statusTagText}>Linked Report</Text>
-                      </TouchableOpacity>
-                    )}
-
-                    {linkedPostsCount > 0 && (
-                      <View style={[styles.statusTag, styles.linkedTag]}>
-                        <Ionicons
-                          name="albums-outline"
-                          size={10}
-                          color="#FFFFFF"
-                          style={{ marginRight: 3 }}
-                        />
-                        <Text style={styles.statusTagText}>
-                          {linkedPostsCount} Linked {linkedPostsCount === 1 ? "Report" : "Reports"}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                </View>
-              </View>
-
-              {/* VICINITY / DUPLICATE NOTICES */}
-              {Boolean(post.linkedReportId || post.duplicateOf) && (
+        {/* MAIN LAYOUT */}
+        <View
+          style={[
+            styles.mainContainer,
+            isCompactLayout && styles.mainContainerCompact,
+          ]}
+        >
+          {/* LEFT - POST */}
+          <View style={[styles.left, isCompactLayout && styles.leftCompact]}>
+            <Animated.View
+              style={[
+                styles.card,
+                effectiveHighlightedCommentId &&
+                  isHighlighted && {
+                    borderColor: highlightFadeAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: ["transparent", "#3B82F6"],
+                    }),
+                    borderWidth: 3,
+                  },
+              ]}
+            >
+              {!Boolean(isCleaned && post.afterImageUrl) && (
                 <TouchableOpacity
-                  style={styles.linkedNoticeBox}
-                  activeOpacity={0.7}
-                  onPress={async () => {
-                    const targetId = post.linkedReportId || post.duplicateOf;
-                    try {
-                      const snap = await getDoc(doc(db, "posts", targetId));
-                      if (snap.exists()) {
-                        setSelectedPost({ id: snap.id, ...snap.data() });
-                      } else {
-                        Alert.alert("Notice", "The primary linked report is no longer available.");
-                      }
-                    } catch (err) {
-                      console.error("Error opening linked report:", err);
-                    }
-                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="View report image full screen"
+                  activeOpacity={0.9}
+                  onPress={() => setFullImageUrl(post.imageUrl)}
                 >
-                  <Ionicons name="link" size={16} color="#1D4ED8" />
-                  <Text style={styles.linkedNoticeText}>
-                    Linked Vicinity Report: Tap to view the primary report for this location.
-                  </Text>
-                  <Ionicons name="chevron-forward" size={15} color="#1D4ED8" />
+                  <Image
+                    source={{ uri: post.imageUrl }}
+                    style={styles.postImage}
+                  />
                 </TouchableOpacity>
               )}
 
-              {Boolean(post.isDuplicate || post.isPointEligible === false) && (
-                <View
-                  style={[
-                    styles.duplicateNoticeBox,
-                    Boolean(post.linkedReportId || post.duplicateOf) && {
-                      marginTop: 0,
-                    },
-                  ]}
-                >
-                  <Ionicons name="copy-outline" size={16} color="#DC2626" />
-                  <Text style={styles.duplicateNoticeText}>
-                    Duplicate Report: Marked as a duplicate report in the same vicinity (0 EcoPoints awarded).
+              {Boolean(isCleaned && post.afterImageUrl) && (
+                <View style={styles.beforeAfterSection}>
+                  <Text style={styles.beforeAfterTitle}>Cleanup Result</Text>
+                  <View style={styles.beforeAfterRow}>
+                    <View style={styles.beforeAfterColumn}>
+                      <Text style={styles.beforeAfterLabel}>Before</Text>
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityLabel="View before cleanup image full screen"
+                        activeOpacity={0.9}
+                        onPress={() => setFullImageUrl(post.imageUrl)}
+                      >
+                        <Image
+                          source={{ uri: post.imageUrl }}
+                          style={styles.beforeAfterImage}
+                        />
+                      </TouchableOpacity>
+                    </View>
+                    <View style={styles.beforeAfterColumn}>
+                      <Text style={styles.beforeAfterLabel}>After</Text>
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityLabel="View after cleanup image full screen"
+                        activeOpacity={0.9}
+                        onPress={() => setFullImageUrl(post.afterImageUrl)}
+                      >
+                        <Image
+                          source={{ uri: post.afterImageUrl }}
+                          style={styles.beforeAfterImage}
+                        />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                  <Text style={styles.cleanedByText} numberOfLines={1}>
+                    Cleaned by {post.cleanedByName || "Admin"}
                   </Text>
                 </View>
               )}
 
-              {/* DESCRIPTION */}
-              {Boolean(post.caption) && (
-                <View style={styles.descriptionContainer}>
-                  <Text style={styles.description}>
-                    {hideBadWords(post.caption)}
-                  </Text>
-                </View>
-              )}
-
-              {/* REACTIONS */}
-              <View
-                style={[
-                  styles.reactions,
-                  isMobile && styles.reactionsMobile,
-                ]}
-              >
-                <View
-                  style={[
-                    styles.reactBox,
-                    isMobile && styles.reactBoxMobile,
-                  ]}
-                >
+              <View style={styles.postInfo}>
+                {/* PROFILE AND POST DETAILS */}
+                <View style={styles.authorRow}>
                   <Image
-                    source={require("../../../../assets/images/priorityreact.png")}
-                    style={styles.smallIcon}
+                    source={require("../../../../assets/images/profile2.png")}
+                    style={styles.authorImage}
                   />
-                  <Text style={styles.reactionCount}>
-                    {post.reactionCount || 0}
-                  </Text>
-                </View>
-                <View
-                  style={[
-                    styles.commentBox,
-                    isMobile && styles.commentBoxMobile,
-                  ]}
-                >
-                  <Image
-                    source={require("../../../../assets/images/comment.png")}
-                    style={styles.smallIcon}
-                  />
-                  <Text style={styles.count}>{comments.length}</Text>
-                </View>
-              </View>
-            </View>
-          </Animated.View>
-        </View>
-
-        {/* RIGHT - COMMENTS + LOCATION */}
-        <View style={[styles.right, isCompactLayout && styles.rightCompact]}>
-          {!isCompactLayout && commentsSection}
-
-          {/* ACTIVE VOLUNTEER CLEANUP CARD */}
-          {Boolean(existingVolunteerActivity) && (
-            <View style={styles.volunteerActivityCard}>
-              <TouchableOpacity
-                onPress={openVolunteerActivity}
-                activeOpacity={0.8}
-                style={styles.volunteerActivityCardMain}
-              >
-                <View style={styles.volunteerCardHeader}>
-                  <View style={styles.volunteerBadgeRow}>
+                  <View style={styles.authorDetails}>
                     <View
                       style={[
-                        styles.volunteerStatusDot,
-                        existingVolunteerActivity.status === "ongoing"
-                          ? styles.volunteerStatusDotOngoing
-                          : existingVolunteerActivity.status === "cancelled"
-                            ? styles.volunteerStatusDotCancelled
-                            : styles.volunteerStatusDotOpen,
+                        styles.authorHeader,
+                        isMobile && styles.authorHeaderMobile,
                       ]}
-                    />
-                    <Text style={styles.volunteerStatusText}>
-                      {existingVolunteerActivity.status === "ongoing"
-                        ? "Operation On-Going"
-                        : existingVolunteerActivity.status === "cancelled"
-                          ? "Drive Cancelled"
-                          : "Volunteer Drive Active"}
-                    </Text>
-                  </View>
-                  <View style={styles.volunteerMemberPill}>
-                    <Ionicons name="people" size={13} color="#276344" />
-                    <Text style={styles.volunteerMemberPillText}>
-                      {(existingVolunteerActivity.volunteers || []).length} /{" "}
-                      {existingVolunteerActivity.maxVolunteers || 0}
-                    </Text>
+                    >
+                      <View
+                        style={[
+                          styles.authorIdentity,
+                          isMobile && styles.authorIdentityMobile,
+                        ]}
+                      >
+                        <Text style={styles.profileName}>
+                          {residentProfile?.firstName ?? post.firstName}{" "}
+                          {residentProfile?.lastName ?? post.lastName}
+                          <Text style={styles.pointsText}>
+                            {" "}
+                            {"\u2022"} {residentPoints} pts
+                          </Text>
+                        </Text>
+
+                        <View style={styles.badgeRow}>
+                          {residentBadges.slice(0, 3).map((badge) => (
+                            <View key={badge.id} style={styles.badge}>
+                              <Text style={styles.badgeIcon}>{badge.icon}</Text>
+                            </View>
+                          ))}
+                          {residentBadges.length > 3 && (
+                            <View style={styles.badge}>
+                              <Text style={styles.badgeMore}>
+                                +{residentBadges.length - 3}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                      </View>
+                      <View
+                        style={{
+                          alignItems: isMobile ? "flex-start" : "flex-end",
+                          gap: 4,
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.postedDate,
+                            isMobile && styles.postedDateMobile,
+                          ]}
+                        >
+                          {formatPostedDate(post.createdAt)}
+                        </Text>
+                        <TouchableOpacity
+                          style={styles.contactReporterButton}
+                          onPress={() => setShowReporterModal(true)}
+                          activeOpacity={0.8}
+                          accessibilityLabel="View reporter contact details"
+                        >
+                          <Ionicons
+                            name="person-circle-outline"
+                            size={13}
+                            color="#276344"
+                          />
+                          <Text style={styles.contactReporterButtonText}>
+                            Reporter Info
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+
+                    <TouchableOpacity
+                      style={styles.locationRow}
+                      onPress={() => setLocationModalVisible(true)}
+                      activeOpacity={0.7}
+                      hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                    >
+                      <Image
+                        source={require("../../../../assets/images/location.png")}
+                        style={styles.locationIcon}
+                      />
+                      <Text style={styles.locationText} numberOfLines={1}>
+                        {formatLocationWithPurok(post)}
+                      </Text>
+                    </TouchableOpacity>
+
+                    {/* Report Status & Waste Category Tags */}
+                    <View style={styles.tagsRow}>
+                      <View
+                        style={[
+                          styles.statusTag,
+                          {
+                            backgroundColor: (
+                              STATUS_DETAILS[post.status] ||
+                              STATUS_DETAILS.pending
+                            ).color,
+                          },
+                        ]}
+                      >
+                        <Text style={styles.statusTagText}>
+                          {
+                            (
+                              STATUS_DETAILS[post.status] ||
+                              STATUS_DETAILS.pending
+                            ).label
+                          }
+                        </Text>
+                      </View>
+
+                      {Boolean(formatWasteLabel(post.wasteClassification)) && (
+                        <View
+                          style={[
+                            styles.wasteTag,
+                            {
+                              backgroundColor: getWasteCategoryColor(
+                                post.wasteClassification?.category,
+                              ),
+                            },
+                          ]}
+                        >
+                          <Text style={styles.wasteTagText}>
+                            {formatWasteLabel(post.wasteClassification)}
+                          </Text>
+                        </View>
+                      )}
+
+                      {Boolean(
+                        post.isDuplicate || post.isPointEligible === false,
+                      ) && (
+                        <View style={[styles.statusTag, styles.duplicateTag]}>
+                          <Ionicons
+                            name="copy-outline"
+                            size={10}
+                            color="#FFFFFF"
+                            style={{ marginRight: 3 }}
+                          />
+                          <Text style={styles.statusTagText}>
+                            Duplicate Report
+                          </Text>
+                        </View>
+                      )}
+
+                      {Boolean(post.linkedReportId || post.duplicateOf) && (
+                        <TouchableOpacity
+                          style={[styles.statusTag, styles.linkedTag]}
+                          activeOpacity={0.7}
+                          onPress={async () => {
+                            const targetId =
+                              post.linkedReportId || post.duplicateOf;
+                            try {
+                              const snap = await getDoc(
+                                doc(db, "posts", targetId),
+                              );
+                              if (snap.exists()) {
+                                setSelectedPost({
+                                  id: snap.id,
+                                  ...snap.data(),
+                                });
+                              } else {
+                                Alert.alert(
+                                  "Notice",
+                                  "The primary linked report is no longer available.",
+                                );
+                              }
+                            } catch (err) {
+                              console.error(
+                                "Error loading linked report:",
+                                err,
+                              );
+                            }
+                          }}
+                        >
+                          <Ionicons
+                            name="link-outline"
+                            size={10}
+                            color="#FFFFFF"
+                            style={{ marginRight: 3 }}
+                          />
+                          <Text style={styles.statusTagText}>
+                            Linked Report
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+
+                      {linkedPostsCount > 0 && (
+                        <View style={[styles.statusTag, styles.linkedTag]}>
+                          <Ionicons
+                            name="albums-outline"
+                            size={10}
+                            color="#FFFFFF"
+                            style={{ marginRight: 3 }}
+                          />
+                          <Text style={styles.statusTagText}>
+                            {linkedPostsCount} Linked{" "}
+                            {linkedPostsCount === 1 ? "Report" : "Reports"}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
                   </View>
                 </View>
 
-                <Text style={styles.volunteerActivityTitle} numberOfLines={1}>
-                  {existingVolunteerActivity.title || "Community Clean-up Drive"}
-                </Text>
-
-                <View style={styles.volunteerCardFooter}>
-                  <Text style={styles.volunteerManageHint}>
-                    Tap to manage volunteers & attendance
-                  </Text>
-                  <Ionicons name="chevron-forward" size={16} color="#276344" />
-                </View>
-              </TouchableOpacity>
-
-              {effectiveCurrentTab === "ongoing" && (
-                <View style={{ borderTopWidth: 1, borderTopColor: "#A7F3D0" }}>
+                {/* VICINITY / DUPLICATE NOTICES */}
+                {Boolean(post.linkedReportId || post.duplicateOf) && (
                   <TouchableOpacity
-                    style={styles.rescheduleCleanupActionRow}
-                    onPress={() => {
-                      const d = existingVolunteerActivity?.meetingDate;
-                      setRescheduleDate(
-                        d
-                          ? typeof d?.toDate === "function"
-                            ? d.toDate().toISOString().split("T")[0]
-                            : String(d)
-                          : "",
-                      );
-                      setRescheduleTime(
-                        existingVolunteerActivity?.meetingTime || "",
-                      );
-                      setShowRescheduleModal(true);
-                    }}
+                    style={styles.linkedNoticeBox}
                     activeOpacity={0.7}
+                    onPress={async () => {
+                      const targetId = post.linkedReportId || post.duplicateOf;
+                      try {
+                        const snap = await getDoc(doc(db, "posts", targetId));
+                        if (snap.exists()) {
+                          setSelectedPost({ id: snap.id, ...snap.data() });
+                        } else {
+                          Alert.alert(
+                            "Notice",
+                            "The primary linked report is no longer available.",
+                          );
+                        }
+                      } catch (err) {
+                        console.error("Error opening linked report:", err);
+                      }
+                    }}
                   >
+                    <Ionicons name="link" size={16} color="#1D4ED8" />
+                    <Text style={styles.linkedNoticeText}>
+                      Linked Vicinity Report: Tap to view the primary report for
+                      this location.
+                    </Text>
                     <Ionicons
-                      name="calendar-outline"
-                      size={14}
+                      name="chevron-forward"
+                      size={15}
+                      color="#1D4ED8"
+                    />
+                  </TouchableOpacity>
+                )}
+
+                {Boolean(
+                  post.isDuplicate || post.isPointEligible === false,
+                ) && (
+                  <View
+                    style={[
+                      styles.duplicateNoticeBox,
+                      Boolean(post.linkedReportId || post.duplicateOf) && {
+                        marginTop: 0,
+                      },
+                    ]}
+                  >
+                    <Ionicons name="copy-outline" size={16} color="#DC2626" />
+                    <Text style={styles.duplicateNoticeText}>
+                      Duplicate Report: Marked as a duplicate report in the same
+                      vicinity (0 EcoPoints awarded).
+                    </Text>
+                  </View>
+                )}
+
+                {/* DESCRIPTION */}
+                {Boolean(post.caption) && (
+                  <View style={styles.descriptionContainer}>
+                    <Text style={styles.description}>
+                      {hideBadWords(post.caption)}
+                    </Text>
+                  </View>
+                )}
+
+                {/* REACTIONS */}
+                <View
+                  style={[styles.reactions, isMobile && styles.reactionsMobile]}
+                >
+                  <View
+                    style={[styles.reactBox, isMobile && styles.reactBoxMobile]}
+                  >
+                    <Image
+                      source={require("../../../../assets/images/priorityreact.png")}
+                      style={styles.smallIcon}
+                    />
+                    <Text style={styles.reactionCount}>
+                      {post.reactionCount || 0}
+                    </Text>
+                  </View>
+                  <View
+                    style={[
+                      styles.commentBox,
+                      isMobile && styles.commentBoxMobile,
+                    ]}
+                  >
+                    <Image
+                      source={require("../../../../assets/images/comment.png")}
+                      style={styles.smallIcon}
+                    />
+                    <Text style={styles.count}>{comments.length}</Text>
+                  </View>
+                </View>
+              </View>
+            </Animated.View>
+          </View>
+
+          {/* RIGHT - COMMENTS + LOCATION */}
+          <View style={[styles.right, isCompactLayout && styles.rightCompact]}>
+            {!isCompactLayout && commentsSection}
+
+            {/* ACTIVE VOLUNTEER CLEANUP CARD */}
+            {Boolean(existingVolunteerActivity) && (
+              <View style={styles.volunteerActivityCard}>
+                <TouchableOpacity
+                  onPress={openVolunteerActivity}
+                  activeOpacity={0.8}
+                  style={styles.volunteerActivityCardMain}
+                >
+                  <View style={styles.volunteerCardHeader}>
+                    <View style={styles.volunteerBadgeRow}>
+                      <View
+                        style={[
+                          styles.volunteerStatusDot,
+                          existingVolunteerActivity.status === "ongoing"
+                            ? styles.volunteerStatusDotOngoing
+                            : existingVolunteerActivity.status === "cancelled"
+                              ? styles.volunteerStatusDotCancelled
+                              : styles.volunteerStatusDotOpen,
+                        ]}
+                      />
+                      <Text style={styles.volunteerStatusText}>
+                        {existingVolunteerActivity.status === "ongoing"
+                          ? "Operation On-Going"
+                          : existingVolunteerActivity.status === "cancelled"
+                            ? "Drive Cancelled"
+                            : "Volunteer Drive Active"}
+                      </Text>
+                    </View>
+                    <View style={styles.volunteerMemberPill}>
+                      <Ionicons name="people" size={13} color="#276344" />
+                      <Text style={styles.volunteerMemberPillText}>
+                        {(existingVolunteerActivity.volunteers || []).length} /{" "}
+                        {existingVolunteerActivity.maxVolunteers || 0}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <Text style={styles.volunteerActivityTitle} numberOfLines={1}>
+                    {existingVolunteerActivity.title ||
+                      "Community Clean-up Drive"}
+                  </Text>
+
+                  <View style={styles.volunteerCardFooter}>
+                    <Text style={styles.volunteerManageHint}>
+                      Tap to manage volunteers & attendance
+                    </Text>
+                    <Ionicons
+                      name="chevron-forward"
+                      size={16}
                       color="#276344"
                     />
-                    <Text style={styles.rescheduleCleanupActionText}>
-                      Reschedule Cleanup Drive
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.cancelCleanupActionRow}
-                    onPress={() => setShowCancelCleanupModal(true)}
-                    activeOpacity={0.7}
+                  </View>
+                </TouchableOpacity>
+
+                {effectiveCurrentTab === "ongoing" && (
+                  <View
+                    style={{ borderTopWidth: 1, borderTopColor: "#A7F3D0" }}
                   >
-                    <Ionicons
-                      name="close-circle-outline"
-                      size={14}
-                      color="#DC2626"
-                    />
-                    <Text style={styles.cancelCleanupActionText}>
-                      Cancel / Revert Cleanup Operation
-                    </Text>
-                  </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.rescheduleCleanupActionRow}
+                      onPress={() => {
+                        const d = existingVolunteerActivity?.meetingDate;
+                        setRescheduleDate(
+                          d
+                            ? typeof d?.toDate === "function"
+                              ? d.toDate().toISOString().split("T")[0]
+                              : String(d)
+                            : "",
+                        );
+                        setRescheduleTime(
+                          existingVolunteerActivity?.meetingTime || "",
+                        );
+                        setShowRescheduleModal(true);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons
+                        name="calendar-outline"
+                        size={14}
+                        color="#276344"
+                      />
+                      <Text style={styles.rescheduleCleanupActionText}>
+                        Reschedule Cleanup Drive
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.cancelCleanupActionRow}
+                      onPress={() => setShowCancelCleanupModal(true)}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons
+                        name="close-circle-outline"
+                        size={14}
+                        color="#DC2626"
+                      />
+                      <Text style={styles.cancelCleanupActionText}>
+                        Cancel / Revert Cleanup Operation
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            )}
+
+            {!isCleaned && (
+              <TouchableOpacity
+                style={styles.actionCard}
+                onPress={() => setShowCleanupModal(true)}
+                activeOpacity={0.8}
+              >
+                <View style={styles.actionCardIcon}>
+                  <Ionicons name="images-outline" size={22} color="#397A51" />
                 </View>
-              )}
-            </View>
-          )}
+                <View style={styles.actionCardCopy}>
+                  <Text style={styles.actionCardTitle}>
+                    Cleanup result image
+                  </Text>
+                  <Text style={styles.actionCardHint}>
+                    {cleanupImageUrl
+                      ? "After image added"
+                      : "Optional Before and After images"}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#7A8A80" />
+              </TouchableOpacity>
+            )}
 
-
-          {!isCleaned && (
+            {/* SITUATION ASSESSMENT */}
             <TouchableOpacity
-              style={styles.actionCard}
-              onPress={() => setShowCleanupModal(true)}
+              style={[
+                styles.assessmentSection,
+                {
+                  borderColor: (
+                    STATUS_DETAILS[
+                      String(
+                        post.status || effectiveCurrentTab || "pending",
+                      ).toLowerCase()
+                    ] || STATUS_DETAILS.pending
+                  ).color,
+                },
+              ]}
+              onPress={() => setShowAssessmentModal(true)}
               activeOpacity={0.8}
             >
-              <View style={styles.actionCardIcon}>
-                <Ionicons name="images-outline" size={22} color="#397A51" />
+              <View style={styles.assessmentHeader}>
+                <View>
+                  <Text style={styles.sectionTitle}>Situation Assessment</Text>
+                  <Text style={styles.assessmentCardStatus}>
+                    {
+                      (
+                        STATUS_DETAILS[
+                          String(
+                            post.status || effectiveCurrentTab || "pending",
+                          ).toLowerCase()
+                        ] || STATUS_DETAILS.pending
+                      ).label
+                    }
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#397A51" />
               </View>
-              <View style={styles.actionCardCopy}>
-                <Text style={styles.actionCardTitle}>Cleanup result image</Text>
-                <Text style={styles.actionCardHint}>
-                  {cleanupImageUrl
-                    ? "After image added"
-                    : "Optional Before and After images"}
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color="#7A8A80" />
             </TouchableOpacity>
-          )}
-
-          {/* SITUATION ASSESSMENT */}
-          <TouchableOpacity
-            style={[
-              styles.assessmentSection,
-              {
-                borderColor: (
-                  STATUS_DETAILS[
-                    String(
-                      post.status || effectiveCurrentTab || "pending",
-                    ).toLowerCase()
-                  ] || STATUS_DETAILS.pending
-                ).color,
-              },
-            ]}
-            onPress={() => setShowAssessmentModal(true)}
-            activeOpacity={0.8}
-          >
-            <View style={styles.assessmentHeader}>
-              <View>
-                <Text style={styles.sectionTitle}>Situation Assessment</Text>
-                <Text style={styles.assessmentCardStatus}>
-                  {
-                    (
-                      STATUS_DETAILS[
-                        String(
-                          post.status || effectiveCurrentTab || "pending",
-                        ).toLowerCase()
-                      ] || STATUS_DETAILS.pending
-                    ).label
-                  }
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color="#397A51" />
-            </View>
-          </TouchableOpacity>
+          </View>
         </View>
-      </View>
 
-      {isCompactLayout && !isCleaned && bottomActions}
-      {isCompactLayout && commentsSection}
+        {isCompactLayout && !isCleaned && bottomActions}
+        {isCompactLayout && commentsSection}
       </ScrollView>
 
       {/* BUTTON */}
@@ -2662,7 +2711,8 @@ export default function PostDetail({
                 { textAlign: "center", marginBottom: 16 },
               ]}
             >
-              You can revert the report back to Moderate (re-opening registration) or cancel the cleanup drive permanently.
+              You can revert the report back to Moderate (re-opening
+              registration) or cancel the cleanup drive permanently.
             </Text>
             <TextInput
               style={styles.editCommentInput}
@@ -2835,7 +2885,11 @@ export default function PostDetail({
             <View
               style={[
                 styles.deleteIconCircle,
-                { alignSelf: "center", marginBottom: 12, backgroundColor: "#EAF4ED" },
+                {
+                  alignSelf: "center",
+                  marginBottom: 12,
+                  backgroundColor: "#EAF4ED",
+                },
               ]}
             >
               <Ionicons name="calendar-outline" size={26} color="#276344" />
@@ -2854,7 +2908,8 @@ export default function PostDetail({
                 { textAlign: "center", marginBottom: 16 },
               ]}
             >
-              Update the date and time. Enrolled volunteers will automatically receive an update notification.
+              Update the date and time. Enrolled volunteers will automatically
+              receive an update notification.
             </Text>
 
             <Text style={styles.rescheduleInputLabel}>Meeting Date</Text>
@@ -2875,9 +2930,14 @@ export default function PostDetail({
               onChangeText={setRescheduleTime}
             />
 
-            <Text style={styles.rescheduleInputLabel}>Reason / Advisory for Volunteers</Text>
+            <Text style={styles.rescheduleInputLabel}>
+              Reason / Advisory for Volunteers
+            </Text>
             <TextInput
-              style={[styles.rescheduleInput, { height: 65, textAlignVertical: "top" }]}
+              style={[
+                styles.rescheduleInput,
+                { height: 65, textAlignVertical: "top" },
+              ]}
               placeholder="e.g. Rescheduled due to inclement weather advisory..."
               placeholderTextColor="#8FA396"
               value={rescheduleReason}
@@ -2905,9 +2965,7 @@ export default function PostDetail({
                 {reschedulingCleanup ? (
                   <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
-                  <Text style={styles.confirmButtonText}>
-                    Confirm & Notify
-                  </Text>
+                  <Text style={styles.confirmButtonText}>Confirm & Notify</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -2937,14 +2995,23 @@ export default function PostDetail({
             <View style={styles.reporterInfoCard}>
               <Text style={styles.reporterInfoLabel}>Full Name</Text>
               <Text style={styles.reporterInfoValue}>
-                {[residentProfile?.firstName ?? post.firstName, residentProfile?.lastName ?? post.lastName]
+                {[
+                  residentProfile?.firstName ?? post.firstName,
+                  residentProfile?.lastName ?? post.lastName,
+                ]
                   .filter(Boolean)
                   .join(" ") || "Resident"}
               </Text>
             </View>
 
             <View style={styles.reporterInfoCard}>
-              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <View
+                style={{
+                  flexDirection: "row",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                }}
+              >
                 <Text style={styles.reporterInfoLabel}>Email Address</Text>
                 {Boolean(residentProfile?.email) && (
                   <TouchableOpacity onPress={handleCopyReporterEmail}>
@@ -2958,7 +3025,13 @@ export default function PostDetail({
             </View>
 
             <View style={styles.reporterInfoCard}>
-              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <View
+                style={{
+                  flexDirection: "row",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                }}
+              >
                 <Text style={styles.reporterInfoLabel}>Phone Number</Text>
                 {Boolean(reporterPhone) && (
                   <TouchableOpacity onPress={handleCopyReporterPhone}>
@@ -2991,7 +3064,9 @@ export default function PostDetail({
                   }}
                   activeOpacity={0.8}
                 >
-                  <Text style={styles.confirmButtonText}>View Resident Profile</Text>
+                  <Text style={styles.confirmButtonText}>
+                    View Resident Profile
+                  </Text>
                 </TouchableOpacity>
               )}
               <TouchableOpacity

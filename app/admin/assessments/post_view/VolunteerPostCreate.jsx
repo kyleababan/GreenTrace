@@ -310,6 +310,15 @@ export default function VolunteerPostCreate({
       .map((item) => item.trim())
       .filter(Boolean);
 
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const isPastMeetingDate = !isEditing && meetingDate && meetingDate < today;
+    const currentJoined =
+      volunteerPost?.joinedCount ||
+      (Array.isArray(volunteerPost?.volunteers)
+        ? volunteerPost.volunteers.length
+        : 0);
+
     const nextErrors = {
       ...(!title.trim() ? { title: "Title is required." } : {}),
       ...(!desc.trim() ? { desc: "Description is required." } : {}),
@@ -319,13 +328,21 @@ export default function VolunteerPostCreate({
       ...(!meetingLocation.trim()
         ? { meetingLocation: "Meeting location is required." }
         : {}),
-      ...(!meetingDate ? { meetingDate: "Select a meeting date." } : {}),
+      ...(!meetingDate
+        ? { meetingDate: "Select a meeting date." }
+        : isPastMeetingDate
+          ? { meetingDate: "Choose today or a future date." }
+          : {}),
       ...(!meetingTime.trim()
         ? { meetingTime: "Meeting time is required." }
         : {}),
-      ...(!maxVolunteers || Number(maxVolunteers) < 1
-        ? { maxVolunteers: "Enter at least 1 volunteer." }
-        : {}),
+      ...(isEditing && currentJoined > 0 && Number(maxVolunteers) < currentJoined
+        ? {
+            maxVolunteers: `Cannot be less than ${currentJoined} (already joined).`,
+          }
+        : !maxVolunteers || Number(maxVolunteers) < 1
+          ? { maxVolunteers: "Enter at least 1 volunteer." }
+          : {}),
     };
 
     setErrors(nextErrors);

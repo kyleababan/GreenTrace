@@ -9,6 +9,7 @@ import {
     Image,
     PanResponder,
     Platform,
+    RefreshControl,
     SafeAreaView,
     StyleSheet,
     Text,
@@ -85,7 +86,67 @@ const formatRelativeTime = (timestamp, now) => {
   return `${dateLabel} • ${relativeTime}`;
 };
 
-const POSTS_PER_PAGE = 10;
+const getPostTimeMillis = (timestamp) => {
+  if (!timestamp) return 0;
+  if (typeof timestamp.toDate === "function") {
+    return timestamp.toDate().getTime();
+  }
+  if (typeof timestamp.seconds === "number") {
+    return timestamp.seconds * 1000;
+  }
+  const date = new Date(timestamp);
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+};
+
+const getPostStatusTier = (status) => {
+  const s = String(status || "moderate").toLowerCase().replace(/[\s_-]/g, "");
+  if (s === "critical" || s === "moderate" || s === "pending") {
+    return 1; // Top: Action needed / Unresolved reports
+  }
+  if (s === "ongoing") {
+    return 2; // Middle: Clean-up operation in progress
+  }
+  if (s === "cleaned") {
+    return 3; // Lowest: Successfully resolved
+  }
+  return 1;
+};
+
+const sortPostsByPriority = (first, second) => {
+  const statusA = String(first?.status || "moderate").toLowerCase().replace(/[\s_-]/g, "");
+  const statusB = String(second?.status || "moderate").toLowerCase().replace(/[\s_-]/g, "");
+
+  const tierA = getPostStatusTier(statusA);
+  const tierB = getPostStatusTier(statusB);
+
+  // 1. Sort by Status Tier (Top: Critical/Moderate -> Middle: Ongoing -> Lowest: Cleaned)
+  if (tierA !== tierB) {
+    return tierA - tierB;
+  }
+
+  // 2. Within each tier, posts with more priority reaction counts display on top
+  const reactsA = Number(first?.reactionCount) || 0;
+  const reactsB = Number(second?.reactionCount) || 0;
+  if (reactsA !== reactsB) {
+    return reactsB - reactsA;
+  }
+
+  // 3. If within Tier 1 and reaction counts are equal: Critical takes precedence over Moderate
+  if (tierA === 1) {
+    const isCriticalA = statusA === "critical" ? 1 : 0;
+    const isCriticalB = statusB === "critical" ? 1 : 0;
+    if (isCriticalA !== isCriticalB) {
+      return isCriticalB - isCriticalA;
+    }
+  }
+
+  // 4. Recency fallback: newest post first
+  const timeA = getPostTimeMillis(first?.createdAt);
+  const timeB = getPostTimeMillis(second?.createdAt);
+  return timeB - timeA;
+};
+
+const POSTS_PER_PAGE = 25;
 const HOME_CAROUSEL_INTERVAL = 5000;
 
 export default function Home() {
@@ -118,6 +179,7 @@ export default function Home() {
   const [now, setNow] = useState(() => Date.now());
   const [expandedPosts, setExpandedPosts] = useState({});
   const [loadingMorePosts, setLoadingMorePosts] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const lastPostDocRef = useRef(null);
   const hasMorePostsRef = useRef(true);
   const loadingPostsRef = useRef(false);
@@ -186,7 +248,7 @@ export default function Home() {
     }
   };
 
-  /* eslint-disable react-hooks/immutability */
+  /* eslint-disable react-hooks/immutability, react-hooks/set-state-in-effect */
   useEffect(() => {
     loadPosts(true);
     const unsubscribeUsers = onSnapshot(
@@ -219,7 +281,7 @@ export default function Home() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  /* eslint-enable react-hooks/immutability */
+  /* eslint-enable react-hooks/immutability, react-hooks/set-state-in-effect */
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30 * 1000);
@@ -849,12 +911,17 @@ export default function Home() {
       }));
 
       setPosts((currentPosts) => {
-        if (reset) return data;
-        const currentIds = new Set(currentPosts.map((post) => post.id));
-        return [
-          ...currentPosts,
-          ...data.filter((post) => !currentIds.has(post.id)),
-        ];
+        let combined;
+        if (reset) {
+          combined = data;
+        } else {
+          const currentIds = new Set(currentPosts.map((post) => post.id));
+          combined = [
+            ...currentPosts,
+            ...data.filter((post) => !currentIds.has(post.id)),
+          ];
+        }
+        return [...combined].sort(sortPostsByPriority);
       });
 
       lastPostDocRef.current = snapshot.docs[snapshot.docs.length - 1] || null;
@@ -864,6 +931,25 @@ export default function Home() {
     } finally {
       loadingPostsRef.current = false;
       setLoadingMorePosts(false);
+    }
+  };
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([
+        loadPosts(true),
+        loadUserReactions(),
+        loadCurrentUser(),
+        loadAnnouncement(),
+        loadUserRankSummary(),
+        loadOpenVolunteerActivity(),
+        loadAuthorBadges(),
+      ]);
+    } catch (err) {
+      console.error("Error refreshing home feed:", err);
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -911,10 +997,18 @@ export default function Home() {
             showsVerticalScrollIndicator={false}
             data={filteredPosts}
             keyExtractor={(item) => item.id}
-            initialNumToRender={3}
-            maxToRenderPerBatch={3}
+            initialNumToRender={5}
+            maxToRenderPerBatch={5}
             windowSize={5}
             removeClippedSubviews={Platform.OS !== "web"}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                colors={["#5F9C76"]}
+                tintColor="#5F9C76"
+              />
+            }
             onEndReached={() => {
               if (!loadingPostsRef.current && hasMorePostsRef.current) {
                 loadPosts();

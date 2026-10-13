@@ -87,6 +87,7 @@ export default function VolunteerPostDetail({
   const [removingMemberId, setRemovingMemberId] = useState("");
   const [kickReason, setKickReason] = useState("");
   const [updatingAttendanceId, setUpdatingAttendanceId] = useState("");
+  const [memberSearch, setMemberSearch] = useState("");
   const [memberProfiles, setMemberProfiles] = useState({});
   const [kickDialog, setKickDialog] = useState(null);
   const [showCompletionModal, setShowCompletionModal] = useState(false);
@@ -148,9 +149,34 @@ export default function VolunteerPostDetail({
     standaloneOperationStarted ||
     standaloneOperationCompleted ||
     ["completed", "cleaned"].includes(post?.status);
-  const attendedVolunteerIds = Array.isArray(post?.attendedVolunteerIds)
-    ? post.attendedVolunteerIds
-    : [];
+  const attendedVolunteerIds = useMemo(
+    () =>
+      Array.isArray(post?.attendedVolunteerIds)
+        ? post.attendedVolunteerIds
+        : [],
+    [post],
+  );
+
+  const filteredMembers = useMemo(() => {
+    const q = memberSearch.trim().toLowerCase();
+    if (!q) return members;
+    return members.filter((member) => {
+      const memberId = getMemberId(member);
+      const displayMember = {
+        ...(memberProfiles[memberId] || {}),
+        ...(typeof member === "object" ? member : { userId: member }),
+      };
+      const name = getMemberName(displayMember).toLowerCase();
+      const email = String(displayMember.email || "").toLowerCase();
+      return name.includes(q) || email.includes(q);
+    });
+  }, [members, memberSearch, memberProfiles]);
+
+  const unmarkedMembersCount = useMemo(() => {
+    return members.filter(
+      (member) => !attendedVolunteerIds.includes(getMemberId(member)),
+    ).length;
+  }, [members, attendedVolunteerIds]);
   useEffect(() => {
     const memberIds = members.map(getMemberId).filter(Boolean);
     if (!memberIds.length) {
@@ -221,30 +247,37 @@ export default function VolunteerPostDetail({
           ? activity.volunteers
           : [];
         const activityJoinedCount = Number(activity.joinedCount) || 0;
+        const activityStatus = String(activity.status || "").toLowerCase();
         const isCompletedStandaloneEvent =
           !activity.postId &&
-          ["completed", "cleaned"].includes(
-            String(activity.status || "").toLowerCase(),
-          );
+          ["completed", "cleaned"].includes(activityStatus);
+        const isCancelled = activityStatus === "cancelled";
 
-        if (activity.status !== "open" && !isCompletedStandaloneEvent) {
+        if (
+          activityStatus !== "open" &&
+          !isCompletedStandaloneEvent &&
+          !isCancelled
+        ) {
           throw new Error(
-            "Only open or completed standalone events can be deleted.",
+            "Only open, cancelled, or completed standalone events can be deleted.",
           );
         }
 
         if (
           !isCompletedStandaloneEvent &&
+          !isCancelled &&
           (activityMembers.length > 0 || activityJoinedCount > 0)
         ) {
-          throw new Error("Events with joined volunteers cannot be deleted.");
+          throw new Error("Open events with joined volunteers cannot be deleted.");
         }
 
         transaction.delete(activityRef);
       });
       if (
         isStandaloneEvent &&
-        ["completed", "cleaned"].includes(String(post.status || "").toLowerCase())
+        ["completed", "cleaned", "cancelled"].includes(
+          String(post.status || "").toLowerCase(),
+        )
       ) {
         router.back();
       } else {
@@ -497,24 +530,26 @@ export default function VolunteerPostDetail({
               ),
           ),
         ];
-        const userDocuments = await Promise.all(
-          volunteerIds.map(async (userId) => {
-            const userRef = doc(db, "users", userId);
-            const userSnapshot = await transaction.get(userRef);
-            if (!userSnapshot.exists()) {
-              throw new Error(
-                "A joined volunteer account could not be found. No points were awarded and the event was not completed.",
-              );
-            }
-            return { userId, userRef, userSnapshot };
-          }),
-        );
 
         const attendedIds =
           Array.isArray(activity.attendedVolunteerIds) &&
           activity.attendedVolunteerIds.length > 0
             ? activity.attendedVolunteerIds
             : volunteerIds;
+
+        const userDocuments = await Promise.all(
+          attendedIds.map(async (userId) => {
+            const userRef = doc(db, "users", userId);
+            const userSnapshot = await transaction.get(userRef);
+            if (!userSnapshot.exists()) {
+              return null;
+            }
+            return { userId, userRef, userSnapshot };
+          }),
+        );
+
+        const validUserDocs = userDocuments.filter(Boolean);
+        const validRewardedIds = validUserDocs.map((u) => u.userId);
 
         transaction.update(activityRef, {
           status: "completed",
@@ -525,14 +560,10 @@ export default function VolunteerPostDetail({
           },
           completedAt: serverTimestamp(),
           eventRewardPoints: reward,
-          rewardedVolunteerIds: attendedIds,
+          rewardedVolunteerIds: validRewardedIds,
         });
 
-        const rewardedUserDocs = userDocuments.filter((u) =>
-          attendedIds.includes(u.userId),
-        );
-
-        rewardedUserDocs.forEach(({ userId, userRef, userSnapshot }) => {
+        validUserDocs.forEach(({ userId, userRef, userSnapshot }) => {
           transaction.update(userRef, {
             points: (Number(userSnapshot.data().points) || 0) + reward,
           });
@@ -555,8 +586,8 @@ export default function VolunteerPostDetail({
         return {
           alreadyCompleted: false,
           reward,
-          volunteerCount: rewardedUserDocs.length,
-          rewardedIds: attendedIds,
+          volunteerCount: validUserDocs.length,
+          rewardedIds: validRewardedIds,
         };
       });
 
@@ -572,10 +603,10 @@ export default function VolunteerPostDetail({
       setCompletionSummary("");
 
       if (!result.alreadyCompleted && result.reward) {
-        const volunteerIds = Array.isArray(post.volunteers)
-          ? post.volunteers.map(getMemberId).filter(Boolean)
+        const rewardedIds = Array.isArray(result.rewardedIds)
+          ? result.rewardedIds
           : [];
-        volunteerIds.forEach((vId) => {
+        rewardedIds.forEach((vId) => {
           notifyUserEcoPointsAwarded({
             userId: vId,
             amount: result.reward,
@@ -723,6 +754,79 @@ export default function VolunteerPostDetail({
       Alert.alert("Error", "Could not revert attendance.");
     } finally {
       setRevertingAttendance(false);
+    }
+  };
+
+  const markAllVolunteersPresent = async () => {
+    if (!post?.id || updatingAttendanceId || !members.length) return;
+
+    const allMemberIds = members.map(getMemberId).filter(Boolean);
+    const unmarkedIds = allMemberIds.filter(
+      (id) => !attendedVolunteerIds.includes(id),
+    );
+
+    if (!unmarkedIds.length) return;
+
+    setUpdatingAttendanceId("ALL");
+    try {
+      let finalAttendees = [];
+      await runTransaction(db, async (transaction) => {
+        const activityRef = doc(db, "volunteer_posts", post.id);
+        const activitySnapshot = await transaction.get(activityRef);
+        if (!activitySnapshot.exists()) {
+          throw new Error("This event no longer exists.");
+        }
+
+        const currentAttendees = Array.isArray(
+          activitySnapshot.data().attendedVolunteerIds,
+        )
+          ? activitySnapshot.data().attendedVolunteerIds
+          : [];
+
+        const newlyMarkedIds = allMemberIds.filter(
+          (id) => !currentAttendees.includes(id),
+        );
+
+        if (newlyMarkedIds.length === 0) {
+          finalAttendees = currentAttendees;
+          return;
+        }
+
+        finalAttendees = Array.from(
+          new Set([...currentAttendees, ...allMemberIds]),
+        );
+
+        transaction.update(activityRef, {
+          attendedVolunteerIds: finalAttendees,
+        });
+
+        newlyMarkedIds.forEach((memberId) => {
+          const notificationRef = doc(collection(db, "notifications"));
+          transaction.set(notificationRef, {
+            userId: memberId,
+            ...(auth.currentUser?.uid ? { actorId: auth.currentUser.uid } : {}),
+            actorNames: ["GreenTrace Admin"],
+            type: "attendance_marked",
+            title: "Attendance Confirmed",
+            message: `You were marked Present for "${post.title || "volunteer activity"}".`,
+            volunteerPostId: post.id,
+            read: false,
+            createdAt: serverTimestamp(),
+          });
+        });
+      });
+
+      if (finalAttendees.length > 0) {
+        setPost((currentPost) => ({
+          ...currentPost,
+          attendedVolunteerIds: finalAttendees,
+        }));
+      }
+    } catch (error) {
+      console.error("Unable to mark all volunteers present:", error);
+      Alert.alert("Error", "Could not mark all volunteers as present.");
+    } finally {
+      setUpdatingAttendanceId("");
     }
   };
 
@@ -1361,97 +1465,148 @@ export default function VolunteerPostDetail({
               </TouchableOpacity>
             </View>
 
+            {members.length > 0 ? (
+              <View style={styles.memberSearchRow}>
+                <Ionicons name="search" size={17} color="#8C9E93" />
+                <TextInput
+                  style={styles.memberSearchInput}
+                  placeholder="Search volunteers..."
+                  placeholderTextColor="#8C9E93"
+                  value={memberSearch}
+                  onChangeText={setMemberSearch}
+                />
+                {memberSearch ? (
+                  <TouchableOpacity onPress={() => setMemberSearch("")}>
+                    <Ionicons name="close-circle" size={17} color="#8C9E93" />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            ) : null}
+
+            {eventAttendanceAvailable && unmarkedMembersCount > 0 ? (
+              <TouchableOpacity
+                style={[
+                  styles.markAllPresentBtn,
+                  updatingAttendanceId === "ALL" && styles.disabledAction,
+                ]}
+                onPress={markAllVolunteersPresent}
+                disabled={Boolean(updatingAttendanceId)}
+                activeOpacity={0.8}
+              >
+                {updatingAttendanceId === "ALL" ? (
+                  <ActivityIndicator size="small" color="#15803D" />
+                ) : (
+                  <Ionicons
+                    name="checkmark-done-circle"
+                    size={18}
+                    color="#15803D"
+                  />
+                )}
+                <Text style={styles.markAllPresentBtnText}>
+                  {updatingAttendanceId === "ALL"
+                    ? "Marking all volunteers present..."
+                    : `Mark All Present (${unmarkedMembersCount} remaining)`}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+
             <ScrollView
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.membersList}
             >
               {members.length ? (
-                members.map((member, index) => {
-                  const memberId = getMemberId(member) || `member-${index}`;
-                  const attendanceMemberId = getMemberId(member);
-                  const isAttended = attendedVolunteerIds.includes(
-                    attendanceMemberId,
-                  );
-                  const displayMember = {
-                    ...(memberProfiles[getMemberId(member)] || {}),
-                    ...(typeof member === "object"
-                      ? member
-                      : { userId: member }),
-                  };
-                  const name = getMemberName(displayMember);
-                  const avatarUrl =
-                    displayMember.imageUrl ||
-                    displayMember.photoURL ||
-                    displayMember.profileImage;
+                filteredMembers.length ? (
+                  filteredMembers.map((member, index) => {
+                    const memberId = getMemberId(member) || `member-${index}`;
+                    const attendanceMemberId = getMemberId(member);
+                    const isAttended = attendedVolunteerIds.includes(
+                      attendanceMemberId,
+                    );
+                    const displayMember = {
+                      ...(memberProfiles[getMemberId(member)] || {}),
+                      ...(typeof member === "object"
+                        ? member
+                        : { userId: member }),
+                    };
+                    const name = getMemberName(displayMember);
+                    const avatarUrl =
+                      displayMember.imageUrl ||
+                      displayMember.photoURL ||
+                      displayMember.profileImage;
 
-                  return (
-                    <TouchableOpacity
-                      key={memberId}
-                      style={styles.memberCard}
-                      onPress={() => setActionMember(displayMember)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Manage ${name}`}
-                      activeOpacity={0.7}
-                    >
-                      <View style={styles.memberRow}>
-                        {avatarUrl ? (
-                          <Image
-                            source={{ uri: avatarUrl }}
-                            style={styles.avatar}
-                          />
-                        ) : (
-                          <View style={styles.avatarFallback}>
-                            <Text style={styles.avatarInitials}>
-                              {initialsFor(name)}
+                    return (
+                      <TouchableOpacity
+                        key={memberId}
+                        style={styles.memberCard}
+                        onPress={() => setActionMember(displayMember)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Manage ${name}`}
+                        activeOpacity={0.7}
+                      >
+                        <View style={styles.memberRow}>
+                          {avatarUrl ? (
+                            <Image
+                              source={{ uri: avatarUrl }}
+                              style={styles.avatar}
+                            />
+                          ) : (
+                            <View style={styles.avatarFallback}>
+                              <Text style={styles.avatarInitials}>
+                                {initialsFor(name)}
+                              </Text>
+                            </View>
+                          )}
+                          <View style={{ flex: 1, paddingRight: 8 }}>
+                            <Text style={styles.memberName} numberOfLines={1}>
+                              {name}
+                            </Text>
+                            <Text style={styles.memberEmail} numberOfLines={1}>
+                              {displayMember.email || "Volunteer"}
                             </Text>
                           </View>
-                        )}
-                        <View style={{ flex: 1, paddingRight: 8 }}>
-                          <Text style={styles.memberName} numberOfLines={1}>
-                            {name}
-                          </Text>
-                          <Text style={styles.memberEmail} numberOfLines={1}>
-                            {displayMember.email || "Volunteer"}
-                          </Text>
-                        </View>
 
-                        <View
-                          style={[
-                            styles.attendanceStatusBadge,
-                            isAttended
-                              ? styles.attendanceStatusBadgePresent
-                              : styles.attendanceStatusBadgeRegistered,
-                          ]}
-                        >
-                          <Ionicons
-                            name={
-                              isAttended
-                                ? "checkmark-circle"
-                                : "time-outline"
-                            }
-                            size={13}
-                            color={isAttended ? "#15803D" : "#64748B"}
-                          />
-                          <Text
+                          <View
                             style={[
-                              styles.attendanceStatusBadgeText,
+                              styles.attendanceStatusBadge,
                               isAttended
-                                ? styles.attendanceStatusBadgeTextPresent
-                                : styles.attendanceStatusBadgeTextRegistered,
+                                ? styles.attendanceStatusBadgePresent
+                                : styles.attendanceStatusBadgeRegistered,
                             ]}
                           >
-                            {isAttended ? "Present" : "Registered"}
-                          </Text>
+                            <Ionicons
+                              name={
+                                isAttended
+                                  ? "checkmark-circle"
+                                  : "time-outline"
+                              }
+                              size={13}
+                              color={isAttended ? "#15803D" : "#64748B"}
+                            />
+                            <Text
+                              style={[
+                                styles.attendanceStatusBadgeText,
+                                isAttended
+                                  ? styles.attendanceStatusBadgeTextPresent
+                                  : styles.attendanceStatusBadgeTextRegistered,
+                              ]}
+                            >
+                              {isAttended ? "Present" : "Registered"}
+                            </Text>
+                          </View>
+                          <Ionicons
+                            name="chevron-forward"
+                            size={18}
+                            color="#94A3B8"
+                          />
                         </View>
-                        <Ionicons
-                          name="chevron-forward"
-                          size={18}
-                          color="#94A3B8"
-                        />
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })
+                      </TouchableOpacity>
+                    );
+                  })
+                ) : (
+                  <Text style={styles.emptyText}>
+                    No volunteers found for &quot;{memberSearch}&quot;.
+                  </Text>
+                )
               ) : (
                 <Text style={styles.emptyText}>
                   No volunteers have joined yet.
@@ -1735,6 +1890,40 @@ export default function VolunteerPostDetail({
             <Text style={styles.confirmMessage}>
               You can add an optional summary of the event outcome.
             </Text>
+
+            <View
+              style={[
+                styles.completionAttendanceBanner,
+                attendedVolunteerIds.length > 0
+                  ? styles.completionAttendanceBannerPresent
+                  : styles.completionAttendanceBannerWarning,
+              ]}
+            >
+              <Ionicons
+                name={
+                  attendedVolunteerIds.length > 0
+                    ? "checkmark-circle-outline"
+                    : "alert-circle-outline"
+                }
+                size={18}
+                color={attendedVolunteerIds.length > 0 ? "#15803D" : "#B45309"}
+              />
+              <Text
+                style={[
+                  styles.completionAttendanceText,
+                  attendedVolunteerIds.length > 0
+                    ? styles.completionAttendanceTextPresent
+                    : styles.completionAttendanceTextWarning,
+                ]}
+              >
+                {attendedVolunteerIds.length > 0
+                  ? `${attendedVolunteerIds.length} of ${joinedCount} volunteer(s) marked present will receive ${post.eventRewardPoints || 50} EcoPoints each.`
+                  : joinedCount > 0
+                    ? `No attendance marked yet. All ${joinedCount} joined volunteer(s) will receive ${post.eventRewardPoints || 50} EcoPoints each.`
+                    : "No volunteers have joined this event."}
+              </Text>
+            </View>
+
             <TextInput
               value={completionSummary}
               onChangeText={setCompletionSummary}
@@ -1819,9 +2008,11 @@ export default function VolunteerPostDetail({
             <Text style={styles.confirmMessage}>
               {post.postId
                 ? "This cannot be undone. The original waste report will remain, but this volunteer event will be removed."
-                : standaloneOperationCompleted
-                  ? "This cannot be undone. The completed event will be removed. EcoPoints already earned by volunteers will remain."
-                  : "This cannot be undone. This volunteer event will be permanently removed."}
+                : String(post.status || "").toLowerCase() === "cancelled"
+                  ? "This cannot be undone. This cancelled event will be permanently removed."
+                  : standaloneOperationCompleted
+                    ? "This cannot be undone. The completed event will be removed. EcoPoints already earned by volunteers will remain."
+                    : "This cannot be undone. This volunteer event will be permanently removed."}
             </Text>
             <View style={styles.confirmActions}>
               <TouchableOpacity
@@ -2631,5 +2822,70 @@ const styles = StyleSheet.create({
     backgroundColor: "#FAFCFB",
     fontSize: 13,
     color: "#1F2937",
+  },
+  memberSearchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F1F5F9",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 8,
+    marginHorizontal: 16,
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  memberSearchInput: {
+    flex: 1,
+    fontSize: 13,
+    color: "#1E293B",
+    padding: 0,
+  },
+  markAllPresentBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: "#DCFCE7",
+    borderWidth: 1,
+    borderColor: "#86EFAC",
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginHorizontal: 16,
+    marginTop: 6,
+    marginBottom: 4,
+  },
+  markAllPresentBtnText: {
+    color: "#15803D",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  completionAttendanceBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    padding: 10,
+    borderRadius: 8,
+    marginTop: 12,
+    width: "100%",
+  },
+  completionAttendanceBannerPresent: {
+    backgroundColor: "#DCFCE7",
+  },
+  completionAttendanceBannerWarning: {
+    backgroundColor: "#FEF3C7",
+  },
+  completionAttendanceText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "600",
+    lineHeight: 16,
+  },
+  completionAttendanceTextPresent: {
+    color: "#15803D",
+  },
+  completionAttendanceTextWarning: {
+    color: "#92400E",
   },
 });
