@@ -113,6 +113,7 @@ export default function CreateReport() {
     };
 
     loadUser();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Camera & GPS State

@@ -442,6 +442,7 @@ export default function Post() {
     }
   };
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     loadPost();
     loadComments(true);
@@ -450,6 +451,7 @@ export default function Post() {
     loadLinkedPosts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const submitComment = async () => {
     if (!comment.trim()) {
