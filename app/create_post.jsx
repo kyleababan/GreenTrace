@@ -113,6 +113,7 @@ export default function CreateReport() {
     };
 
     loadUser();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Camera & GPS State
@@ -382,6 +383,75 @@ export default function CreateReport() {
     }
   };
 
+  const resolveRootOriginalReport = async (nearbyReports) => {
+    if (!Array.isArray(nearbyReports) || nearbyReports.length === 0) return null;
+
+    // 1. Prioritize a pure original report: not marked duplicate, no linkedReportId, and no duplicateOf
+    const pureOriginals = nearbyReports.filter(
+      (p) => !p.linkedReportId && !p.duplicateOf && !p.isDuplicate,
+    );
+
+    if (pureOriginals.length > 0) {
+      pureOriginals.sort((a, b) => {
+        const timeA =
+          a.createdAt?.toMillis?.() ??
+          (a.createdAt?.seconds ? a.createdAt.seconds * 1000 : 0) ??
+          new Date(a.createdAt || 0).getTime();
+        const timeB =
+          b.createdAt?.toMillis?.() ??
+          (b.createdAt?.seconds ? b.createdAt.seconds * 1000 : 0) ??
+          new Date(b.createdAt || 0).getTime();
+        return timeA - timeB;
+      });
+      return pureOriginals[0];
+    }
+
+    // 2. If all nearby reports are already duplicates or linked, follow the chain to the root
+    for (const nearby of nearbyReports) {
+      let currentId =
+        nearby.linkedReportId || nearby.duplicateOf || nearby.vicinityGroupId;
+      let hops = 0;
+      while (currentId && hops < 6) {
+        const cached = nearbyReports.find((r) => r.id === currentId);
+        if (cached) {
+          if (!cached.linkedReportId && !cached.duplicateOf && !cached.isDuplicate) {
+            return cached;
+          }
+          currentId =
+            cached.linkedReportId || cached.duplicateOf || cached.vicinityGroupId;
+        } else {
+          try {
+            const docSnap = await getDoc(doc(db, "posts", currentId));
+            if (!docSnap.exists()) break;
+            const data = { id: docSnap.id, ...docSnap.data() };
+            if (!data.linkedReportId && !data.duplicateOf && !data.isDuplicate) {
+              return data;
+            }
+            currentId =
+              data.linkedReportId || data.duplicateOf || data.vicinityGroupId;
+          } catch (_err) {
+            break;
+          }
+        }
+        hops++;
+      }
+    }
+
+    // 3. Fallback: sort all nearby reports by createdAt ascending (earliest first)
+    const sorted = [...nearbyReports].sort((a, b) => {
+      const timeA =
+        a.createdAt?.toMillis?.() ??
+        (a.createdAt?.seconds ? a.createdAt.seconds * 1000 : 0) ??
+        new Date(a.createdAt || 0).getTime();
+      const timeB =
+        b.createdAt?.toMillis?.() ??
+        (b.createdAt?.seconds ? b.createdAt.seconds * 1000 : 0) ??
+        new Date(b.createdAt || 0).getTime();
+      return timeA - timeB;
+    });
+    return sorted[0];
+  };
+
   const createPost = async () => {
     if (uploading || duplicateSubmitting) return;
 
@@ -437,41 +507,44 @@ export default function CreateReport() {
       });
 
       if (nearbyReports.length > 0) {
+        const rootOriginal = await resolveRootOriginalReport(nearbyReports);
+        const originalToLink = rootOriginal || nearbyReports[0];
+
         // 1. If the SAME user already submitted in this vicinity -> Warning Modal (No Points)
-        const sameUserReport = nearbyReports.find(
+        const userHasExistingReport = nearbyReports.some(
           (p) => p.userId === currentUser.uid,
         );
 
-        if (sameUserReport) {
+        if (userHasExistingReport) {
           setUploading(false);
           setDuplicateModalConfig({
             visible: true,
             mode: "warning",
-            existingReport: sameUserReport,
+            existingReport: originalToLink,
             extraFields: {
               isDuplicate: true,
               isPointEligible: false,
-              duplicateOf: sameUserReport.id,
+              duplicateOf: originalToLink.id,
+              linkedReportId: originalToLink.id,
               vicinityGroupId:
-                sameUserReport.vicinityGroupId || sameUserReport.id,
+                originalToLink.vicinityGroupId || originalToLink.id,
             },
           });
           return;
         }
 
         // 2. If a DIFFERENT user reported in this same vicinity -> Notice Modal (Point Eligible on Cleaned)
-        const existingNearby = nearbyReports[0];
         setUploading(false);
         setDuplicateModalConfig({
           visible: true,
           mode: "notice",
-          existingReport: existingNearby,
+          existingReport: originalToLink,
           extraFields: {
             isDuplicate: false,
             isPointEligible: true,
-            linkedReportId: existingNearby.id,
+            linkedReportId: originalToLink.id,
             vicinityGroupId:
-              existingNearby.vicinityGroupId || existingNearby.id,
+              originalToLink.vicinityGroupId || originalToLink.id,
           },
         });
         return;

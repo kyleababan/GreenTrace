@@ -198,6 +198,37 @@ export default function PostDetail({
     return () => unsubscribe();
   }, [post?.id]);
 
+  const navigateToAdminOriginalPost = async (targetId) => {
+    if (!targetId) return;
+    try {
+      let currentId = targetId;
+      let hops = 0;
+      let targetSnap = null;
+      while (currentId && hops < 6) {
+        const snap = await getDoc(doc(db, "posts", currentId));
+        if (!snap.exists()) break;
+        targetSnap = snap;
+        const d = snap.data();
+        const nextId = d.linkedReportId || d.duplicateOf;
+        if (!nextId || nextId === currentId) {
+          break;
+        }
+        currentId = nextId;
+        hops++;
+      }
+      if (targetSnap && targetSnap.exists()) {
+        setSelectedPost({ id: targetSnap.id, ...targetSnap.data() });
+      } else {
+        Alert.alert(
+          "Notice",
+          "The primary linked report is no longer available.",
+        );
+      }
+    } catch (err) {
+      console.error("Error loading linked report:", err);
+    }
+  };
+
   const handleSaveLocation = async ({
     locationName,
     street,
@@ -1729,31 +1760,11 @@ export default function PostDetail({
                         <TouchableOpacity
                           style={[styles.statusTag, styles.linkedTag]}
                           activeOpacity={0.7}
-                          onPress={async () => {
-                            const targetId =
-                              post.linkedReportId || post.duplicateOf;
-                            try {
-                              const snap = await getDoc(
-                                doc(db, "posts", targetId),
-                              );
-                              if (snap.exists()) {
-                                setSelectedPost({
-                                  id: snap.id,
-                                  ...snap.data(),
-                                });
-                              } else {
-                                Alert.alert(
-                                  "Notice",
-                                  "The primary linked report is no longer available.",
-                                );
-                              }
-                            } catch (err) {
-                              console.error(
-                                "Error loading linked report:",
-                                err,
-                              );
-                            }
-                          }}
+                          onPress={() =>
+                            navigateToAdminOriginalPost(
+                              post.linkedReportId || post.duplicateOf,
+                            )
+                          }
                         >
                           <Ionicons
                             name="link-outline"
@@ -1790,22 +1801,11 @@ export default function PostDetail({
                   <TouchableOpacity
                     style={styles.linkedNoticeBox}
                     activeOpacity={0.7}
-                    onPress={async () => {
-                      const targetId = post.linkedReportId || post.duplicateOf;
-                      try {
-                        const snap = await getDoc(doc(db, "posts", targetId));
-                        if (snap.exists()) {
-                          setSelectedPost({ id: snap.id, ...snap.data() });
-                        } else {
-                          Alert.alert(
-                            "Notice",
-                            "The primary linked report is no longer available.",
-                          );
-                        }
-                      } catch (err) {
-                        console.error("Error opening linked report:", err);
-                      }
-                    }}
+                    onPress={() =>
+                      navigateToAdminOriginalPost(
+                        post.linkedReportId || post.duplicateOf,
+                      )
+                    }
                   >
                     <Ionicons name="link" size={16} color="#1D4ED8" />
                     <Text style={styles.linkedNoticeText}>

@@ -349,6 +349,29 @@ export default function Home() {
     setUserReactions(reacted);
   };
 
+  const navigateToOriginalPost = async (targetId) => {
+    if (!targetId) return;
+    try {
+      let currentId = targetId;
+      let hops = 0;
+      while (currentId && hops < 6) {
+        const snap = await getDoc(doc(db, "posts", currentId));
+        if (!snap.exists()) break;
+        const d = snap.data();
+        const nextId = d.linkedReportId || d.duplicateOf;
+        if (!nextId || nextId === currentId) {
+          router.push({ pathname: "/post", params: { id: currentId } });
+          return;
+        }
+        currentId = nextId;
+        hops++;
+      }
+      router.push({ pathname: "/post", params: { id: currentId || targetId } });
+    } catch (_err) {
+      router.push({ pathname: "/post", params: { id: targetId } });
+    }
+  };
+
   const formatDateKey = (date) =>
     [
       date.getFullYear(),
@@ -1333,15 +1356,14 @@ export default function Home() {
                         </View>
                       )}
 
-                      {Boolean(post.linkedReportId) && (
+                      {Boolean(post.linkedReportId || post.duplicateOf) && (
                         <TouchableOpacity
                           style={[styles.statusTag, styles.linkedTag]}
                           activeOpacity={0.7}
                           onPress={() =>
-                            router.push({
-                              pathname: "/post",
-                              params: { id: post.linkedReportId },
-                            })
+                            navigateToOriginalPost(
+                              post.linkedReportId || post.duplicateOf,
+                            )
                           }
                         >
                           <Ionicons

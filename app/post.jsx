@@ -244,6 +244,29 @@ export default function Post() {
     fetchLinkedVolunteer();
   }, [id, post?.status]);
 
+  const navigateToOriginalPost = async (targetId) => {
+    if (!targetId) return;
+    try {
+      let currentId = targetId;
+      let hops = 0;
+      while (currentId && hops < 6) {
+        const snap = await getDoc(doc(db, "posts", currentId));
+        if (!snap.exists()) break;
+        const d = snap.data();
+        const nextId = d.linkedReportId || d.duplicateOf;
+        if (!nextId || nextId === currentId) {
+          router.push({ pathname: "/post", params: { id: currentId } });
+          return;
+        }
+        currentId = nextId;
+        hops++;
+      }
+      router.push({ pathname: "/post", params: { id: currentId || targetId } });
+    } catch (_err) {
+      router.push({ pathname: "/post", params: { id: targetId } });
+    }
+  };
+
   const loadPost = async () => {
     try {
       const docRef = doc(db, "posts", id);
@@ -400,17 +423,26 @@ export default function Post() {
   const loadLinkedPosts = async () => {
     if (!id) return;
     try {
-      const q = query(
-        collection(db, "posts"),
-        where("linkedReportId", "==", id),
-      );
-      const snapshot = await getDocs(q);
-      setLinkedPostsCount(snapshot.size);
+      const [linkedSnap, dupSnap] = await Promise.all([
+        getDocs(
+          query(collection(db, "posts"), where("linkedReportId", "==", id)),
+        ),
+        getDocs(
+          query(collection(db, "posts"), where("duplicateOf", "==", id)),
+        ),
+      ]);
+      const uniqueIds = new Set([
+        ...linkedSnap.docs.map((d) => d.id),
+        ...dupSnap.docs.map((d) => d.id),
+      ]);
+      uniqueIds.delete(id);
+      setLinkedPostsCount(uniqueIds.size);
     } catch (err) {
       console.log("Error checking linked posts:", err);
     }
   };
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     loadPost();
     loadComments(true);
@@ -419,6 +451,7 @@ export default function Post() {
     loadLinkedPosts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const submitComment = async () => {
     if (!comment.trim()) {
@@ -827,15 +860,14 @@ export default function Post() {
                       </View>
                     )}
 
-                    {Boolean(post.linkedReportId) && (
+                    {Boolean(post.linkedReportId || post.duplicateOf) && (
                       <TouchableOpacity
                         style={[styles.statusTag, styles.linkedTag]}
                         activeOpacity={0.7}
                         onPress={() =>
-                          router.push({
-                            pathname: "/post",
-                            params: { id: post.linkedReportId },
-                          })
+                          navigateToOriginalPost(
+                            post.linkedReportId || post.duplicateOf,
+                          )
                         }
                       >
                         <Ionicons
@@ -870,15 +902,14 @@ export default function Post() {
               </View>
 
               {/* VICINITY / DUPLICATE NOTICES */}
-              {Boolean(post.linkedReportId) && (
+              {Boolean(post.linkedReportId || post.duplicateOf) && (
                 <TouchableOpacity
                   style={styles.linkedNoticeBox}
                   activeOpacity={0.7}
                   onPress={() =>
-                    router.push({
-                      pathname: "/post",
-                      params: { id: post.linkedReportId },
-                    })
+                    navigateToOriginalPost(
+                      post.linkedReportId || post.duplicateOf,
+                    )
                   }
                 >
                   <Ionicons name="link" size={16} color="#1D4ED8" />
@@ -893,7 +924,9 @@ export default function Post() {
                 <View
                   style={[
                     styles.duplicateNoticeBox,
-                    Boolean(post.linkedReportId) && { marginTop: 0 },
+                    Boolean(post.linkedReportId || post.duplicateOf) && {
+                      marginTop: 0,
+                    },
                   ]}
                 >
                   <Ionicons name="copy-outline" size={16} color="#DC2626" />
